@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onSetUIMode: (callback: any) => ipcRenderer.on('set-ui-mode', callback),
   notifyUIMode: (mode: string) => ipcRenderer.send('ui-mode-changed', mode),
   onLoadLatestConversation: (callback: any) => ipcRenderer.on('load-latest-conversation', callback),
+  onFindConversationByCode: (callback: any) => ipcRenderer.on('find-conversation-by-code', callback),
 
   // Chat-related events and methods
   sendChatMessage: (message: string, messageHistory: any[], additionalContext?: any) =>

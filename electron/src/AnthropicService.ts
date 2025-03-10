@@ -106,7 +106,11 @@ export class AnthropicService {
    * @param code The code to analyze
    * @param window The BrowserWindow to send updates to
    */
-  public async analyzeCodeToGetInsight(code: string, window: BrowserWindow): Promise<void> {
+  public async analyzeCodeToGetInsight(
+    code: string, 
+    window: BrowserWindow, 
+    options: { isRestored?: boolean } = {}
+  ): Promise<void> {
     // Always reload settings to get latest prompt and API key
     await this.loadSettings();
 
@@ -296,10 +300,11 @@ export class AnthropicService {
           console.log('Saved conversation:', savedConversation.id);
         }
         
-        // Signal completion with detected language and conversation ID
+        // Signal completion with detected language, conversation ID and isRestored flag
         window.webContents.send('ai-assistant-insight-complete', {
           language: detectedLanguage,
-          conversationId: savedConversation.id
+          conversationId: savedConversation.id,
+          isRestored: options.isRestored || false
         });
       } catch (error) {
         console.error('Error saving conversation:', error);
