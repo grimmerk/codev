@@ -710,7 +710,21 @@ const AIAssistantApp: React.FC = () => {
     // Initialize chat with code as first message
     if (codeToUse && codeToUse.trim().length > 0) {
       setCode(codeToUse);
-      setMessages([{ role: 'user', content: codeToUse }]);
+      
+      // Create initial message array with system message to ensure proper conversation initialization
+      const systemMessage = { role: 'system', content: 'Chat started from code selection' };
+      const initialMessages = [
+        systemMessage,
+        { role: 'user', content: codeToUse }
+      ];
+      
+      setMessages(initialMessages);
+      
+      // Create a placeholder conversation ID to ensure state is ready for chat
+      setCurrentConversationId('');
+      
+      // The first message will initialize the conversation properly when sent
+      // with additionalContext including the sourceCode and INSIGHT_SOURCE_CHAT mode
     }
   };
 
@@ -1595,7 +1609,8 @@ const AIAssistantApp: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center' }}>
           {/* Conversation selector dropdown */}
           {(uiMode === AIAssistantUIMode.SMART_CHAT ||
-            uiMode === AIAssistantUIMode.INSIGHT_CHAT) && (
+            uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
+            uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT) && (
             <div style={styles.conversationSelector}>
               <button
                 style={styles.conversationButton}
