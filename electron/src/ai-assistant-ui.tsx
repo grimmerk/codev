@@ -436,6 +436,25 @@ const AIAssistantApp: React.FC = () => {
         // Force refresh conversations list to ensure we have the latest data
         if (isConversationMenuOpen) {
           loadRecentConversations();
+        } else {
+          // Still update the conversations array with this conversation
+          // to ensure the title is available for the dropdown button
+          setConversations((prevConversations) => {
+            // Check if conversation already exists in our list
+            const existingIndex = prevConversations.findIndex(
+              (c) => c.id === latestConversation.id,
+            );
+
+            if (existingIndex >= 0) {
+              // Update existing conversation
+              const updatedConversations = [...prevConversations];
+              updatedConversations[existingIndex] = latestConversation;
+              return updatedConversations;
+            } else {
+              // Add at the beginning
+              return [latestConversation, ...prevConversations];
+            }
+          });
         }
 
         // Set conversation data
@@ -624,22 +643,91 @@ const AIAssistantApp: React.FC = () => {
     }
   };
 
+  // Utility function to sync conversation details
+  const syncConversationWithTitle = async (conversationId: string) => {
+    if (!conversationId || !(window as any).electronAPI || !(window as any).electronAPI.getConversation) {
+      console.warn(`Cannot sync conversation: invalid ID or API not available. ID: ${conversationId}`);
+      return;
+    }
+    
+    try {
+      console.log(`[SYNC] Fetching details for conversation: ${conversationId}`);
+      const conversation = await (window as any).electronAPI.getConversation(conversationId);
+      
+      if (!conversation) {
+        console.warn(`[SYNC] Failed to get conversation details: ${conversationId}`);
+        return;
+      }
+      
+      console.log(`[SYNC] Got conversation: ${conversation.id}, title: ${conversation.title || 'Untitled'}`);
+      
+      // CRITICAL FIX: Force a redraw by setting a temporary value and then the real one
+      // This fixes React's optimization that might skip updates when setting the same value
+      setCurrentConversationId(null);
+      
+      // Set timeout to ensure React processes the null value first
+      setTimeout(() => {
+        // Now set the real conversation ID
+        setCurrentConversationId(conversation.id);
+        console.log(`[SYNC] Force updated currentConversationId to: ${conversation.id}`);
+        
+        // Update conversations list
+        setConversations(prevConversations => {
+          // First, check if this conversation already exists in our list
+          const exists = prevConversations.some(c => c.id === conversation.id);
+          
+          // Log detailed information
+          console.log(`[SYNC] Conversation ${conversation.id} exists in list: ${exists}`);
+          console.log(`[SYNC] Conversation title: ${conversation.title || 'Untitled'}`);
+          
+          if (exists) {
+            // Replace the existing conversation
+            return prevConversations.map(c => 
+              c.id === conversation.id ? conversation : c
+            );
+          } else {
+            // Add it to the beginning
+            return [conversation, ...prevConversations];
+          }
+        });
+      }, 10);
+      
+      return conversation;
+    } catch (error) {
+      console.error(`[SYNC] Error syncing conversation ${conversationId}:`, error);
+    }
+  };
+
   // Handler for insight complete
   const handleInsightComplete = (
     _event: any,
-    data: { language?: string; conversationId?: string } = {},
+    data: { language?: string; conversationId?: string; isRestored?: boolean } = {},
   ) => {
     setIsLoading(false);
     setIsComplete(true);
 
-    // If we received a conversation ID from the completion, store it
+    // If we received a conversation ID from the completion, store it and sync it
     if (data && data.conversationId) {
-      setCurrentConversationId(data.conversationId);
-      console.log(
-        `Insight completed and saved with conversation ID: ${data.conversationId}`,
-      );
-
-      // Update our conversations list if menu is open
+      // Check if this is a restored conversation or a new one
+      const isRestoredConversation = data.isRestored === true;
+      
+      console.log(`Insight completed with ID: ${data.conversationId}, isRestored: ${isRestoredConversation}`);
+      
+      // IMPORTANT: For new conversations, set a temporary value first to trigger proper re-rendering
+      // This ensures the React component recalculates the title
+      if (!isRestoredConversation) {
+        setCurrentConversationId(null);
+        console.log('Temporarily reset conversation ID to null to force UI update');
+      }
+      
+      // Then synchronize with latest data from server - this will update the title
+      // Use a slight delay to ensure the server has processed any changes
+      setTimeout(() => {
+        // Don't use setCurrentConversationId here - use the sync function which handles everything
+        syncConversationWithTitle(data.conversationId);
+      }, 300); // Longer delay to ensure server has processed everything
+      
+      // Update our conversations menu if it's open
       if (isConversationMenuOpen) {
         loadRecentConversations();
       }
@@ -710,7 +798,24 @@ const AIAssistantApp: React.FC = () => {
     // Initialize chat with code as first message
     if (codeToUse && codeToUse.trim().length > 0) {
       setCode(codeToUse);
-      setMessages([{ role: 'user', content: codeToUse }]);
+
+      // Create initial message array with system message to ensure proper conversation initialization
+      const systemMessage = {
+        role: 'system',
+        content: 'Chat started from code selection',
+      };
+      const initialMessages = [
+        systemMessage,
+        { role: 'user', content: codeToUse },
+      ];
+
+      setMessages(initialMessages);
+
+      // Create a placeholder conversation ID to ensure state is ready for chat
+      setCurrentConversationId('');
+
+      // The first message will initialize the conversation properly when sent
+      // with additionalContext including the sourceCode and INSIGHT_SOURCE_CHAT mode
     }
   };
 
@@ -837,6 +942,14 @@ const AIAssistantApp: React.FC = () => {
         // If we have data with code, use it
         if (data.code) {
           setCode(data.code);
+
+          // Reset conversation ID when handling new code
+          // This ensures the button shows "New Chat" until we get
+          // a new conversation ID
+          if (!data.restoreInsight) {
+            setCurrentConversationId(null);
+            console.log('Reset conversation ID for new code analysis');
+          }
         }
 
         // Handle restoreInsight flag
@@ -930,6 +1043,109 @@ const AIAssistantApp: React.FC = () => {
       setInputLanguage(language); // Update the input display language too
     }
   };
+  
+  // Handler for finding conversation by code content
+  // This is used when restoring a window with the same code content
+  const handleFindConversationByCode = async (_event: any, codeContent: string) => {
+    console.log(`Finding conversation for code: ${codeContent.substring(0, 50)}...`);
+    let found = false;
+    
+    try {
+      // Instead of using searchConversations, we'll use a different approach
+      // First load recent conversations and then filter them locally
+      if ((window as any).electronAPI && (window as any).electronAPI.getConversations) {
+        // Get most recent code-based conversations
+        const recentConversations = await (window as any).electronAPI.getConversations({
+          isFromCode: true,
+          limit: 20
+        });
+        
+        // Now find any with matching code
+        const matchingConversation = recentConversations.find(c => 
+          c.sourceCode && c.sourceCode.includes(codeContent.substring(0, 100))
+        );
+        
+        if (matchingConversation) {
+          console.log(`Found matching conversation: ${matchingConversation.id}, title: ${matchingConversation.title || 'Untitled'}`);
+          
+          // Get full conversation with messages
+          if ((window as any).electronAPI.getConversation) {
+            const fullConversation = await (window as any).electronAPI.getConversation(matchingConversation.id);
+            
+            if (fullConversation) {
+              console.log(`Loaded full conversation: ${fullConversation.id}, messages: ${fullConversation.messages?.length || 0}`);
+              
+              // Reset UI state first to force UI update
+              setCurrentConversationId(null);
+              
+              // Set conversation data after a slight delay
+              setTimeout(() => {
+                // Set conversation data
+                setMessages(fullConversation.messages || []);
+                setCurrentConversationId(fullConversation.id);
+                
+                // If it has source code, set it
+                if (fullConversation.sourceCode) {
+                  setCode(fullConversation.sourceCode);
+                }
+                
+                // For insight-based conversations, set insight content
+                const insightMessage = fullConversation.messages.find(
+                  (m: any) => m.role === 'assistant' && m.content.length > 100
+                );
+                
+                if (insightMessage) {
+                  setInsight(insightMessage.content);
+                  setIsComplete(true);
+                }
+                
+                // Make sure this conversation is in our list
+                setConversations(prevConversations => {
+                  // Check if already exists
+                  const exists = prevConversations.some(c => c.id === fullConversation.id);
+                  
+                  if (!exists) {
+                    return [fullConversation, ...prevConversations];
+                  }
+                  
+                  // Replace existing conversation with updated one
+                  return prevConversations.map(c => 
+                    c.id === fullConversation.id ? fullConversation : c
+                  );
+                });
+                
+                // Set UI mode to INSIGHT_CHAT for consistency
+                setUIMode(AIAssistantUIMode.INSIGHT_CHAT);
+                
+                console.log(`Successfully restored conversation: ${fullConversation.title || 'Untitled'}`);
+              }, 50);
+              
+              found = true;
+            }
+          }
+        } else {
+          console.log('No matching conversation found in recent conversations');
+        }
+      }
+    } catch (error) {
+      console.error('Error finding conversation by code:', error);
+    }
+    
+    // Send result back to main process
+    try {
+      if ((window as any).ipcRenderer) {
+        (window as any).ipcRenderer.send('find-conversation-result', found);
+      } else {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.send('find-conversation-result', found);
+      }
+    } catch (e) {
+      console.error('Failed to send find-conversation-result', e);
+    }
+    
+    console.log(`Find conversation result: ${found ? 'found' : 'not found'}`);
+    return found;
+  };
 
   // Handler for chat response
   const handleChatResponse = async (_event: any, responseText: string) => {
@@ -939,31 +1155,19 @@ const AIAssistantApp: React.FC = () => {
       { role: 'assistant', content: responseText },
     ]);
     setIsLoading(false);
-    
+
     // If we have a conversation ID, fetch the updated conversation to get the latest title
     if (currentConversationId) {
-      try {
-        console.log(`Chat response received, fetching updated conversation ${currentConversationId}`);
-        const conversation = await (window as any).electronAPI.getConversation(currentConversationId);
-        if (conversation) {
-          // Update our local conversations list
-          setConversations(prev => {
-            // Check if conversation already exists in the list
-            const exists = prev.some(c => c.id === conversation.id);
-            if (exists) {
-              // Replace existing conversation
-              return prev.map(c => c.id === conversation.id ? conversation : c);
-            } else {
-              // Add new conversation to the beginning
-              return [conversation, ...prev];
-            }
-          });
-        }
-      } catch (error) {
-        console.error('Error fetching updated conversation:', error);
-      }
+      console.log(`Chat response received for conversation ${currentConversationId}`);
+      
+      // Use our sync function for consistent behavior
+      setTimeout(() => {
+        syncConversationWithTitle(currentConversationId);
+      }, 200);
     } else {
-      // If we don't have a conversation ID yet, wait a moment and then 
+      console.log('No conversation ID yet, will load recent conversations');
+      
+      // If we don't have a conversation ID yet, wait a moment and then
       // try to load recent conversations to capture any newly created ones
       setTimeout(() => {
         loadRecentConversations();
@@ -977,31 +1181,15 @@ const AIAssistantApp: React.FC = () => {
     data: { conversationId: string },
   ) => {
     if (data && data.conversationId) {
-      setCurrentConversationId(data.conversationId);
       console.log(`Conversation saved with ID: ${data.conversationId}`);
-
-      try {
-        // Immediately fetch the conversation to get its title
-        const conversation = await (window as any).electronAPI.getConversation(data.conversationId);
-        if (conversation) {
-          console.log(`Fetched saved conversation: ${conversation.title}`);
-          
-          // Update our local conversations list to include this new one
-          setConversations(prev => {
-            // Check if conversation already exists in the list
-            const exists = prev.some(c => c.id === conversation.id);
-            if (exists) {
-              // Replace existing conversation
-              return prev.map(c => c.id === conversation.id ? conversation : c);
-            } else {
-              // Add new conversation to the beginning
-              return [conversation, ...prev];
-            }
-          });
-        }
-      } catch (error) {
-        console.error('Error fetching newly saved conversation:', error);
-      }
+      
+      // Briefly set to null to force UI refresh when it's set again
+      setCurrentConversationId(null);
+      
+      // Use our synchronization function to ensure consistent behavior
+      setTimeout(() => {
+        syncConversationWithTitle(data.conversationId);
+      }, 200);
       
       // Also refresh the conversation list if the menu is open
       if (isConversationMenuOpen) {
@@ -1094,7 +1282,7 @@ const AIAssistantApp: React.FC = () => {
         ]);
       }
     }
-    
+
     // Force a refresh of the conversations list to ensure UI updates properly
     setTimeout(() => {
       loadRecentConversations();
@@ -1128,16 +1316,20 @@ const AIAssistantApp: React.FC = () => {
     const loadConversation = async () => {
       if (uiMode === AIAssistantUIMode.SMART_CHAT) {
         const conversation = await loadLatestConversation(false);
-        
+
         // Immediately update our conversations list with this conversation
         if (conversation) {
-          console.log(`Initial load - updating conversations with: ${conversation.title}`);
-          setConversations(prev => {
+          console.log(
+            `Initial load - updating conversations with: ${conversation.title}`,
+          );
+          setConversations((prev) => {
             // Check if conversation already exists in the list
-            const exists = prev.some(c => c.id === conversation.id);
+            const exists = prev.some((c) => c.id === conversation.id);
             if (exists) {
               // Replace existing conversation
-              return prev.map(c => c.id === conversation.id ? conversation : c);
+              return prev.map((c) =>
+                c.id === conversation.id ? conversation : c,
+              );
             } else {
               // Add new conversation to the beginning
               return [conversation, ...prev];
@@ -1147,16 +1339,20 @@ const AIAssistantApp: React.FC = () => {
       } else if (uiMode === AIAssistantUIMode.INSIGHT_CHAT && !code) {
         // If in insight chat mode but no code is set, try to load the latest code-based conversation
         const conversation = await loadLatestConversation(true);
-        
+
         // Immediately update our conversations list with this conversation
         if (conversation) {
-          console.log(`Initial code load - updating conversations with: ${conversation.title}`);
-          setConversations(prev => {
+          console.log(
+            `Initial code load - updating conversations with: ${conversation.title}`,
+          );
+          setConversations((prev) => {
             // Check if conversation already exists in the list
-            const exists = prev.some(c => c.id === conversation.id);
+            const exists = prev.some((c) => c.id === conversation.id);
             if (exists) {
               // Replace existing conversation
-              return prev.map(c => c.id === conversation.id ? conversation : c);
+              return prev.map((c) =>
+                c.id === conversation.id ? conversation : c,
+              );
             } else {
               // Add new conversation to the beginning
               return [conversation, ...prev];
@@ -1165,7 +1361,7 @@ const AIAssistantApp: React.FC = () => {
         }
       }
     };
-    
+
     loadConversation();
   }, [uiMode]);
 
@@ -1175,16 +1371,22 @@ const AIAssistantApp: React.FC = () => {
       // Even if the menu is not open, fetch the conversation to update the title
       const fetchConversation = async () => {
         try {
-          console.log(`Fetching conversation details for ID: ${currentConversationId}`);
-          const conversation = await (window as any).electronAPI.getConversation(currentConversationId);
+          console.log(
+            `Fetching conversation details for ID: ${currentConversationId}`,
+          );
+          const conversation = await (
+            window as any
+          ).electronAPI.getConversation(currentConversationId);
           if (conversation) {
             // Update our local conversations list
-            setConversations(prev => {
+            setConversations((prev) => {
               // Check if conversation already exists in the list
-              const exists = prev.some(c => c.id === conversation.id);
+              const exists = prev.some((c) => c.id === conversation.id);
               if (exists) {
                 // Replace existing conversation
-                return prev.map(c => c.id === conversation.id ? conversation : c);
+                return prev.map((c) =>
+                  c.id === conversation.id ? conversation : c,
+                );
               } else {
                 // Add new conversation to the beginning
                 return [conversation, ...prev];
@@ -1192,12 +1394,15 @@ const AIAssistantApp: React.FC = () => {
             });
           }
         } catch (error) {
-          console.error(`Error fetching conversation details for ${currentConversationId}:`, error);
+          console.error(
+            `Error fetching conversation details for ${currentConversationId}:`,
+            error,
+          );
         }
       };
-      
+
       fetchConversation();
-      
+
       // Also refresh the full list if menu is open
       if (isConversationMenuOpen) {
         loadRecentConversations();
@@ -1323,6 +1528,11 @@ const AIAssistantApp: React.FC = () => {
           // This ensures we continue where we left off when reopening chat
           loadLatestConversation(false);
         });
+      }
+      
+      // Register handler for finding conversation by code
+      if ((window as any).electronAPI.onFindConversationByCode) {
+        (window as any).electronAPI.onFindConversationByCode(handleFindConversationByCode);
       }
     } else {
       console.error('electronAPI not available');
@@ -1595,7 +1805,8 @@ const AIAssistantApp: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center' }}>
           {/* Conversation selector dropdown */}
           {(uiMode === AIAssistantUIMode.SMART_CHAT ||
-            uiMode === AIAssistantUIMode.INSIGHT_CHAT) && (
+            uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
+            uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT) && (
             <div style={styles.conversationSelector}>
               <button
                 style={styles.conversationButton}
@@ -1611,15 +1822,30 @@ const AIAssistantApp: React.FC = () => {
                   if (!currentConversationId) {
                     return 'New Chat ▾';
                   }
-                  
+
                   // Find current conversation in our list
-                  const currentConversation = conversations.find(c => c.id === currentConversationId);
+                  const currentConversation = conversations.find(
+                    (c) => c.id === currentConversationId,
+                  );
+                  
+                  // Debug: check if conversation is in the list
+                  console.log(`Looking for conversation: ${currentConversationId}`);
+                  console.log(`Found in conversations list: ${!!currentConversation}`);
+                  console.log(`Has title: ${currentConversation?.title || 'No title'}`);
+                  console.log(`Conversations in list: ${conversations.length}`);
+                  
+                  // Log all conversations to verify the problem
+                  console.log('All conversations:');
+                  conversations.forEach((c, i) => {
+                    console.log(`  [${i}] id: ${c.id}, title: ${c.title || 'Untitled'}`);
+                  });
                   
                   if (currentConversation && currentConversation.title) {
                     // If we have the conversation in our list AND it has a title, use it
-                    const shortTitle = currentConversation.title.length > 20 
-                      ? currentConversation.title.substring(0, 18) + '...' 
-                      : currentConversation.title;
+                    const shortTitle =
+                      currentConversation.title.length > 20
+                        ? currentConversation.title.substring(0, 18) + '...'
+                        : currentConversation.title;
                     return `${shortTitle} ▾`;
                   } else {
                     // Either conversation not in list or no title

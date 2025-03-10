@@ -827,6 +827,16 @@ const trayToggleEvtHandler = async () => {
 
       // Add new closed listener
       aiAssistantWindow.on('closed', () => {
+        // Store state before closing to decide what to do on reopen
+        const previousAnalyzedCode = lastAnalyzedCodeToGetInsight;
+        const previousUIMode = lastUIMode;
+        
+        // IMPORTANT: Don't reset tracking variables when window is closed
+        // This allows us to remember the state when reopening with the same code content
+        // We comment out these lines to preserve state across window close/open
+        // lastAnalyzedCodeToGetInsight = '';
+        // lastInsightCompleted = false;
+        
         // Schedule recreation after a short delay
         setTimeout(() => {
           if (!aiAssistantWindow || aiAssistantWindow.isDestroyed()) {
@@ -841,12 +851,24 @@ const trayToggleEvtHandler = async () => {
                   'set-ui-mode',
                   AIAssistantUIMode.SMART_CHAT,
                 );
+                
+                // Log window recreation for debugging
+                if (isDebug) {
+                  console.log('AI Assistant window recreated after close. Reset to SMART_CHAT mode.');
+                  console.log(`Previous mode: ${previousUIMode}, Previous code hash: ${previousAnalyzedCode.length > 0 ? 'has content' : 'empty'}`);
+                }
               });
             } else {
               aiAssistantWindow.webContents.send(
                 'set-ui-mode',
                 AIAssistantUIMode.SMART_CHAT,
               );
+              
+              // Log window recreation for debugging
+              if (isDebug) {
+                console.log('AI Assistant window recreated after close. Reset to SMART_CHAT mode.');
+                console.log(`Previous mode: ${previousUIMode}, Previous code hash: ${previousAnalyzedCode.length > 0 ? 'has content' : 'empty'}`);
+              }
             }
           }
         }, 500);
@@ -1042,7 +1064,13 @@ const trayToggleEvtHandler = async () => {
         if (!aiAssistantWindow.isVisible()) {
           showAIAssistantWindow();
         }
-
+        
+        // First, try to load existing conversation with matching code content
+        // We'll need to add a new IPC event to handle this in the renderer
+        if (isDebug) {
+          console.log(`Trying to find existing conversation for code: ${clipboardContent.substring(0, 50)}...`);
+        }
+        
         // Send code to analyze
         aiAssistantWindow.webContents.send(
           'code-to-generate-insight',
@@ -1056,37 +1084,77 @@ const trayToggleEvtHandler = async () => {
           lastInsightCompleted &&
           lastUIMode === AIAssistantUIMode.INSIGHT_CHAT
         ) {
-          aiAssistantWindow.webContents.send(
-            'set-ui-mode',
-            AIAssistantUIMode.INSIGHT_CHAT,
-            {
-              code: clipboardContent,
-              restoreInsight: true,
-            },
-          );
-
-          // Still request insight in case we need to regenerate it
-          // The renderer will handle showing the cached insight if available
-          anthropicService.analyzeCodeToGetInsight(
-            clipboardContent,
-            aiAssistantWindow,
-          );
+          // Small delay to ensure window is fully loaded
+          setTimeout(() => {
+            // Important: First try to find matching conversation BEFORE setting UI mode
+            // This allows the conversation to be loaded before UI logic runs
+            console.log('Trying to find existing conversation for code');
+            
+            // Add event listener for one-time response from renderer process
+            const findConversationResponseHandler = (event, success) => {
+              console.log(`Find conversation response: ${success ? 'found' : 'not found'}`);
+              
+              // If conversation was not found, proceed with normal insight generation
+              if (!success) {
+                console.log('Setting UI mode to INSIGHT_CHAT with restore flag');
+                
+                // Set UI mode after we know if conversation exists
+                aiAssistantWindow.webContents.send(
+                  'set-ui-mode',
+                  AIAssistantUIMode.INSIGHT_CHAT,
+                  {
+                    code: clipboardContent,
+                    restoreInsight: true,
+                  },
+                );
+                
+                // Still request insight in case we need to regenerate it
+                // The renderer will handle showing the cached insight if available
+                anthropicService.analyzeCodeToGetInsight(
+                  clipboardContent,
+                  aiAssistantWindow,
+                  { isRestored: true } // Flag that this is a restored conversation
+                );
+              }
+              
+              // Remove one-time handler
+              ipcMain.removeListener('find-conversation-result', findConversationResponseHandler);
+            };
+            
+            // Register one-time event handler
+            ipcMain.once('find-conversation-result', findConversationResponseHandler);
+            
+            // Send the find request
+            aiAssistantWindow.webContents.send(
+              'find-conversation-by-code',
+              clipboardContent
+            );
+          }, 100);
         } else {
           // Otherwise, use INSIGHT_CHAT mode and request a new insight
-          aiAssistantWindow.webContents.send(
-            'set-ui-mode',
-            AIAssistantUIMode.INSIGHT_CHAT,
-            { code: clipboardContent },
-          );
+          setTimeout(() => {
+            aiAssistantWindow.webContents.send(
+              'set-ui-mode',
+              AIAssistantUIMode.INSIGHT_CHAT,
+              { code: clipboardContent }
+            );
 
-          // Request explanation
-          anthropicService.analyzeCodeToGetInsight(
-            clipboardContent,
-            aiAssistantWindow,
-          );
+            // First try to load any existing matching conversation
+            aiAssistantWindow.webContents.send(
+              'find-conversation-by-code',
+              clipboardContent
+            );
 
-          // Reset explanation completed flag
-          lastInsightCompleted = false;
+            // Request explanation (this is a new conversation)
+            anthropicService.analyzeCodeToGetInsight(
+              clipboardContent,
+              aiAssistantWindow,
+              { isRestored: false } // Flag that this is a new conversation (explicit)
+            );
+
+            // Reset explanation completed flag
+            lastInsightCompleted = false;
+          }, 100);
         }
       };
 
