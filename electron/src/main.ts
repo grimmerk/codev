@@ -13,6 +13,7 @@ import { DBManager } from './DBManager';
 import { isMAS, TrayGenerator } from './TrayGenerator';
 import { bootstrap } from './server/server';
 import { AIAssistantUIMode, isDebug } from './utility';
+import { openVSCodeOrCursor } from "./vscode-based-ide-utility"
 
 const clipboard = require('electron').clipboard;
 
@@ -331,7 +332,7 @@ const createSwitcherWindow = (): BrowserWindow => {
     width: 800,
     webPreferences: {
       preload: SWITCHER_WINDOW_PRELOAD_WEBPACK_ENTRY,
-      devTools: false, //isDebug,
+      devTools: true, //isDebug,
     },
 
     // hide window by default
@@ -413,7 +414,7 @@ app.on('activate', () => {
 });
 
 /** https://www.electronjs.org/docs/latest/tutorial/ipc */
-ipcMain.on('invoke-vscode', (event, path, option) => {
+ipcMain.on('invoke-vscode', (event, path: string, option: string) => {
   // if (isDebug) {
   //   console.log('invoke', { /*event,*/ path });
   //   tray.tray.setTitle(`CodeV(${path ? path[path.length - 1] : 'n'})`);
@@ -436,37 +437,9 @@ ipcMain.on('invoke-vscode', (event, path, option) => {
     return;
   }
 
-  /** TODO: use Node.js path.join() instead of manual concat */
-  // FIXME: win/linux has difference path
-  // ref:
-  // 1. https://stackoverflow.com/questions/44405523/spawn-child-node-process-from-electron
-  // 2. https://stackoverflow.com/questions/62885809/nodejs-child-process-npm-command-not-found
-  // 3. https://github.com/electron/fiddle/issues/365#issuecomment-616630874
-  // const fullCmd = `code ${command}`
-  // const child = spawn('open', ['-b', 'com.microsoft.VSCode', '--args', argv], options);
-  // https://github.com/microsoft/vscode/issues/102975#issuecomment-661647219
-  // const fullCmd = `open -b com.microsoft.VSCode --args -r ${path}`
+  const ifForceReuseWin = option ? true : false;  
 
-  let fullCmd = '';
-  const newPath = path.replace(/ /g, '\\ ');
-  if (option) {
-    // reuse
-    // https://stackoverflow.com/a/47473271/7354486
-    // https://code.visualstudio.com/docs/editor/command-line#_opening-vs-code-with-urls
-    fullCmd = `open vscode://file/${newPath}`;
-  } else {
-    // NOTE: VSCode insider needs to use "com.microsoft.VSCodeInsiders" instead
-    fullCmd = `open -b com.microsoft.VSCode ${newPath}`;
-  }
-
-  if (isDebug) {
-    console.log({ fullCmd });
-  }
-  exec(fullCmd, (error, stdout, stderr) => {
-    if (isDebug) {
-      console.log(stdout);
-    }
-  });
+  openVSCodeOrCursor(path, ifForceReuseWin)
 
   hideWindow();
 });
