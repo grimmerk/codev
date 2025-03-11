@@ -410,6 +410,14 @@ const AIAssistantApp: React.FC = () => {
     try {
       setIsLoadingConversations(true);
 
+      // Skip loading if we're currently creating a new conversation
+      // Check both the state and the ref to be extra safe
+      if (isCreatingNewConversation || isCreatingNewConversationRef.current) {
+        console.log('Skipping loadLatestConversation because we are creating a new conversation');
+        setIsLoadingConversations(false);
+        return null; // Explicitly return null to indicate no conversation was loaded
+      }
+      
       // Only load conversation if we're in the right mode
       if (
         uiMode !== AIAssistantUIMode.SMART_CHAT &&
@@ -1249,44 +1257,75 @@ const AIAssistantApp: React.FC = () => {
   };
 
   // Function to start a new conversation
+  // Track if we're creating a new conversation to avoid loading latest conversation
+  const [isCreatingNewConversation, setIsCreatingNewConversation] = useState(false);
+
+  // A separate reference to track if we're actively creating a new conversation
+  // This needs to persist across renders, unlike the state variable
+  const isCreatingNewConversationRef = useRef(false);
+
   const startNewConversation = () => {
+    // Set both the state and ref to indicate we're creating a new conversation
+    // The ref will be checked synchronously by other functions
+    setIsCreatingNewConversation(true);
+    isCreatingNewConversationRef.current = true;
+    
     // Clear current conversation state
-    console.log('Starting a new conversation');
+    console.log('Starting a NEW conversation - preventing auto-load');
     setCurrentConversationId(null);
 
-    if (uiMode === AIAssistantUIMode.SMART_CHAT) {
-      // For chat mode, just reset to welcome message
-      setMessages([
-        {
-          role: 'assistant',
-          content: firstAssistantMsg,
-        },
-      ]);
-    } else if (
-      uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
-      uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT
-    ) {
-      // For insight modes with code, keep the code but remove insights/messages
-      if (code) {
-        setMessages([{ role: 'user', content: code }]);
-        setInsight('');
-        setIsComplete(false);
-      } else {
-        // If no code, switch to SMART_CHAT
-        setUIMode(AIAssistantUIMode.SMART_CHAT);
+    // Always switch to SMART_CHAT mode for new conversations
+    // This ensures consistent behavior regardless of the current mode
+    const wasInInsightMode = uiMode === AIAssistantUIMode.INSIGHT_CHAT || 
+                            uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT || 
+                            uiMode === AIAssistantUIMode.INSIGHT_SPLIT;
+    
+    // Clear any previous code and insight content
+    if (wasInInsightMode) {
+      setCode('');
+      setInsight('');
+      setIsComplete(false);
+    }
+    
+    // We need to block the automatic load that happens on mode change
+    // So we'll set the mode and messages together to ensure consistency
+    
+    // Set the welcome message first to ensure it's available when mode changes
+    setMessages([
+      {
+        role: 'assistant',
+        content: firstAssistantMsg,
+      },
+    ]);
+    
+    // Always set to SMART_CHAT mode
+    setUIMode(AIAssistantUIMode.SMART_CHAT);
+    
+    // Force a refresh of the conversations list for the dropdown
+    // But don't reset our creating flag until much later
+    setTimeout(() => {
+      if (isCreatingNewConversationRef.current) {
+        loadRecentConversations();
+        
+        // Reinforce our new message to prevent race conditions
         setMessages([
           {
             role: 'assistant',
             content: firstAssistantMsg,
           },
         ]);
+        
+        console.log('Still waiting before allowing auto-load again...');
       }
-    }
-
-    // Force a refresh of the conversations list to ensure UI updates properly
+    }, 300);
+    
+    // Keep the protection active for a longer period
+    // This ensures any delayed effects have completed
     setTimeout(() => {
-      loadRecentConversations();
-    }, 10);
+      console.log('Now allowing auto-load again');
+      setIsCreatingNewConversation(false);
+      isCreatingNewConversationRef.current = false;
+    }, 2000); // Much longer delay to ensure we catch all effects
 
     // Close the menu
     setIsConversationMenuOpen(false);
@@ -1314,6 +1353,23 @@ const AIAssistantApp: React.FC = () => {
   // Load the latest conversation when opening the app in SMART_CHAT mode
   useEffect(() => {
     const loadConversation = async () => {
+      // Skip loading if we're currently creating a new conversation (check both state and ref)
+      if (isCreatingNewConversation || isCreatingNewConversationRef.current) {
+        console.log('Skipping uiMode-triggered conversation load because we are creating a new conversation');
+        return;
+      }
+      
+      // Also protect against unwanted loading right after creating a new conversation
+      // by checking if messagesRef contains just the welcome message
+      if (
+        messagesRef.current.length === 1 && 
+        messagesRef.current[0].role === 'assistant' && 
+        messagesRef.current[0].content === firstAssistantMsg
+      ) {
+        console.log('Skipping load because we already have a welcome message - likely a new conversation');
+        return;
+      }
+      
       if (uiMode === AIAssistantUIMode.SMART_CHAT) {
         const conversation = await loadLatestConversation(false);
 
@@ -1363,21 +1419,32 @@ const AIAssistantApp: React.FC = () => {
     };
 
     loadConversation();
-  }, [uiMode]);
+  }, [uiMode, isCreatingNewConversation]);
 
   // Refresh conversations list when currentConversationId changes
   useEffect(() => {
-    if (currentConversationId) {
+    // If we have a conversation ID AND we're not actively creating a new conversation
+    if (currentConversationId && !isCreatingNewConversationRef.current) {
       // Even if the menu is not open, fetch the conversation to update the title
       const fetchConversation = async () => {
         try {
           console.log(
             `Fetching conversation details for ID: ${currentConversationId}`,
           );
+          
+          // Double-check we're not creating a new conversation to prevent race conditions
+          if (isCreatingNewConversationRef.current) {
+            console.log('Cancelled fetch because we are now creating a new conversation');
+            return;
+          }
+          
           const conversation = await (
             window as any
           ).electronAPI.getConversation(currentConversationId);
-          if (conversation) {
+          
+          if (conversation && !isCreatingNewConversationRef.current) {
+            console.log(`Got conversation details for title: ${conversation.title || 'Untitled'}`);
+            
             // Update our local conversations list
             setConversations((prev) => {
               // Check if conversation already exists in the list
