@@ -16,6 +16,7 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import remarkGfm from 'remark-gfm';
 import { detectLanguage } from './language-detector';
 import { AIAssistantUIMode } from './utility';
+import { systemMsgForChatFromSelection, systemMsgForConversationContentStart, systemMsgForFollowUpInInsightChatInAIAssistantUI } from "./ai-assistant-prompt"
 
 const aiAssistantName = 'Liho';
 
@@ -762,7 +763,7 @@ const AIAssistantApp: React.FC = () => {
       const initialMessages: Message[] = [
         {
           role: 'system',
-          content: 'Initial code snippet and insight for context',
+          content: systemMsgForFollowUpInInsightChatInAIAssistantUI,
         },
         { role: 'user', content: codeRef.current },
         { role: 'assistant', content: insightContentRef.current },
@@ -810,7 +811,7 @@ const AIAssistantApp: React.FC = () => {
       // Create initial message array with system message to ensure proper conversation initialization
       const systemMessage = {
         role: 'system',
-        content: 'Chat started from code selection',
+        content: systemMsgForChatFromSelection,
       };
       const initialMessages = [
         systemMessage,
@@ -974,7 +975,7 @@ const AIAssistantApp: React.FC = () => {
           setMessages([
             {
               role: 'system',
-              content: 'Initial code snippet and insight for context',
+              content: systemMsgForFollowUpInInsightChatInAIAssistantUI,
             },
             /** current, it should only be code, but adding "data.code ||" for future edge case  */
             { role: 'user', content: data.code || codeRef.current },
@@ -1663,7 +1664,7 @@ const AIAssistantApp: React.FC = () => {
         messageHistory = [
           {
             role: 'system',
-            content: 'conversation context',
+            content: systemMsgForConversationContentStart,
             conversationId: currentConversationId,
           },
           ...messageHistory,

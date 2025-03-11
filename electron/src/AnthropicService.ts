@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   DEFAULT_AI_ASSISTANT_PROMPT,
   processPromptTemplate,
+  systemMsgForFollowUpInInsightChatInAnthropicService,  
 } from './ai-assistant-prompt';
 import { detectLanguage } from './language-detector';
 import { AIAssistantUIMode, isDebug } from './utility';
@@ -279,7 +280,7 @@ export class AnthropicService {
           messages: [
             {
               role: 'system',
-              content: 'Initial code analysis context'
+              content: systemMsgForFollowUpInInsightChatInAnthropicService
             },
             {
               role: 'user',
