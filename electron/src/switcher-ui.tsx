@@ -5,6 +5,7 @@ import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
 import { isDebug } from './utility';
+import { VSWindow as VSWindowModel } from '@prisma/client';
 
 // Global styles for the switcher UI (moved from index.css)
 const globalStyles = `
@@ -100,6 +101,9 @@ const deleteRecentProjectRecord = async (path: string) => {
     Accept: 'application/json',
   };
 
+  /** e.g. /Users/grimmer/git/alphago-zero-tictactoe-js */
+  console.log("deleteRecentProjectRecord:", path)
+
   await fetch(url, {
     body: JSON.stringify({ path }),
     method: 'DELETE',
@@ -107,7 +111,7 @@ const deleteRecentProjectRecord = async (path: string) => {
   });
 };
 
-const retryFetchRecentProjectRecord = async (): Promise<any[]> => {
+const retryFetchRecentProjectRecord = async (): Promise<VSWindowModel[]> => {
   if (isDebug) {
     console.log('retryFetchData');
   }
@@ -115,7 +119,7 @@ const retryFetchRecentProjectRecord = async (): Promise<any[]> => {
 
   let retryTimes = 20;
   let succeed = false;
-  let json = [];
+  let json: VSWindowModel[] = [];
   while (!succeed && retryTimes > 0) {
     try {
       // at least 6/5*50 milliseconds needed for serve start time
@@ -125,6 +129,8 @@ const retryFetchRecentProjectRecord = async (): Promise<any[]> => {
       }
       const resp = await fetch(url);
       json = await resp.json();
+      console.log('fetch:json:', json)
+
       succeed = true;
     } catch (err) {
       retryTimes -= 1;
@@ -429,7 +435,12 @@ function SwitcherApp() {
     pathArray: pathArray.length,
   });
 
-  const onDeleteClick = useCallback(async (data: any) => {
+  const onDeleteClick = useCallback(async (data: {
+    everOpened: boolean,
+    label: string,
+    value: string
+  }) => {
+
     const { value } = data;
     await deleteRecentProjectRecord(value);
 
@@ -437,9 +448,14 @@ function SwitcherApp() {
   }, []);
 
   const filterOptions = (
-    candidate: { label: string; value: string; data: any },
+    candidate: { label: string; value: string; data: {
+      everOpened: boolean,
+      label: string,
+      value: string
+    } },
     input: string,
   ) => {
+    // console.log("filterOptions:", candidate?.data)
     let allFound = true;
     const target = candidate.value.toLowerCase();
 

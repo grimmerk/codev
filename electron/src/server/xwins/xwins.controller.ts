@@ -93,6 +93,9 @@ export class XWinsController {
     return xwin;
   }
 
+  // usually name: null, spaceParentId: null
+  // and embeddedWindows:[] is not in the VSWindowModel, 
+  // but in the actual returned data
   @Get()
   async findAll(): Promise<VSWindowModel[]> {
     const xwins = await this.xwinService.xwins({
