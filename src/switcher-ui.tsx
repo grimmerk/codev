@@ -78,7 +78,6 @@ const fetchWorkingFolder = async (): Promise<{
   id: number;
   workingFolder?: string;
 }> => {
-  console.log('fetchWorkingFolder');
   const url = `${SERVER_URL}/user`;
   const resp = await fetch(url);
   const json = await resp.json();
@@ -382,10 +381,6 @@ function SwitcherApp() {
 
     (window as any).electronAPI.onVSCodeBasedSqliteRead(
       async (_event: any, recentProject: VSWindowModel[]) => {
-        // if (json && Array.isArray(json)) {
-        //
-        // }
-        console.log('ui get recentProject:', recentProject);
         setPathInfoArray(recentProject);
       },
     );
@@ -440,12 +435,12 @@ function SwitcherApp() {
   });
   // if (openPathArray?.length) {
   const pathArray = openPathArray.concat(workingInfoArray);
-  console.log('before set pathArray:', pathArray.length);
-  console.log({
-    openPathArray: openPathArray.length,
-    workingPathInfoArray: workingPathInfoArray.length,
-    pathArray: pathArray.length,
-  });
+  // console.log('before set pathArray:', pathArray.length);
+  // console.log({
+  //   openPathArray: openPathArray.length,
+  //   workingPathInfoArray: workingPathInfoArray.length,
+  //   pathArray: pathArray.length,
+  // });
 
   const onDeleteClick = useCallback(
     async (data: { everOpened: boolean; label: string; value: string }) => {

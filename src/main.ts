@@ -590,7 +590,7 @@ ipcMain.on('open-folder-selector', async (event) => {
 
 ipcMain.on('fetch-vscode-based-sqlite', async (event) => {
   const resp = readVSCodeBasedIDEState();
-  console.log('readVSCodeBasedIDEState done: sent it to ui: ', resp);
+  // console.log('readVSCodeBasedIDEState done: sent it to ui: ', resp);
   switcherWindow.webContents.send('vscode-based-sqlite-read', resp);
 });
 ipcMain.on('delete-vscode-based-sqlite-record', async (event, path: string) => {

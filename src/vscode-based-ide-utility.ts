@@ -35,7 +35,7 @@ export const VSCodeBasedIDEStateFilePath = () => {
 };
 
 export const readVSCodeBasedIDEState = (): VSWindowModel[] => {
-  console.log('readVSCodeBasedIDEState');
+  // console.log('readVSCodeBasedIDEState');
   const dbPath = VSCodeBasedIDEStateFilePath();
 
   let jsonData: VSCodeBasedSqlite = {}; //VSWindowModel[] = []
@@ -298,7 +298,7 @@ const convertVSCodeBasedSqliteToVSWindowModelArray = (
     } as VSWindowModel;
   });
 
-  console.log('convertVSCodeBasedSqliteToVSWindowModelArray:', resp);
+  // console.log('convertVSCodeBasedSqliteToVSWindowModelArray:', resp);
   return resp;
 };
 
