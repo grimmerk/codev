@@ -296,6 +296,8 @@ const createSettingsWindow = (
       settingsWindow.webContents.send('open-api-key-settings');
     } else if (settingsType === 'leftClick') {
       settingsWindow.webContents.send('open-left-click-settings');
+    } else if (settingsType === 'idePreference') {
+      settingsWindow.webContents.send('open-ide-settings');
     }
 
     return settingsWindow;
@@ -546,6 +548,10 @@ ipcMain.on('open-left-click-settings', () => {
   createSettingsWindow('leftClick');
 });
 
+ipcMain.on('open-ide-settings', () => {
+  createSettingsWindow('idePreference');
+});
+
 // Import our Anthropic service
 import axios from 'axios';
 import anthropicService from './AnthropicService';
@@ -553,9 +559,14 @@ import anthropicService from './AnthropicService';
 // API URL for the local NestJS server
 const API_URL = 'http://localhost:55688';
 
+// Import the function to update IDE mode and IDE enum
+import { updateCurrentIDEMode } from './vscode-based-ide-utility';
+import { IDEMode } from './ide-enum';
+
 // Track user settings
 let userSettings = {
   leftClickBehavior: 'switcher_window', // Default behavior
+  preferredIDE: IDEMode.VSCode, // Default to VSCode
 };
 
 // Track the last analyzed code to detect changes
@@ -624,6 +635,11 @@ const loadUserSettings = async () => {
         if (settings) {
           userSettings.leftClickBehavior =
             settings.leftClickBehavior || 'switcher_window';
+          userSettings.preferredIDE = 
+            settings.preferredIDE || IDEMode.VSCode;
+            
+          // Apply the IDE mode setting
+          updateCurrentIDEMode(userSettings.preferredIDE);
         }
         return; // Success, exit the function
       }

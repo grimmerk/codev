@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import * as ReactDOM from 'react-dom/client';
 import AIAssistantSettingsForm from './AIAssistantSettingsForm';
 import ApiKeySettingsForm from './ApiKeySettingsForm';
+import IDESettingsForm from './IDESettingsForm';
 import LeftClickSettingsForm from './LeftClickSettingsForm';
 
 enum SettingsType {
   AI_ASSISTANT_SETTING = 'ai_assistant_setting',
   API_KEY = 'apiKey',
   LEFT_CLICK = 'leftClick',
+  IDE_PREFERENCE = 'idePreference',
 }
 
 // Styles for the main container
@@ -47,6 +49,8 @@ const SettingsWindow: React.FC<SettingsWindowProps> = ({
         return <ApiKeySettingsForm onClose={closeWindow} />;
       case SettingsType.LEFT_CLICK:
         return <LeftClickSettingsForm onClose={closeWindow} />;
+      case SettingsType.IDE_PREFERENCE:
+        return <IDESettingsForm onClose={closeWindow} />;
       default:
         return <div>Unknown settings type</div>;
     }
@@ -85,6 +89,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const root = ReactDOM.createRoot(document.getElementById('settings-root'));
     root.render(
       <SettingsWindow initialSettingsType={SettingsType.LEFT_CLICK} />,
+    );
+  });
+  
+  (window as any).electronAPI.onOpenIDESettings(() => {
+    const root = ReactDOM.createRoot(document.getElementById('settings-root'));
+    root.render(
+      <SettingsWindow initialSettingsType={SettingsType.IDE_PREFERENCE} />,
     );
   });
 });

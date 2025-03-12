@@ -39,6 +39,10 @@ export class AIAssistantSettingsService {
           data.leftClickBehavior !== undefined
             ? data.leftClickBehavior
             : settings.leftClickBehavior,
+        preferredIDE:
+          data.preferredIDE !== undefined
+            ? data.preferredIDE
+            : settings.preferredIDE,
       },
     });
   }

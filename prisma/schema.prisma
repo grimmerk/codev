@@ -45,6 +45,7 @@ model AIAssistantSettings {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   leftClickBehavior String   @default("switch_window") // "switch_window" or "ai_assistant"
+  preferredIDE      String   @default("VSCode") // "VSCode" or "Cursor"
 }
 
 model Conversation {

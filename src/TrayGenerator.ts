@@ -54,6 +54,12 @@ export class TrayGenerator {
           this.openLeftClickSettings();
         },
       },
+      {
+        label: 'IDE Preference',
+        click: () => {
+          this.openIDESettings();
+        },
+      },
     ];
 
     const menu: any = [
@@ -96,6 +102,12 @@ export class TrayGenerator {
     // Send IPC event to open left-click behavior settings
     const { ipcMain } = require('electron');
     ipcMain.emit('open-left-click-settings');
+  };
+
+  openIDESettings = () => {
+    // Send IPC event to open IDE preference settings
+    const { ipcMain } = require('electron');
+    ipcMain.emit('open-ide-settings');
   };
 
   // ref: https://www.electronjs.org/docs/latest/tutorial/tray
