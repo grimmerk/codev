@@ -76,6 +76,16 @@ export const readVSCodeBasedIDEState = (): VSWindowModel[] => {
 
   // console.log('IDE state:', jsonData);
 
+  if (jsonData.entries) {
+    // filter out fileUri one
+    // and limit to 100
+    jsonData.entries = jsonData.entries
+      .filter((entry: VSCodeBasedEntry) => {
+        return entry.folderUri || entry.workspace;
+      })
+      .slice(0, 100);
+  }
+
   const resp = convertVSCodeBasedSqliteToVSWindowModelArray(jsonData);
   return resp;
 };
@@ -90,7 +100,7 @@ async function deleteVSCodeBasedIDEEntry(
   entryToDelete: string,
   isWorkspace = false,
 ) {
-  console.log("deleteVSCodeBasedIDEEntry",entryToDelete, isWorkspace);
+  console.log('deleteVSCodeBasedIDEEntry', entryToDelete, isWorkspace);
   // Build database path
   const dbPath = VSCodeBasedIDEStateFilePath(); //path.join(os.homedir(), 'Library/Application Support/Cursor/User/globalStorage/state.vscdb');
   let db = null;
@@ -318,6 +328,6 @@ export const deleteRecentProjectRecord = async (path: string) => {
 
   const isWorkspace = path.indexOf('code-workspace') > -1 ? true : false;
 
-  const fullPath = "file://" + path;
+  const fullPath = 'file://' + path;
   await deleteVSCodeBasedIDEEntry(fullPath, isWorkspace);
 };
