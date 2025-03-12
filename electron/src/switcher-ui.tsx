@@ -92,7 +92,7 @@ const saveWorkingFolder = async (workingFolder: string) => {
   return json;
 };
 
-const deleteXWin = async (path: string) => {
+const deleteRecentProjectRecord = async (path: string) => {
   const url = `${SERVER_URL}/xwins`;
 
   const headers = {
@@ -107,7 +107,7 @@ const deleteXWin = async (path: string) => {
   });
 };
 
-const retryFetchXwinData = async (): Promise<any[]> => {
+const retryFetchRecentProjectRecord = async (): Promise<any[]> => {
   if (isDebug) {
     console.log('retryFetchData');
   }
@@ -304,8 +304,8 @@ function SwitcherApp() {
     }
   };
 
-  const fetchXWinData = async () => {
-    const json = await retryFetchXwinData();
+  const fetchRecentProjectRecord = async () => {
+    const json = await retryFetchRecentProjectRecord();
 
     if (json && Array.isArray(json)) {
       setPathInfoArray(json);
@@ -342,7 +342,7 @@ function SwitcherApp() {
     });
 
     (window as any).electronAPI.onFocusWindow((_event: any) => {
-      fetchXWinData();
+      fetchRecentProjectRecord();
 
       /** pros: use the latest list
        * cons: query workingFolder multiple times
@@ -387,7 +387,7 @@ function SwitcherApp() {
     /** onFocusWindow will trigger it, buf if we use cmd + w to close it,
      * then we must call it here, onFocusWindow will not be triggered in that case
      */
-    fetchXWinData();
+    fetchRecentProjectRecord();
     fetchWorkingFolderAndUpdate();
 
     // Don't forget to clean up
@@ -431,9 +431,9 @@ function SwitcherApp() {
 
   const onDeleteClick = useCallback(async (data: any) => {
     const { value } = data;
-    await deleteXWin(value);
+    await deleteRecentProjectRecord(value);
 
-    fetchXWinData();
+    fetchRecentProjectRecord();
   }, []);
 
   const filterOptions = (
