@@ -1,4 +1,3 @@
-import { exec } from 'child_process';
 import {
   app,
   BrowserWindow,
@@ -13,6 +12,11 @@ import { DBManager } from './DBManager';
 import { isMAS, TrayGenerator } from './TrayGenerator';
 import { bootstrap } from './server/server';
 import { AIAssistantUIMode, isDebug } from './utility';
+import {
+  deleteRecentProjectRecord,
+  openVSCodeBasedIDE,
+  readVSCodeBasedIDEState,
+} from './vscode-based-ide-utility';
 
 const clipboard = require('electron').clipboard;
 
@@ -72,14 +76,22 @@ const showAIAssistantWindow = () => {
 };
 
 // Handle chat messages from the AI Assistant window
-ipcMain.on('send-chat-message', (event, message, messageHistory, additionalContext) => {
-  // Get the window that sent this message
-  const sender = BrowserWindow.fromWebContents(event.sender);
-  if (sender && !sender.isDestroyed()) {
-    // Forward the message to AnthropicService with additional context
-    anthropicService.handleChatMessage(message, sender, messageHistory, additionalContext);
-  }
-});
+ipcMain.on(
+  'send-chat-message',
+  (event, message, messageHistory, additionalContext) => {
+    // Get the window that sent this message
+    const sender = BrowserWindow.fromWebContents(event.sender);
+    if (sender && !sender.isDestroyed()) {
+      // Forward the message to AnthropicService with additional context
+      anthropicService.handleChatMessage(
+        message,
+        sender,
+        messageHistory,
+        additionalContext,
+      );
+    }
+  },
+);
 
 // Handle UI mode changes to track the current mode
 ipcMain.on('ui-mode-changed', (event, mode) => {
@@ -109,7 +121,10 @@ ipcMain.handle('save-conversation', async (_, conversation) => {
 
 ipcMain.handle('update-conversation', async (_, id, conversation) => {
   try {
-    const response = await axios.put(`${API_URL}/conversations/${id}`, conversation);
+    const response = await axios.put(
+      `${API_URL}/conversations/${id}`,
+      conversation,
+    );
     return response.data;
   } catch (error) {
     console.error('Error updating conversation:', error);
@@ -140,7 +155,9 @@ ipcMain.handle('get-conversations', async (_, params = {}) => {
 ipcMain.handle('get-latest-conversation', async (_, isFromCode) => {
   try {
     const params = isFromCode !== undefined ? { isFromCode } : {};
-    const response = await axios.get(`${API_URL}/conversations/latest`, { params });
+    const response = await axios.get(`${API_URL}/conversations/latest`, {
+      params,
+    });
     return response.data;
   } catch (error) {
     console.error('Error fetching latest conversation:', error);
@@ -160,7 +177,10 @@ ipcMain.handle('delete-conversation', async (_, id) => {
 
 ipcMain.handle('add-message-to-conversation', async (_, id, message) => {
   try {
-    const response = await axios.post(`${API_URL}/conversations/${id}/messages`, message);
+    const response = await axios.post(
+      `${API_URL}/conversations/${id}/messages`,
+      message,
+    );
     return response.data;
   } catch (error) {
     console.error('Error adding message to conversation:', error);
@@ -171,7 +191,7 @@ ipcMain.handle('add-message-to-conversation', async (_, id, message) => {
 ipcMain.handle('search-conversations', async (_, searchTerm) => {
   try {
     const response = await axios.get(`${API_URL}/conversations/search`, {
-      params: { term: searchTerm }
+      params: { term: searchTerm },
     });
     return response.data;
   } catch (error) {
@@ -331,7 +351,7 @@ const createSwitcherWindow = (): BrowserWindow => {
     width: 800,
     webPreferences: {
       preload: SWITCHER_WINDOW_PRELOAD_WEBPACK_ENTRY,
-      devTools: false, //isDebug,
+      devTools: true, //isDebug,
     },
 
     // hide window by default
@@ -413,7 +433,7 @@ app.on('activate', () => {
 });
 
 /** https://www.electronjs.org/docs/latest/tutorial/ipc */
-ipcMain.on('invoke-vscode', (event, path, option) => {
+ipcMain.on('invoke-vscode', (event, path: string, option: string) => {
   // if (isDebug) {
   //   console.log('invoke', { /*event,*/ path });
   //   tray.tray.setTitle(`CodeV(${path ? path[path.length - 1] : 'n'})`);
@@ -436,37 +456,9 @@ ipcMain.on('invoke-vscode', (event, path, option) => {
     return;
   }
 
-  /** TODO: use Node.js path.join() instead of manual concat */
-  // FIXME: win/linux has difference path
-  // ref:
-  // 1. https://stackoverflow.com/questions/44405523/spawn-child-node-process-from-electron
-  // 2. https://stackoverflow.com/questions/62885809/nodejs-child-process-npm-command-not-found
-  // 3. https://github.com/electron/fiddle/issues/365#issuecomment-616630874
-  // const fullCmd = `code ${command}`
-  // const child = spawn('open', ['-b', 'com.microsoft.VSCode', '--args', argv], options);
-  // https://github.com/microsoft/vscode/issues/102975#issuecomment-661647219
-  // const fullCmd = `open -b com.microsoft.VSCode --args -r ${path}`
+  const ifForceReuseWin = option ? true : false;
 
-  let fullCmd = '';
-  const newPath = path.replace(/ /g, '\\ ');
-  if (option) {
-    // reuse
-    // https://stackoverflow.com/a/47473271/7354486
-    // https://code.visualstudio.com/docs/editor/command-line#_opening-vs-code-with-urls
-    fullCmd = `open vscode://file/${newPath}`;
-  } else {
-    // NOTE: VSCode insider needs to use "com.microsoft.VSCodeInsiders" instead
-    fullCmd = `open -b com.microsoft.VSCode ${newPath}`;
-  }
-
-  if (isDebug) {
-    console.log({ fullCmd });
-  }
-  exec(fullCmd, (error, stdout, stderr) => {
-    if (isDebug) {
-      console.log(stdout);
-    }
-  });
+  openVSCodeBasedIDE(path, ifForceReuseWin);
 
   hideWindow();
 });
@@ -555,8 +547,8 @@ ipcMain.on('open-left-click-settings', () => {
 });
 
 // Import our Anthropic service
-import anthropicService from './AnthropicService';
 import axios from 'axios';
+import anthropicService from './AnthropicService';
 
 // API URL for the local NestJS server
 const API_URL = 'http://localhost:55688';
@@ -594,6 +586,16 @@ ipcMain.on('open-folder-selector', async (event) => {
   const folderPath = filePaths[0];
 
   switcherWindow.webContents.send('folder-selected', folderPath);
+});
+
+ipcMain.on('fetch-vscode-based-sqlite', async (event) => {
+  const resp = readVSCodeBasedIDEState();
+  // console.log('readVSCodeBasedIDEState done: sent it to ui: ', resp);
+  switcherWindow.webContents.send('vscode-based-sqlite-read', resp);
+});
+ipcMain.on('delete-vscode-based-sqlite-record', async (event, path: string) => {
+  deleteRecentProjectRecord(path);
+  switcherWindow.webContents.send('vscode-based-sqlite-record-deleted');
 });
 
 // Load settings from database with retry mechanism
@@ -830,13 +832,13 @@ const trayToggleEvtHandler = async () => {
         // Store state before closing to decide what to do on reopen
         const previousAnalyzedCode = lastAnalyzedCodeToGetInsight;
         const previousUIMode = lastUIMode;
-        
+
         // IMPORTANT: Don't reset tracking variables when window is closed
         // This allows us to remember the state when reopening with the same code content
         // We comment out these lines to preserve state across window close/open
         // lastAnalyzedCodeToGetInsight = '';
         // lastInsightCompleted = false;
-        
+
         // Schedule recreation after a short delay
         setTimeout(() => {
           if (!aiAssistantWindow || aiAssistantWindow.isDestroyed()) {
@@ -851,11 +853,15 @@ const trayToggleEvtHandler = async () => {
                   'set-ui-mode',
                   AIAssistantUIMode.SMART_CHAT,
                 );
-                
+
                 // Log window recreation for debugging
                 if (isDebug) {
-                  console.log('AI Assistant window recreated after close. Reset to SMART_CHAT mode.');
-                  console.log(`Previous mode: ${previousUIMode}, Previous code hash: ${previousAnalyzedCode.length > 0 ? 'has content' : 'empty'}`);
+                  console.log(
+                    'AI Assistant window recreated after close. Reset to SMART_CHAT mode.',
+                  );
+                  console.log(
+                    `Previous mode: ${previousUIMode}, Previous code hash: ${previousAnalyzedCode.length > 0 ? 'has content' : 'empty'}`,
+                  );
                 }
               });
             } else {
@@ -863,11 +869,15 @@ const trayToggleEvtHandler = async () => {
                 'set-ui-mode',
                 AIAssistantUIMode.SMART_CHAT,
               );
-              
+
               // Log window recreation for debugging
               if (isDebug) {
-                console.log('AI Assistant window recreated after close. Reset to SMART_CHAT mode.');
-                console.log(`Previous mode: ${previousUIMode}, Previous code hash: ${previousAnalyzedCode.length > 0 ? 'has content' : 'empty'}`);
+                console.log(
+                  'AI Assistant window recreated after close. Reset to SMART_CHAT mode.',
+                );
+                console.log(
+                  `Previous mode: ${previousUIMode}, Previous code hash: ${previousAnalyzedCode.length > 0 ? 'has content' : 'empty'}`,
+                );
               }
             }
           }
@@ -966,18 +976,20 @@ const trayToggleEvtHandler = async () => {
           // We need to first load the latest conversation and THEN set UI mode
           // This ensures we have the conversation data before switching modes
           // Otherwise, setting mode will reinitialize messages and lose conversation data
-          
+
           // First load the conversation
-          console.log('Sending load-latest-conversation event to restore previous chat');
+          console.log(
+            'Sending load-latest-conversation event to restore previous chat',
+          );
           aiAssistantWindow.webContents.send('load-latest-conversation');
-          
+
           // Add a small delay before setting UI mode to ensure conversation loads first
           setTimeout(() => {
             console.log('Setting UI mode to SMART_CHAT');
             aiAssistantWindow.webContents.send(
               'set-ui-mode',
               AIAssistantUIMode.SMART_CHAT,
-              { keepExistingMessages: true } // Add flag to keep existing messages
+              { keepExistingMessages: true }, // Add flag to keep existing messages
             );
           }, 100); // Small delay to ensure conversation loads first
         }, 0);
@@ -999,29 +1011,31 @@ const trayToggleEvtHandler = async () => {
         // First load the conversation
         console.log('New window ready - loading latest conversation first');
         aiAssistantWindow.webContents.send('load-latest-conversation');
-        
+
         // Add a small delay before setting UI mode
         setTimeout(() => {
           console.log('Setting UI mode to SMART_CHAT in new window');
           aiAssistantWindow.webContents.send(
             'set-ui-mode',
             AIAssistantUIMode.SMART_CHAT,
-            { keepExistingMessages: true } // Flag to keep existing messages
+            { keepExistingMessages: true }, // Flag to keep existing messages
           );
         }, 100);
       });
     } else {
       // First load the conversation
-      console.log('New window already loaded - loading latest conversation first');
+      console.log(
+        'New window already loaded - loading latest conversation first',
+      );
       aiAssistantWindow.webContents.send('load-latest-conversation');
-      
+
       // Add a small delay before setting UI mode
       setTimeout(() => {
         console.log('Setting UI mode to SMART_CHAT in new window');
         aiAssistantWindow.webContents.send(
           'set-ui-mode',
           AIAssistantUIMode.SMART_CHAT,
-          { keepExistingMessages: true } // Flag to keep existing messages
+          { keepExistingMessages: true }, // Flag to keep existing messages
         );
       }, 100);
     }
@@ -1064,13 +1078,15 @@ const trayToggleEvtHandler = async () => {
         if (!aiAssistantWindow.isVisible()) {
           showAIAssistantWindow();
         }
-        
+
         // First, try to load existing conversation with matching code content
         // We'll need to add a new IPC event to handle this in the renderer
         if (isDebug) {
-          console.log(`Trying to find existing conversation for code: ${clipboardContent.substring(0, 50)}...`);
+          console.log(
+            `Trying to find existing conversation for code: ${clipboardContent.substring(0, 50)}...`,
+          );
         }
-        
+
         // Send code to analyze
         aiAssistantWindow.webContents.send(
           'code-to-generate-insight',
@@ -1089,15 +1105,19 @@ const trayToggleEvtHandler = async () => {
             // Important: First try to find matching conversation BEFORE setting UI mode
             // This allows the conversation to be loaded before UI logic runs
             console.log('Trying to find existing conversation for code');
-            
+
             // Add event listener for one-time response from renderer process
             const findConversationResponseHandler = (event, success) => {
-              console.log(`Find conversation response: ${success ? 'found' : 'not found'}`);
-              
+              console.log(
+                `Find conversation response: ${success ? 'found' : 'not found'}`,
+              );
+
               // If conversation was not found, proceed with normal insight generation
               if (!success) {
-                console.log('Setting UI mode to INSIGHT_CHAT with restore flag');
-                
+                console.log(
+                  'Setting UI mode to INSIGHT_CHAT with restore flag',
+                );
+
                 // Set UI mode after we know if conversation exists
                 aiAssistantWindow.webContents.send(
                   'set-ui-mode',
@@ -1107,27 +1127,33 @@ const trayToggleEvtHandler = async () => {
                     restoreInsight: true,
                   },
                 );
-                
+
                 // Still request insight in case we need to regenerate it
                 // The renderer will handle showing the cached insight if available
                 anthropicService.analyzeCodeToGetInsight(
                   clipboardContent,
                   aiAssistantWindow,
-                  { isRestored: true } // Flag that this is a restored conversation
+                  { isRestored: true }, // Flag that this is a restored conversation
                 );
               }
-              
+
               // Remove one-time handler
-              ipcMain.removeListener('find-conversation-result', findConversationResponseHandler);
+              ipcMain.removeListener(
+                'find-conversation-result',
+                findConversationResponseHandler,
+              );
             };
-            
+
             // Register one-time event handler
-            ipcMain.once('find-conversation-result', findConversationResponseHandler);
-            
+            ipcMain.once(
+              'find-conversation-result',
+              findConversationResponseHandler,
+            );
+
             // Send the find request
             aiAssistantWindow.webContents.send(
               'find-conversation-by-code',
-              clipboardContent
+              clipboardContent,
             );
           }, 100);
         } else {
@@ -1136,20 +1162,20 @@ const trayToggleEvtHandler = async () => {
             aiAssistantWindow.webContents.send(
               'set-ui-mode',
               AIAssistantUIMode.INSIGHT_CHAT,
-              { code: clipboardContent }
+              { code: clipboardContent },
             );
 
             // First try to load any existing matching conversation
             aiAssistantWindow.webContents.send(
               'find-conversation-by-code',
-              clipboardContent
+              clipboardContent,
             );
 
             // Request explanation (this is a new conversation)
             anthropicService.analyzeCodeToGetInsight(
               clipboardContent,
               aiAssistantWindow,
-              { isRestored: false } // Flag that this is a new conversation (explicit)
+              { isRestored: false }, // Flag that this is a new conversation (explicit)
             );
 
             // Reset explanation completed flag

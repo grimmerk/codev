@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchWorkingFolder: (path: string) =>
     ipcRenderer.send('search-working-folder', path),
 
+  /** for reading VS Code built-in sqlite */
+  fetchVSCodeBasedIDESqlite: () => ipcRenderer.send('fetch-vscode-based-sqlite'),
+  onVSCodeBasedSqliteRead: (callback: any) =>
+    ipcRenderer.on('vscode-based-sqlite-read', callback),
+  deleteVSCodeBasedIDESqliteRecord: (path: string) => ipcRenderer.send('delete-vscode-based-sqlite-record', path),
+  onVSCodeBasedSqliteRecordDeleted: (callback: any) =>
+    ipcRenderer.on('vscode-based-sqlite-record-deleted', callback),
+  
+
   onFolderSelected: (callback: any) =>
     ipcRenderer.on('folder-selected', callback),
 

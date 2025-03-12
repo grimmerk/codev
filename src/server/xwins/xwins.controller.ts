@@ -93,6 +93,7 @@ export class XWinsController {
     return xwin;
   }
 
+  // usually name: null, spaceParentId: null
   @Get()
   async findAll(): Promise<VSWindowModel[]> {
     const xwins = await this.xwinService.xwins({

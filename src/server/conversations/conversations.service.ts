@@ -68,7 +68,7 @@ export class ConversationsService {
   }
 
   async findOne(id: string): Promise<Conversation | null> {
-    console.log('ConversationsService findOne', id);
+    // console.log('ConversationsService findOne', id);
 
     const resp = await this.prisma.conversation.findUnique({
       where: { id },
@@ -81,7 +81,7 @@ export class ConversationsService {
       },
     });
 
-    console.log('ConversationsService findOne result ', resp);
+    // console.log('ConversationsService findOne result ', resp);
 
     return resp;
   }
@@ -106,7 +106,7 @@ export class ConversationsService {
       },
     });
 
-    console.log('ConversationsService getLatestConversation resp', resp);
+    // console.log('ConversationsService getLatestConversation resp', resp);
     return resp;
   }
 
