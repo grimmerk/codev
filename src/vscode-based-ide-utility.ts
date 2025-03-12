@@ -3,21 +3,25 @@ import Database from 'better-sqlite3';
 import { exec } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
+import { IDEMode } from './ide-enum';
 import {
   VSCodeBasedEntry,
   VSCodeBasedSqlite,
 } from './vscode-based-ide-sqlite.type';
 
-export enum IDEMode {
-  VSCode = 'VSCode',
-  Cursor = 'Cursor',
-}
+// Will be updated from settings
+let currentIDEMode = IDEMode.VSCode;
 
-const defaultIDEMode = IDEMode.VSCode;
+// Function to update the current IDE mode from settings
+export const updateCurrentIDEMode = (preferredIDE: string) => {
+  if (preferredIDE === IDEMode.Cursor || preferredIDE === IDEMode.VSCode) {
+    currentIDEMode = preferredIDE as IDEMode;
+  }
+};
 
 export const VSCodeBasedIDEStateFilePath = () => {
   const homePath = os.homedir();
-  if (defaultIDEMode === IDEMode.VSCode) {
+  if (currentIDEMode === IDEMode.VSCode) {
     const dbPath = path.join(
       homePath,
       /** VSCode may have some variants, e.g. insider, so "Code" -> others */
@@ -25,7 +29,7 @@ export const VSCodeBasedIDEStateFilePath = () => {
     );
     return dbPath;
   } else {
-    //if (defaultIDEMode === IDEMode.Cursor){
+    //if (currentIDEMode === IDEMode.Cursor){
     const dbPath = path.join(
       homePath,
       'Library/Application Support/Cursor/User/globalStorage/state.vscdb',
@@ -40,7 +44,7 @@ export const readVSCodeBasedIDEState = (): VSWindowModel[] => {
 
   let jsonData: VSCodeBasedSqlite = {}; //VSWindowModel[] = []
 
-  const profileIDEstateLog = 'read VSCode base state:' + defaultIDEMode;
+  const profileIDEstateLog = 'read VSCode base state:' + currentIDEMode;
   try {
     console.time(profileIDEstateLog);
 
@@ -219,7 +223,7 @@ export const openVSCodeBasedIDE = (
   let app: string;
   let bundleId: string;
 
-  if (defaultIDEMode === IDEMode.VSCode) {
+  if (currentIDEMode === IDEMode.VSCode) {
     app = 'vscode';
     bundleId = 'com.microsoft.VSCode';
   } else {

@@ -12,6 +12,10 @@ export class AIAssistantSettingsDto {
   @IsOptional()
   @IsString()
   leftClickBehavior?: string;
+  
+  @IsOptional()
+  @IsString()
+  preferredIDE?: string;
 }
 
 export class AIAssistantSettingsResponseDto {
@@ -19,6 +23,7 @@ export class AIAssistantSettingsResponseDto {
   customPrompt?: string;
   apiKey?: string;
   leftClickBehavior: string;
+  preferredIDE: string;
   createdAt: Date;
   updatedAt: Date;
 }

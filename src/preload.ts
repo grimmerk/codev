@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('open-api-key-settings', callback),
   onOpenLeftClickSettings: (callback: any) =>
     ipcRenderer.on('open-left-click-settings', callback),
+  onOpenIDESettings: (callback: any) =>
+    ipcRenderer.on('open-ide-settings', callback),
     
   // Conversation history APIs
   saveConversation: (conversation: any) => 
