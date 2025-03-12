@@ -12,7 +12,7 @@
 
 ## Lint/Format
 
-- Electron/Server/Extension: `yarn lint` (check), `yarn format` (fix)
+- `yarn lint` (check), `yarn format` (fix)
 
 ## Code Style
 
