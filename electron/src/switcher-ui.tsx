@@ -1,11 +1,12 @@
+import { VSWindow as VSWindowModel } from '@prisma/client';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import * as ReactDOM from 'react-dom/client';
 import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
-import { isDebug } from './utility';
-import { VSWindow as VSWindowModel } from '@prisma/client';
+// import { fetchVSCodeBasedOpenedWindows, SERVER_URL, deleteRecentProjectRecord } from "./vscode-based-ide-utility"
+export const SERVER_URL = 'http://localhost:55688';
 
 // Global styles for the switcher UI (moved from index.css)
 const globalStyles = `
@@ -60,11 +61,18 @@ export function closeAppClick() {
   (window as any).electronAPI.closeAppClick();
 }
 
+export function fetchVSCodeBasedIDESqlite() {
+  (window as any).electronAPI.fetchVSCodeBasedIDESqlite();
+}
+export function deleteVSCodeBasedIDESqliteRecord(path: string) {
+  console.log("ui deleteVSCodeBasedIDESqliteRecord:");
+
+  (window as any).electronAPI.deleteVSCodeBasedIDESqliteRecord(path);
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-const SERVER_URL = 'http://localhost:55688';
 
 const fetchWorkingFolder = async (): Promise<{
   id: number;
@@ -93,67 +101,49 @@ const saveWorkingFolder = async (workingFolder: string) => {
   return json;
 };
 
-const deleteRecentProjectRecord = async (path: string) => {
-  const url = `${SERVER_URL}/xwins`;
-
-  const headers = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-
-  /** e.g. /Users/grimmer/git/alphago-zero-tictactoe-js */
-  console.log("deleteRecentProjectRecord:", path)
-
-  await fetch(url, {
-    body: JSON.stringify({ path }),
-    method: 'DELETE',
-    headers,
-  });
-};
-
-const retryFetchRecentProjectRecord = async (): Promise<VSWindowModel[]> => {
-  if (isDebug) {
-    console.log('retryFetchData');
-  }
-  const url = `${SERVER_URL}/xwins`;
-
-  let retryTimes = 20;
-  let succeed = false;
-  let json: VSWindowModel[] = [];
-  while (!succeed && retryTimes > 0) {
-    try {
-      // at least 6/5*50 milliseconds needed for serve start time
-      // most of the times are 7 or 6 times
-      if (isDebug && retryTimes != 20) {
-        console.log('retrying fetchData');
-      }
-      const resp = await fetch(url);
-      json = await resp.json();
-      console.log('fetch:json:', json)
-
-      succeed = true;
-    } catch (err) {
-      retryTimes -= 1;
-      await sleep(50);
-    }
-  }
-  return json;
-};
+// const retryFetchRecentProjectRecord = async (): Promise<void> => {
+//   if (isDebug) {
+//     console.log('retryFetchData');
+//   }
+// fetchVSCodeBasedIDESqlite();
+// const url = `${SERVER_URL}/xwins`;
+// let retryTimes = 20;
+// let succeed = false;
+// let json: VSWindowModel[] = [];
+// while (!succeed && retryTimes > 0) {
+//   try {
+//     // at least 6/5*50 milliseconds needed for serve start time
+//     // most of the times are 7 or 6 times
+//     if (isDebug && retryTimes != 20) {
+//       console.log('retrying fetchData');
+//     }
+//     // const resp = await fetch(url);
+//     // json = await resp.json();
+//     /** TODO: add this back */
+//     // json = await fetchVSCodeBasedOpenedWindows();
+//     succeed = true;
+//   } catch (err) {
+//     retryTimes -= 1;
+//     await sleep(50);
+//   }
+// }
+// return json;
+// };
 
 const OPTION_KEY = 18;
 
 // Brand color theme - Based on CodeV app icon's turquoise color
 const THEME = {
-  primary: '#00BCD4',      // Turquoise, main brand color
+  primary: '#00BCD4', // Turquoise, main brand color
   text: {
-    primary: '#E9E9E9',    // Light text for dark background
-    secondary: '#A0A0A0',  // Grey text for paths
-    newItem: '#6A9955'     // Green for unopened items
+    primary: '#E9E9E9', // Light text for dark background
+    secondary: '#A0A0A0', // Grey text for paths
+    newItem: '#6A9955', // Green for unopened items
   },
   background: {
-    hover: '#3a3a3a',      // Hover background color
-    selected: '#064f61'    // Selected item background color
-  }
+    hover: '#3a3a3a', // Hover background color
+    selected: '#064f61', // Selected item background color
+  },
 };
 
 /** Enhanced option label formatter - horizontal layout for higher information density */
@@ -171,27 +161,27 @@ const formatOptionLabel = (
     .filter((sub: string) => sub);
 
   // Extract path and name
-  const path = label.slice(0, label.lastIndexOf('/'));
-  let name = label.slice(label.lastIndexOf('/') + 1);
-  name = name.replace(/\.code-workspace/, ' (Workspace)');
+  const path = label?.slice(0, label.lastIndexOf('/'));
+  let name = label?.slice(label.lastIndexOf('/') + 1);
+  name = name?.replace(/\.code-workspace/, ' (Workspace)');
 
   // Determine styles based on whether the item has been opened
   const nameStyle: any = {
     fontWeight: '500',
     fontSize: '15px', // Increased font size
     minWidth: '180px', // Fixed width for project names for better alignment
-    paddingRight: '10px'
+    paddingRight: '10px',
   };
-  
+
   const pathStyle: any = {
     fontSize: '14px', // Increased font size
     color: THEME.text.secondary,
     flex: 1,
     textOverflow: 'ellipsis',
     overflow: 'hidden',
-    whiteSpace: 'nowrap'
+    whiteSpace: 'nowrap',
   };
-  
+
   if (!everOpened) {
     nameStyle.color = THEME.text.newItem;
   } else {
@@ -199,35 +189,37 @@ const formatOptionLabel = (
   }
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      alignItems: 'center',
-      padding: '2px 0',
-      width: '100%',
-      height: '30px' // Increased height for better readability
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        padding: '2px 0',
+        width: '100%',
+        height: '30px', // Increased height for better readability
+      }}
+    >
       <div style={nameStyle}>
-        <Highlighter 
-          searchWords={searchWords} 
+        <Highlighter
+          searchWords={searchWords}
           textToHighlight={name}
-          highlightStyle={{ 
-            backgroundColor: 'rgba(0, 188, 212, 0.2)', 
+          highlightStyle={{
+            backgroundColor: 'rgba(0, 188, 212, 0.2)',
             color: '#fff',
             padding: '0 2px',
-            borderRadius: '2px'
-          }} 
+            borderRadius: '2px',
+          }}
         />
       </div>
       <div style={pathStyle}>
-        <Highlighter 
-          searchWords={searchWords} 
+        <Highlighter
+          searchWords={searchWords}
           textToHighlight={path}
-          highlightStyle={{ 
-            backgroundColor: 'rgba(0, 188, 212, 0.1)', 
+          highlightStyle={{
+            backgroundColor: 'rgba(0, 188, 212, 0.1)',
             color: '#ccc',
             padding: '0 2px',
-            borderRadius: '2px'
-          }} 
+            borderRadius: '2px',
+          }}
         />
       </div>
     </div>
@@ -259,12 +251,14 @@ const OptionUI: FC<OptionProps<SelectInputOptionInterface>> = (
         padding: '2px 8px',
         margin: '2px 0',
         borderRadius: '3px',
-        backgroundColor: isSelected 
-          ? THEME.background.selected 
-          : (isFocused ? THEME.background.hover : 'transparent'),
+        backgroundColor: isSelected
+          ? THEME.background.selected
+          : isFocused
+            ? THEME.background.hover
+            : 'transparent',
         transition: 'background-color 0.2s ease',
         cursor: 'pointer',
-        height: '34px' // Increased height to match item height
+        height: '34px', // Increased height to match item height
       }}
     >
       <components.Option {...props} />
@@ -298,9 +292,11 @@ function SwitcherApp() {
 
   const [inputValue, setInputValue] = useState('');
   const [selectedOptions, setSelectedOptions] = useState([]);
-  const [pathInfoArray, setPathInfoArray] = useState([]);
+  const [pathInfoArray, setPathInfoArray] = useState<VSWindowModel[]>([]);
   const [workingFolderPath, setWorkingFolderPath] = useState('');
-  const [workingPathInfoArray, setWorkingPathInfoArray] = useState([]);
+  const [workingPathInfoArray, setWorkingPathInfoArray] = useState<string[]>(
+    [],
+  );
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -311,11 +307,10 @@ function SwitcherApp() {
   };
 
   const fetchRecentProjectRecord = async () => {
-    const json = await retryFetchRecentProjectRecord();
-
-    if (json && Array.isArray(json)) {
-      setPathInfoArray(json);
-    }
+    fetchVSCodeBasedIDESqlite(); //retryFetchRecentProjectRecord();
+    // if (json && Array.isArray(json)) {
+    //   setPathInfoArray(json);
+    // }
   };
 
   const fetchWorkingFolderAndUpdate = async () => {
@@ -385,6 +380,21 @@ function SwitcherApp() {
       },
     );
 
+    (window as any).electronAPI.onVSCodeBasedSqliteRead(
+      async (_event: any, recentProject: VSWindowModel[]) => {
+        // if (json && Array.isArray(json)) {
+        //
+        // }
+        console.log('ui get recentProject:', recentProject);
+        setPathInfoArray(recentProject);
+      },
+    );
+    (window as any).electronAPI.onVSCodeBasedSqliteRecordDeleted(
+      async (_event: any) => {
+        fetchRecentProjectRecord();
+      },
+    );
+
     /** pros: query one time in early stage
      * cons: it may need to retry when it is starting
      * also onFocusWindow will be triggered when the 1st time cmd +ctrl +r is used
@@ -428,36 +438,46 @@ function SwitcherApp() {
       });
     }
   });
+  // if (openPathArray?.length) {
   const pathArray = openPathArray.concat(workingInfoArray);
+  console.log('before set pathArray:', pathArray.length);
   console.log({
     openPathArray: openPathArray.length,
     workingPathInfoArray: workingPathInfoArray.length,
     pathArray: pathArray.length,
   });
 
-  const onDeleteClick = useCallback(async (data: {
-    everOpened: boolean,
-    label: string,
-    value: string
-  }) => {
-
-    const { value } = data;
-    await deleteRecentProjectRecord(value);
-
-    fetchRecentProjectRecord();
-  }, []);
+  const onDeleteClick = useCallback(
+    async (data: { everOpened: boolean; label: string; value: string }) => {
+      const { value } = data;
+      /** TODO: add this back */
+      // await deleteRecentProjectRecord(value);
+      deleteVSCodeBasedIDESqliteRecord(value);
+    },
+    [],
+  );
 
   const filterOptions = (
-    candidate: { label: string; value: string; data: {
-      everOpened: boolean,
-      label: string,
-      value: string
-    } },
+    candidate: {
+      label: string;
+      value: string;
+      data: {
+        everOpened: boolean;
+        label: string;
+        value: string;
+      };
+    },
     input: string,
   ) => {
     // console.log("filterOptions:", candidate?.data)
     let allFound = true;
-    const target = candidate.value.toLowerCase();
+
+    let target: string;
+    try {
+      target = candidate?.value?.toLowerCase();
+    } catch (err) {
+      console.log('target:', candidate);
+    }
 
     if (input) {
       const inputArray = input.toLowerCase().split(' ');
@@ -478,15 +498,17 @@ function SwitcherApp() {
   };
 
   return (
-    <div style={{
-      backgroundColor: '#1a1a1a',
-      borderRadius: '8px',
-      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
-      overflow: 'hidden',
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100vh'
-    }}>
+    <div
+      style={{
+        backgroundColor: '#1a1a1a',
+        borderRadius: '8px',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100vh',
+      }}
+    >
       <div
         style={{
           display: 'flex',
@@ -495,21 +517,25 @@ function SwitcherApp() {
           alignItems: 'center',
           padding: '10px 15px',
           borderBottom: '1px solid #333',
-          backgroundColor: '#252525'
+          backgroundColor: '#252525',
         }}
       >
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center',
-          color: THEME.text.primary,
-          fontWeight: 'bold',
-          fontSize: '16px'
-        }}>
-          <span style={{ 
-            color: THEME.primary, 
-            marginRight: '8px',
-            fontSize: '18px' 
-          }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            color: THEME.text.primary,
+            fontWeight: 'bold',
+            fontSize: '16px',
+          }}
+        >
+          <span
+            style={{
+              color: THEME.primary,
+              marginRight: '8px',
+              fontSize: '18px',
+            }}
+          >
             📂
           </span>
           CodeV Quick Switcher
@@ -571,10 +597,10 @@ function SwitcherApp() {
             borderRadius: '4px',
             boxShadow: 'none',
             '&:hover': {
-              borderColor: THEME.primary
+              borderColor: THEME.primary,
             },
             padding: '4px',
-            margin: '10px 15px'
+            margin: '10px 15px',
           }),
           input: (base) => ({
             ...base,
@@ -585,14 +611,14 @@ function SwitcherApp() {
             ...base,
             backgroundColor: 'transparent',
             boxShadow: 'none',
-            margin: '0'
+            margin: '0',
           }),
           menuList: (base) => ({
             ...base,
             backgroundColor: 'transparent',
             padding: '0 6px',
             margin: '0 6px',
-            maxHeight: '480px' // Increased max height for more items
+            maxHeight: '480px', // Increased max height for more items
           }),
           option: (base) => ({
             ...base,
@@ -600,14 +626,14 @@ function SwitcherApp() {
             cursor: 'pointer',
             padding: 0,
             margin: 0,
-            height: '34px' // Increased height for better readability
+            height: '34px', // Increased height for better readability
           }),
           noOptionsMessage: (base) => ({
             ...base,
             color: THEME.text.secondary,
             textAlign: 'center',
-            padding: '20px 0'
-          })
+            padding: '20px 0',
+          }),
         }}
       />
     </div>
