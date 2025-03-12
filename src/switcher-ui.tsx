@@ -65,7 +65,7 @@ export function fetchVSCodeBasedIDESqlite() {
   (window as any).electronAPI.fetchVSCodeBasedIDESqlite();
 }
 export function deleteVSCodeBasedIDESqliteRecord(path: string) {
-  console.log("ui deleteVSCodeBasedIDESqliteRecord:");
+  console.log('ui deleteVSCodeBasedIDESqliteRecord:');
 
   (window as any).electronAPI.deleteVSCodeBasedIDESqliteRecord(path);
 }
@@ -483,7 +483,7 @@ function SwitcherApp() {
       const inputArray = input.toLowerCase().split(' ');
       for (const subInput of inputArray) {
         if (subInput) {
-          if (!target.includes(subInput)) {
+          if (!target?.includes(subInput)) {
             allFound = false;
             break;
           }
