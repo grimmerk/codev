@@ -25,6 +25,7 @@ export const rules: Required<ModuleOptions>['rules'] = [
       loader: 'ts-loader',
       options: {
         transpileOnly: true,
+        configFile: process.env.BUILD_TYPE === 'prod' ? 'tsconfig.prod.json' : 'tsconfig.json',
       },
     },
   },

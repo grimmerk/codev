@@ -9,6 +9,8 @@ rules.push({
 });
 
 export const rendererConfig: Configuration = {
+  // Add this for production builds
+  mode: process.env.BUILD_TYPE === 'prod' ? 'production' : 'development',
   module: {
     rules,
   },

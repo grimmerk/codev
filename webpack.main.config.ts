@@ -3,6 +3,11 @@ import type { Configuration } from 'webpack';
 import { rules } from './webpack.rules';
 
 export const mainConfig: Configuration = {
+  // Add this for production builds
+  mode: process.env.BUILD_TYPE === 'prod' ? 'production' : 'development',
+  stats: {
+    errorDetails: true
+  },
   /**
    * This is the main entry point for your application, it's the first file
    * that runs in the main process.
