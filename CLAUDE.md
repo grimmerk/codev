@@ -75,6 +75,8 @@ We've implemented several optimizations to improve window opening speed and user
    - `Cmd+Ctrl+C`: Direct shortcut to PURE_CHAT mode
      - Toggles visibility if window is already open
    - `Cmd+Ctrl+R`: Original shortcut for main window (unchanged)
+   - `Cmd+N`: Creates a new conversation when AI Assistant window is open
+     - Works in any UI mode (INSIGHT_SPLIT, INSIGHT_CHAT, SELECTION_CHAT, SMART_CHAT)
 
 2. **Window Management Optimizations**:
 
