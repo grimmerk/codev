@@ -62,8 +62,8 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
     - For the first time or every time db scheme changes, execute `yarn db:migrate` to generate SQLite DB file (`./prisma/dev.db`) and generate TypeScript interface. `yarn db:view` can be used to view DB data.
       - `db:migrate` will also automatically do this part, `yarn install` will also include generated types in node_modules/.prisma/index.d.ts)
   - `yarn start` (not set VS Code debugging yet)
-  - package as mac app: `yarn make`. It (Electron part) is about 196MB.
-  - build mas build: `yarn make_mas`. Then execute `sh ./sign.sh`.
+  - package as mac app: `yarn make`. It (Electron part) is about 196MB. Then you can move/copy out/SwitchV-darwin-arm64/SwitchV.app to your application folder and use it daily. 
+  - build MAC build (for app store): `yarn make_mas`. Then execute `sh ./sign.sh`.
 
 ### Setup of AI Assistant feature
 
