@@ -356,6 +356,28 @@ const AIAssistantApp: React.FC = () => {
     messagesRef.current = messages;
   }, [messages]);
 
+  // Auto-focus the input field when the component loads or window is shown/focused
+  useEffect(() => {
+    // Focus on component mount
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+    
+    // Add focus event listener to window to handle when app regains focus
+    const handleWindowFocus = () => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    };
+    
+    window.addEventListener('focus', handleWindowFocus);
+    
+    // Clean up event listener on component unmount
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, []);
+
   const [inputValue, setInputValue] = useState<string>('');
 
   // Conversation tracking
@@ -376,6 +398,15 @@ const AIAssistantApp: React.FC = () => {
   const uiModeRef = useRef(uiMode);
   useEffect(() => {
     uiModeRef.current = uiMode;
+    
+    // Focus input whenever UI mode changes
+    if (inputRef.current) {
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 100); // Small delay to ensure UI has updated
+    }
   }, [uiMode]);
 
   // For backward compatibility - will be removed once migrated completely
@@ -749,6 +780,13 @@ const AIAssistantApp: React.FC = () => {
   ) => {
     setIsLoading(false);
     setIsComplete(true);
+    
+    // Focus input after insight is complete
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }, 200);
 
     // If we received a conversation ID from the completion, store it and sync it
     if (data && data.conversationId) {
@@ -1283,6 +1321,13 @@ const AIAssistantApp: React.FC = () => {
         // Update state with the conversation data
         setMessages(conversation.messages);
         setCurrentConversationId(conversation.id);
+        
+        // Force focus on input after a short delay to ensure UI is updated
+        setTimeout(() => {
+          if (inputRef.current) {
+            inputRef.current.focus();
+          }
+        }, 150);
 
         // If it's a code-based conversation, also load the code and insight
         if (conversation.isFromCode && conversation.sourceCode) {
@@ -1346,6 +1391,13 @@ const AIAssistantApp: React.FC = () => {
       uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
       uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT ||
       uiMode === AIAssistantUIMode.INSIGHT_SPLIT;
+      
+    // Force focus on input after a short delay to ensure UI is updated
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }, 100);
 
     // Clear any previous code and insight content
     if (wasInInsightMode) {
@@ -2230,6 +2282,7 @@ const AIAssistantApp: React.FC = () => {
                 style={styles.textInput}
                 disabled={isLoading}
                 rows={1}
+                autoFocus={true}
               />
               <button
                 style={styles.sendButton}
