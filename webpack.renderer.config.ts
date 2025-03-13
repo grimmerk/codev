@@ -9,6 +9,8 @@ rules.push({
 });
 
 export const rendererConfig: Configuration = {
+  // Add this for production builds
+  mode: process.env.BUILD_TYPE === 'prod' ? 'production' : 'development',
   module: {
     rules,
   },
@@ -25,13 +27,12 @@ export const rendererConfig: Configuration = {
   target: 'web',
   // These are needed for webpack hot reloading to work with Electron's contextIsolation
   output: {
-    publicPath: '/',
     globalObject: 'globalThis',
   },
   // Multiple entrypoints for different HTML pages
   entry: {
     switcher_window: './src/switcher-renderer.ts', // Updated to new file
-    ai_assistant: './src/ai-assistant-renderer.ts',
-    settings: './src/SettingsWindow.tsx',
+    ai_assistant_window: './src/ai-assistant-renderer.ts',
+    settings_window: './src/SettingsWindow.tsx',
   },
 };

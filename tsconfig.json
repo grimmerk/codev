@@ -4,8 +4,9 @@
     "allowJs": true,
     "module": "commonjs",
     "skipLibCheck": true,
+    "strictNullChecks": false,
     "esModuleInterop": true,
-    "noImplicitAny": true,
+    "noImplicitAny": false,
     "sourceMap": true,
     "baseUrl": ".",
     "outDir": "dist",
@@ -25,7 +26,9 @@
     "lib": ["dom", "dom.iterable", "esnext"]
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "types.d.ts",
+    "*.d.ts"
   ],
   "ts-node": {
     "compilerOptions": {

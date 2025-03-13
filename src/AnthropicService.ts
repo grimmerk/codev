@@ -22,7 +22,7 @@ export class AnthropicService {
   private customPrompt: string | null = null;
   private codeInsightCache: Map<
     string,
-    { insight: string; prompt: string }
+    InsightCacheItem
   > = new Map(); // Cache for insight with prompt used
   private SERVER_URL = 'http://localhost:55688';
 

@@ -14,9 +14,13 @@ import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import remarkGfm from 'remark-gfm';
+import {
+  systemMsgForChatFromSelection,
+  systemMsgForConversationContentStart,
+  systemMsgForFollowUpInInsightChatInAIAssistantUI,
+} from './ai-assistant-prompt';
 import { detectLanguage } from './language-detector';
 import { AIAssistantUIMode } from './utility';
-import { systemMsgForChatFromSelection, systemMsgForConversationContentStart, systemMsgForFollowUpInInsightChatInAIAssistantUI } from "./ai-assistant-prompt"
 
 const aiAssistantName = 'Liho';
 
@@ -343,7 +347,7 @@ const AIAssistantApp: React.FC = () => {
   const [isComplete, setIsComplete] = useState<boolean>(false);
   const insightRef = useRef<HTMLDivElement>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
@@ -414,11 +418,13 @@ const AIAssistantApp: React.FC = () => {
       // Skip loading if we're currently creating a new conversation
       // Check both the state and the ref to be extra safe
       if (isCreatingNewConversation || isCreatingNewConversationRef.current) {
-        console.log('Skipping loadLatestConversation because we are creating a new conversation');
+        console.log(
+          'Skipping loadLatestConversation because we are creating a new conversation',
+        );
         setIsLoadingConversations(false);
         return null; // Explicitly return null to indicate no conversation was loaded
       }
-      
+
       // Only load conversation if we're in the right mode
       if (
         uiMode !== AIAssistantUIMode.SMART_CHAT &&
@@ -654,45 +660,67 @@ const AIAssistantApp: React.FC = () => {
 
   // Utility function to sync conversation details
   const syncConversationWithTitle = async (conversationId: string) => {
-    if (!conversationId || !(window as any).electronAPI || !(window as any).electronAPI.getConversation) {
-      console.warn(`Cannot sync conversation: invalid ID or API not available. ID: ${conversationId}`);
+    if (
+      !conversationId ||
+      !(window as any).electronAPI ||
+      !(window as any).electronAPI.getConversation
+    ) {
+      console.warn(
+        `Cannot sync conversation: invalid ID or API not available. ID: ${conversationId}`,
+      );
       return;
     }
-    
+
     try {
-      console.log(`[SYNC] Fetching details for conversation: ${conversationId}`);
-      const conversation = await (window as any).electronAPI.getConversation(conversationId);
-      
+      console.log(
+        `[SYNC] Fetching details for conversation: ${conversationId}`,
+      );
+      const conversation = await (window as any).electronAPI.getConversation(
+        conversationId,
+      );
+
       if (!conversation) {
-        console.warn(`[SYNC] Failed to get conversation details: ${conversationId}`);
+        console.warn(
+          `[SYNC] Failed to get conversation details: ${conversationId}`,
+        );
         return;
       }
-      
-      console.log(`[SYNC] Got conversation: ${conversation.id}, title: ${conversation.title || 'Untitled'}`);
-      
+
+      console.log(
+        `[SYNC] Got conversation: ${conversation.id}, title: ${conversation.title || 'Untitled'}`,
+      );
+
       // CRITICAL FIX: Force a redraw by setting a temporary value and then the real one
       // This fixes React's optimization that might skip updates when setting the same value
       setCurrentConversationId(null);
-      
+
       // Set timeout to ensure React processes the null value first
       setTimeout(() => {
         // Now set the real conversation ID
         setCurrentConversationId(conversation.id);
-        console.log(`[SYNC] Force updated currentConversationId to: ${conversation.id}`);
-        
+        console.log(
+          `[SYNC] Force updated currentConversationId to: ${conversation.id}`,
+        );
+
         // Update conversations list
-        setConversations(prevConversations => {
+        setConversations((prevConversations) => {
           // First, check if this conversation already exists in our list
-          const exists = prevConversations.some(c => c.id === conversation.id);
-          
+          const exists = prevConversations.some(
+            (c) => c.id === conversation.id,
+          );
+
           // Log detailed information
-          console.log(`[SYNC] Conversation ${conversation.id} exists in list: ${exists}`);
-          console.log(`[SYNC] Conversation title: ${conversation.title || 'Untitled'}`);
-          
+          console.log(
+            `[SYNC] Conversation ${conversation.id} exists in list: ${exists}`,
+          );
+          console.log(
+            `[SYNC] Conversation title: ${conversation.title || 'Untitled'}`,
+          );
+
           if (exists) {
             // Replace the existing conversation
-            return prevConversations.map(c => 
-              c.id === conversation.id ? conversation : c
+            return prevConversations.map((c) =>
+              c.id === conversation.id ? conversation : c,
             );
           } else {
             // Add it to the beginning
@@ -700,17 +728,24 @@ const AIAssistantApp: React.FC = () => {
           }
         });
       }, 10);
-      
+
       return conversation;
     } catch (error) {
-      console.error(`[SYNC] Error syncing conversation ${conversationId}:`, error);
+      console.error(
+        `[SYNC] Error syncing conversation ${conversationId}:`,
+        error,
+      );
     }
   };
 
   // Handler for insight complete
   const handleInsightComplete = (
     _event: any,
-    data: { language?: string; conversationId?: string; isRestored?: boolean } = {},
+    data: {
+      language?: string;
+      conversationId?: string;
+      isRestored?: boolean;
+    } = {},
   ) => {
     setIsLoading(false);
     setIsComplete(true);
@@ -719,23 +754,27 @@ const AIAssistantApp: React.FC = () => {
     if (data && data.conversationId) {
       // Check if this is a restored conversation or a new one
       const isRestoredConversation = data.isRestored === true;
-      
-      console.log(`Insight completed with ID: ${data.conversationId}, isRestored: ${isRestoredConversation}`);
-      
+
+      console.log(
+        `Insight completed with ID: ${data.conversationId}, isRestored: ${isRestoredConversation}`,
+      );
+
       // IMPORTANT: For new conversations, set a temporary value first to trigger proper re-rendering
       // This ensures the React component recalculates the title
       if (!isRestoredConversation) {
         setCurrentConversationId(null);
-        console.log('Temporarily reset conversation ID to null to force UI update');
+        console.log(
+          'Temporarily reset conversation ID to null to force UI update',
+        );
       }
-      
+
       // Then synchronize with latest data from server - this will update the title
       // Use a slight delay to ensure the server has processed any changes
       setTimeout(() => {
         // Don't use setCurrentConversationId here - use the sync function which handles everything
         syncConversationWithTitle(data.conversationId);
       }, 300); // Longer delay to ensure server has processed everything
-      
+
       // Update our conversations menu if it's open
       if (isConversationMenuOpen) {
         loadRecentConversations();
@@ -809,14 +848,15 @@ const AIAssistantApp: React.FC = () => {
       setCode(codeToUse);
 
       // Create initial message array with system message to ensure proper conversation initialization
-      const systemMessage = {
+      const systemMessage: Message = {
         role: 'system',
         content: systemMsgForChatFromSelection,
       };
-      const initialMessages = [
-        systemMessage,
-        { role: 'user', content: codeToUse },
-      ];
+      const userMessage: Message = {
+        role: 'user',
+        content: codeToUse,
+      };
+      const initialMessages: Message[] = [systemMessage, userMessage];
 
       setMessages(initialMessages);
 
@@ -1052,83 +1092,105 @@ const AIAssistantApp: React.FC = () => {
       setInputLanguage(language); // Update the input display language too
     }
   };
-  
+
   // Handler for finding conversation by code content
   // This is used when restoring a window with the same code content
-  const handleFindConversationByCode = async (_event: any, codeContent: string) => {
-    console.log(`Finding conversation for code: ${codeContent.substring(0, 50)}...`);
+  const handleFindConversationByCode = async (
+    _event: any,
+    codeContent: string,
+  ) => {
+    console.log(
+      `Finding conversation for code: ${codeContent.substring(0, 50)}...`,
+    );
     let found = false;
-    
+
     try {
       // Instead of using searchConversations, we'll use a different approach
       // First load recent conversations and then filter them locally
-      if ((window as any).electronAPI && (window as any).electronAPI.getConversations) {
+      if (
+        (window as any).electronAPI &&
+        (window as any).electronAPI.getConversations
+      ) {
         // Get most recent code-based conversations
-        const recentConversations = await (window as any).electronAPI.getConversations({
+        const recentConversations = await (
+          window as any
+        ).electronAPI.getConversations({
           isFromCode: true,
-          limit: 20
+          limit: 20,
         });
-        
+
         // Now find any with matching code
-        const matchingConversation = recentConversations.find(c => 
-          c.sourceCode && c.sourceCode.includes(codeContent.substring(0, 100))
+        const matchingConversation = recentConversations.find(
+          (c) =>
+            c.sourceCode &&
+            c.sourceCode.includes(codeContent.substring(0, 100)),
         );
-        
+
         if (matchingConversation) {
-          console.log(`Found matching conversation: ${matchingConversation.id}, title: ${matchingConversation.title || 'Untitled'}`);
-          
+          console.log(
+            `Found matching conversation: ${matchingConversation.id}, title: ${matchingConversation.title || 'Untitled'}`,
+          );
+
           // Get full conversation with messages
           if ((window as any).electronAPI.getConversation) {
-            const fullConversation = await (window as any).electronAPI.getConversation(matchingConversation.id);
-            
+            const fullConversation = await (
+              window as any
+            ).electronAPI.getConversation(matchingConversation.id);
+
             if (fullConversation) {
-              console.log(`Loaded full conversation: ${fullConversation.id}, messages: ${fullConversation.messages?.length || 0}`);
-              
+              console.log(
+                `Loaded full conversation: ${fullConversation.id}, messages: ${fullConversation.messages?.length || 0}`,
+              );
+
               // Reset UI state first to force UI update
               setCurrentConversationId(null);
-              
+
               // Set conversation data after a slight delay
               setTimeout(() => {
                 // Set conversation data
                 setMessages(fullConversation.messages || []);
                 setCurrentConversationId(fullConversation.id);
-                
+
                 // If it has source code, set it
                 if (fullConversation.sourceCode) {
                   setCode(fullConversation.sourceCode);
                 }
-                
+
                 // For insight-based conversations, set insight content
                 const insightMessage = fullConversation.messages.find(
-                  (m: any) => m.role === 'assistant' && m.content.length > 100
+                  (m: any) => m.role === 'assistant' && m.content.length > 100,
                 );
-                
+
                 if (insightMessage) {
                   setInsight(insightMessage.content);
                   setIsComplete(true);
                 }
-                
+
                 // Make sure this conversation is in our list
-                setConversations(prevConversations => {
+                setConversations((prevConversations) => {
                   // Check if already exists
-                  const exists = prevConversations.some(c => c.id === fullConversation.id);
-                  
+                  const exists = prevConversations.some(
+                    (c) => c.id === fullConversation.id,
+                  );
+
                   if (!exists) {
                     return [fullConversation, ...prevConversations];
                   }
-                  
+
                   // Replace existing conversation with updated one
-                  return prevConversations.map(c => 
-                    c.id === fullConversation.id ? fullConversation : c
+                  return prevConversations.map((c) =>
+                    c.id === fullConversation.id ? fullConversation : c,
                   );
                 });
-                
+
                 // Set UI mode to INSIGHT_CHAT for consistency
                 setUIMode(AIAssistantUIMode.INSIGHT_CHAT);
-                
-                console.log(`Successfully restored conversation: ${fullConversation.title || 'Untitled'}`);
+
+                console.log(
+                  `Successfully restored conversation: ${fullConversation.title || 'Untitled'}`,
+                );
               }, 50);
-              
+
               found = true;
             }
           }
@@ -1139,7 +1201,7 @@ const AIAssistantApp: React.FC = () => {
     } catch (error) {
       console.error('Error finding conversation by code:', error);
     }
-    
+
     // Send result back to main process
     try {
       if ((window as any).ipcRenderer) {
@@ -1151,7 +1213,7 @@ const AIAssistantApp: React.FC = () => {
     } catch (e) {
       console.error('Failed to send find-conversation-result', e);
     }
-    
+
     console.log(`Find conversation result: ${found ? 'found' : 'not found'}`);
     return found;
   };
@@ -1167,15 +1229,17 @@ const AIAssistantApp: React.FC = () => {
 
     // If we have a conversation ID, fetch the updated conversation to get the latest title
     if (currentConversationId) {
-      console.log(`Chat response received for conversation ${currentConversationId}`);
-      
+      console.log(
+        `Chat response received for conversation ${currentConversationId}`,
+      );
+
       // Use our sync function for consistent behavior
       setTimeout(() => {
         syncConversationWithTitle(currentConversationId);
       }, 200);
     } else {
       console.log('No conversation ID yet, will load recent conversations');
-      
+
       // If we don't have a conversation ID yet, wait a moment and then
       // try to load recent conversations to capture any newly created ones
       setTimeout(() => {
@@ -1191,15 +1255,15 @@ const AIAssistantApp: React.FC = () => {
   ) => {
     if (data && data.conversationId) {
       console.log(`Conversation saved with ID: ${data.conversationId}`);
-      
+
       // Briefly set to null to force UI refresh when it's set again
       setCurrentConversationId(null);
-      
+
       // Use our synchronization function to ensure consistent behavior
       setTimeout(() => {
         syncConversationWithTitle(data.conversationId);
       }, 200);
-      
+
       // Also refresh the conversation list if the menu is open
       if (isConversationMenuOpen) {
         loadRecentConversations();
@@ -1259,7 +1323,8 @@ const AIAssistantApp: React.FC = () => {
 
   // Function to start a new conversation
   // Track if we're creating a new conversation to avoid loading latest conversation
-  const [isCreatingNewConversation, setIsCreatingNewConversation] = useState(false);
+  const [isCreatingNewConversation, setIsCreatingNewConversation] =
+    useState(false);
 
   // A separate reference to track if we're actively creating a new conversation
   // This needs to persist across renders, unlike the state variable
@@ -1270,27 +1335,28 @@ const AIAssistantApp: React.FC = () => {
     // The ref will be checked synchronously by other functions
     setIsCreatingNewConversation(true);
     isCreatingNewConversationRef.current = true;
-    
+
     // Clear current conversation state
     console.log('Starting a NEW conversation - preventing auto-load');
     setCurrentConversationId(null);
 
     // Always switch to SMART_CHAT mode for new conversations
     // This ensures consistent behavior regardless of the current mode
-    const wasInInsightMode = uiMode === AIAssistantUIMode.INSIGHT_CHAT || 
-                            uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT || 
-                            uiMode === AIAssistantUIMode.INSIGHT_SPLIT;
-    
+    const wasInInsightMode =
+      uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
+      uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT ||
+      uiMode === AIAssistantUIMode.INSIGHT_SPLIT;
+
     // Clear any previous code and insight content
     if (wasInInsightMode) {
       setCode('');
       setInsight('');
       setIsComplete(false);
     }
-    
+
     // We need to block the automatic load that happens on mode change
     // So we'll set the mode and messages together to ensure consistency
-    
+
     // Set the welcome message first to ensure it's available when mode changes
     setMessages([
       {
@@ -1298,16 +1364,16 @@ const AIAssistantApp: React.FC = () => {
         content: firstAssistantMsg,
       },
     ]);
-    
+
     // Always set to SMART_CHAT mode
     setUIMode(AIAssistantUIMode.SMART_CHAT);
-    
+
     // Force a refresh of the conversations list for the dropdown
     // But don't reset our creating flag until much later
     setTimeout(() => {
       if (isCreatingNewConversationRef.current) {
         loadRecentConversations();
-        
+
         // Reinforce our new message to prevent race conditions
         setMessages([
           {
@@ -1315,11 +1381,11 @@ const AIAssistantApp: React.FC = () => {
             content: firstAssistantMsg,
           },
         ]);
-        
+
         console.log('Still waiting before allowing auto-load again...');
       }
     }, 300);
-    
+
     // Keep the protection active for a longer period
     // This ensures any delayed effects have completed
     setTimeout(() => {
@@ -1356,21 +1422,25 @@ const AIAssistantApp: React.FC = () => {
     const loadConversation = async () => {
       // Skip loading if we're currently creating a new conversation (check both state and ref)
       if (isCreatingNewConversation || isCreatingNewConversationRef.current) {
-        console.log('Skipping uiMode-triggered conversation load because we are creating a new conversation');
+        console.log(
+          'Skipping uiMode-triggered conversation load because we are creating a new conversation',
+        );
         return;
       }
-      
+
       // Also protect against unwanted loading right after creating a new conversation
       // by checking if messagesRef contains just the welcome message
       if (
-        messagesRef.current.length === 1 && 
-        messagesRef.current[0].role === 'assistant' && 
+        messagesRef.current.length === 1 &&
+        messagesRef.current[0].role === 'assistant' &&
         messagesRef.current[0].content === firstAssistantMsg
       ) {
-        console.log('Skipping load because we already have a welcome message - likely a new conversation');
+        console.log(
+          'Skipping load because we already have a welcome message - likely a new conversation',
+        );
         return;
       }
-      
+
       if (uiMode === AIAssistantUIMode.SMART_CHAT) {
         const conversation = await loadLatestConversation(false);
 
@@ -1432,20 +1502,24 @@ const AIAssistantApp: React.FC = () => {
           console.log(
             `Fetching conversation details for ID: ${currentConversationId}`,
           );
-          
+
           // Double-check we're not creating a new conversation to prevent race conditions
           if (isCreatingNewConversationRef.current) {
-            console.log('Cancelled fetch because we are now creating a new conversation');
+            console.log(
+              'Cancelled fetch because we are now creating a new conversation',
+            );
             return;
           }
-          
+
           const conversation = await (
             window as any
           ).electronAPI.getConversation(currentConversationId);
-          
+
           if (conversation && !isCreatingNewConversationRef.current) {
-            console.log(`Got conversation details for title: ${conversation.title || 'Untitled'}`);
-            
+            console.log(
+              `Got conversation details for title: ${conversation.title || 'Untitled'}`,
+            );
+
             // Update our local conversations list
             setConversations((prev) => {
               // Check if conversation already exists in the list
@@ -1597,10 +1671,12 @@ const AIAssistantApp: React.FC = () => {
           loadLatestConversation(false);
         });
       }
-      
+
       // Register handler for finding conversation by code
       if ((window as any).electronAPI.onFindConversationByCode) {
-        (window as any).electronAPI.onFindConversationByCode(handleFindConversationByCode);
+        (window as any).electronAPI.onFindConversationByCode(
+          handleFindConversationByCode,
+        );
       }
     } else {
       console.error('electronAPI not available');
@@ -1757,7 +1833,6 @@ const AIAssistantApp: React.FC = () => {
       // Regular markdown rendering for other content
       return (
         <ReactMarkdown
-          children={content}
           remarkPlugins={[remarkGfm]}
           components={{
             code({ node, inline, className, children, ...props }) {
@@ -1895,19 +1970,27 @@ const AIAssistantApp: React.FC = () => {
                   const currentConversation = conversations.find(
                     (c) => c.id === currentConversationId,
                   );
-                  
+
                   // Debug: check if conversation is in the list
-                  console.log(`Looking for conversation: ${currentConversationId}`);
-                  console.log(`Found in conversations list: ${!!currentConversation}`);
-                  console.log(`Has title: ${currentConversation?.title || 'No title'}`);
+                  console.log(
+                    `Looking for conversation: ${currentConversationId}`,
+                  );
+                  console.log(
+                    `Found in conversations list: ${!!currentConversation}`,
+                  );
+                  console.log(
+                    `Has title: ${currentConversation?.title || 'No title'}`,
+                  );
                   console.log(`Conversations in list: ${conversations.length}`);
-                  
+
                   // Log all conversations to verify the problem
                   console.log('All conversations:');
                   conversations.forEach((c, i) => {
-                    console.log(`  [${i}] id: ${c.id}, title: ${c.title || 'Untitled'}`);
+                    console.log(
+                      `  [${i}] id: ${c.id}, title: ${c.title || 'Untitled'}`,
+                    );
                   });
-                  
+
                   if (currentConversation && currentConversation.title) {
                     // If we have the conversation in our list AND it has a title, use it
                     const shortTitle =
@@ -2014,6 +2097,7 @@ const AIAssistantApp: React.FC = () => {
               flexShrink: 0,
             }}
           >
+            {/* @ts-ignore */}
             <SyntaxHighlighter
               language={inputLanguage}
               style={vscDarkPlus as any}
