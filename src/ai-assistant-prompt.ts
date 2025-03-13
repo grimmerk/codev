@@ -37,9 +37,8 @@ export function processPromptTemplate(
   return template.replace('{selected_text}', selectedText);
 }
 
-/** TODO: why do we have two different messages? */
-export const systemMsgForFollowUpInInsightChatInAnthropicService = "Initial code analysis context";
-export const systemMsgForFollowUpInInsightChatInAIAssistantUI = "Initial code snippet and insight for context";
+export const systemMsgForFollowUpInInsightChatInAIAssistantUI =
+  'Initial code snippet and insight for context';
 
-export const systemMsgForChatFromSelection = 'Chat started from code selection'
+export const systemMsgForChatFromSelection = 'Chat started from code selection';
 export const systemMsgForConversationContentStart = 'conversation context';

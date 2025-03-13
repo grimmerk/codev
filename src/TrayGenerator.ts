@@ -1,5 +1,5 @@
 import { BrowserWindow, Menu, Tray, app, nativeImage } from 'electron';
-import { DBManager, isUnPackaged } from './DBManager';
+import { DBPathMigrationManager, isUnPackaged } from './DBPathMigrationManager';
 const path = require('path');
 
 export function isMAS() {
@@ -122,10 +122,10 @@ export class TrayGenerator {
 
     const appPath = app.getAppPath();
 
-    const error = DBManager.migrateError;
+    const error = DBPathMigrationManager.migrateError;
     let info = '';
     if (!isMasStr) {
-      info = `${isMasStr};db:${DBManager.databaseFilePath};schema:${DBManager.schemaPath};server:${DBManager.serverFolderPath};prismaPath:${DBManager.prismaPath};appPath:${appPath};info.${error}`;
+      info = `${isMasStr};db:${DBPathMigrationManager.databaseFilePath};schema:${DBPathMigrationManager.schemaPath};server:${DBPathMigrationManager.serverFolderPath};prismaPath:${DBPathMigrationManager.prismaPath};appPath:${appPath};info.${error}`;
       info = `XWin app.i:${info}`;
     } else {
       info = 'SwitchV';

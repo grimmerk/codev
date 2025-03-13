@@ -1,13 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
+import axios from 'axios';
 import * as dotenv from 'dotenv';
 import { BrowserWindow } from 'electron';
 import * as path from 'path';
-import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
 import {
   DEFAULT_AI_ASSISTANT_PROMPT,
   processPromptTemplate,
-  systemMsgForFollowUpInInsightChatInAnthropicService,  
+  systemMsgForFollowUpInInsightChatInAIAssistantUI,
 } from './ai-assistant-prompt';
 import { detectLanguage } from './language-detector';
 import { AIAssistantUIMode, isDebug } from './utility';
@@ -20,10 +19,7 @@ export class AnthropicService {
   private anthropic: Anthropic;
   private apiKey: string;
   private customPrompt: string | null = null;
-  private codeInsightCache: Map<
-    string,
-    InsightCacheItem
-  > = new Map(); // Cache for insight with prompt used
+  private codeInsightCache: Map<string, InsightCacheItem> = new Map(); // Cache for insight with prompt used
   private SERVER_URL = 'http://localhost:55688';
 
   constructor() {
@@ -108,9 +104,9 @@ export class AnthropicService {
    * @param window The BrowserWindow to send updates to
    */
   public async analyzeCodeToGetInsight(
-    code: string, 
-    window: BrowserWindow, 
-    options: { isRestored?: boolean } = {}
+    code: string,
+    window: BrowserWindow,
+    options: { isRestored?: boolean } = {},
   ): Promise<void> {
     // Always reload settings to get latest prompt and API key
     await this.loadSettings();
@@ -187,7 +183,7 @@ export class AnthropicService {
       }
 
       // Accumulate the full insight to save in cache
-      let fullInsight = ''
+      let fullInsight = '';
 
       // Create a streaming message
       const stream = await this.anthropic.messages.create({
@@ -238,7 +234,10 @@ export class AnthropicService {
 
           // Send each chunk to the renderer process - but only if it's not empty
           if (chunk.delta.text.trim().length > 0) {
-            window.webContents.send('ai-assistant-insight-chunk', chunk.delta.text);
+            window.webContents.send(
+              'ai-assistant-insight-chunk',
+              chunk.delta.text,
+            );
           }
         }
       }
@@ -250,10 +249,7 @@ export class AnthropicService {
       window.webContents.send('ai-assistant-insight-chunk', fullInsight);
 
       if (isDebug) {
-        console.log(
-          'fullInsight:',
-          fullInsight.substring(0, 200) + '...',
-        );
+        console.log('fullInsight:', fullInsight.substring(0, 200) + '...');
         if (detectedLanguage) {
           console.log('Detected language from code blocks:', detectedLanguage);
         }
@@ -270,7 +266,7 @@ export class AnthropicService {
       // Create and save conversation record
       try {
         const title = this.generateTitle(code, fullInsight);
-        
+
         const conversation = {
           title,
           sourceCode: code,
@@ -280,39 +276,42 @@ export class AnthropicService {
           messages: [
             {
               role: 'system',
-              content: systemMsgForFollowUpInInsightChatInAnthropicService
+              content: systemMsgForFollowUpInInsightChatInAIAssistantUI,
             },
             {
               role: 'user',
-              content: code
+              content: code,
             },
             {
               role: 'assistant',
-              content: fullInsight
-            }
-          ]
+              content: fullInsight,
+            },
+          ],
         };
-        
+
         // Save the conversation to the database via the server
-        const response = await axios.post(`${this.SERVER_URL}/conversations`, conversation);
+        const response = await axios.post(
+          `${this.SERVER_URL}/conversations`,
+          conversation,
+        );
         const savedConversation = response.data;
-        
+
         if (isDebug) {
           console.log('Saved conversation:', savedConversation.id);
         }
-        
+
         // Signal completion with detected language, conversation ID and isRestored flag
         window.webContents.send('ai-assistant-insight-complete', {
           language: detectedLanguage,
           conversationId: savedConversation.id,
-          isRestored: options.isRestored || false
+          isRestored: options.isRestored || false,
         });
       } catch (error) {
         console.error('Error saving conversation:', error);
-        
+
         // Still signal completion even if saving failed
         window.webContents.send('ai-assistant-insight-complete', {
-          language: detectedLanguage
+          language: detectedLanguage,
         });
       }
     } catch (error) {
@@ -402,106 +401,132 @@ export class AnthropicService {
 
       // Send the full response for the UI to add to its state
       window.webContents.send('chat-response', fullResponse);
-      
+
       // Save or update conversation record
       try {
         // Determine if this is a new conversation or continuing an existing one
         let existingConversationId = null;
         let isNewConversation = true;
-        
+
         // First check additionalContext for conversation ID
         if (additionalContext && additionalContext.conversationId) {
           existingConversationId = additionalContext.conversationId;
           isNewConversation = false;
           if (isDebug) {
-            console.log(`Using conversation ID from additionalContext: ${existingConversationId}`);
+            console.log(
+              `Using conversation ID from additionalContext: ${existingConversationId}`,
+            );
           }
         } else {
           // Fall back to checking messageHistory for an existing conversation ID
-          const systemMessage = messageHistory.find(msg => msg.role === 'system' && msg.conversationId);
+          const systemMessage = messageHistory.find(
+            (msg) => msg.role === 'system' && msg.conversationId,
+          );
           if (systemMessage && systemMessage.conversationId) {
             existingConversationId = systemMessage.conversationId;
             isNewConversation = false;
             if (isDebug) {
-              console.log(`Using conversation ID from systemMessage: ${existingConversationId}`);
+              console.log(
+                `Using conversation ID from systemMessage: ${existingConversationId}`,
+              );
             }
           } else {
             if (isDebug) {
-              console.log('No existing conversation ID found, creating new conversation');
+              console.log(
+                'No existing conversation ID found, creating new conversation',
+              );
             }
           }
         }
-        
+
         // Create updated messages array with the new response
         const updatedMessages = [
           ...messageHistory,
           { role: 'user', content: message },
-          { role: 'assistant', content: fullResponse }
+          { role: 'assistant', content: fullResponse },
         ];
-        
+
         if (isNewConversation) {
           // Create a new conversation record
           const title = this.generateChatTitle(message, updatedMessages);
-          
+
           // Determine if this is code-related based on context
-          const isFromCode = additionalContext && 
-            (additionalContext.sourceCode || 
-             additionalContext.uiMode === AIAssistantUIMode.INSIGHT_CHAT || 
-             additionalContext.uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT || 
-             additionalContext.uiMode === AIAssistantUIMode.INSIGHT_SPLIT);
-             
+          const isFromCode =
+            additionalContext &&
+            (additionalContext.sourceCode ||
+              additionalContext.uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
+              additionalContext.uiMode ===
+                AIAssistantUIMode.INSIGHT_SOURCE_CHAT ||
+              additionalContext.uiMode === AIAssistantUIMode.INSIGHT_SPLIT);
+
           // Get UI mode from context or default to SMART_CHAT
-          const initialMode = additionalContext && additionalContext.uiMode ? 
-            additionalContext.uiMode : AIAssistantUIMode.SMART_CHAT;
-            
+          const initialMode =
+            additionalContext && additionalContext.uiMode
+              ? additionalContext.uiMode
+              : AIAssistantUIMode.SMART_CHAT;
+
           // Include source code if available
-          const sourceCode = additionalContext && additionalContext.sourceCode ? 
-            additionalContext.sourceCode : undefined;
-            
+          const sourceCode =
+            additionalContext && additionalContext.sourceCode
+              ? additionalContext.sourceCode
+              : undefined;
+
           // Detect language if it's code-related
-          const codeLanguage = isFromCode && sourceCode ? 
-            detectLanguage(sourceCode) : undefined;
-            
+          const codeLanguage =
+            isFromCode && sourceCode ? detectLanguage(sourceCode) : undefined;
+
           const conversation = {
             title,
             isFromCode: !!isFromCode,
             initialMode,
             sourceCode,
             codeLanguage,
-            messages: updatedMessages
+            messages: updatedMessages,
           };
-          
-          const response = await axios.post(`${this.SERVER_URL}/conversations`, conversation);
+
+          const response = await axios.post(
+            `${this.SERVER_URL}/conversations`,
+            conversation,
+          );
           const savedConversation = response.data;
-          
+
           if (isDebug) {
             console.log('Saved new chat conversation:', savedConversation.id);
           }
-          
+
           // Include the conversation ID in the response
-          window.webContents.send('chat-conversation-saved', { 
-            conversationId: savedConversation.id 
+          window.webContents.send('chat-conversation-saved', {
+            conversationId: savedConversation.id,
           });
         } else {
           // Update existing conversation with new messages
           // Send only the new messages to be added, not the entire message history again
           const response = await axios.put(
-            `${this.SERVER_URL}/conversations/${existingConversationId}`, 
+            `${this.SERVER_URL}/conversations/${existingConversationId}`,
             {
               updatedAt: new Date(),
               messages: [
                 { role: 'user', content: message, timestamp: new Date() },
-                { role: 'assistant', content: fullResponse, timestamp: new Date() }
-              ]
-            }
+                {
+                  role: 'assistant',
+                  content: fullResponse,
+                  timestamp: new Date(),
+                },
+              ],
+            },
           );
-          
+
           if (isDebug) {
-            console.log(`Updated existing conversation: ${existingConversationId} with new messages`);
+            console.log(
+              `Updated existing conversation: ${existingConversationId} with new messages`,
+            );
           }
-          
+
           if (isDebug) {
-            console.log('Updated existing conversation:', existingConversationId);
+            console.log(
+              'Updated existing conversation:',
+              existingConversationId,
+            );
           }
         }
       } catch (error) {
@@ -522,7 +547,7 @@ export class AnthropicService {
   }
 
   // Language detection is now handled by the LLM itself
-  
+
   /**
    * Generate a title for a chat conversation
    * @param latestMessage The latest user message
@@ -531,7 +556,7 @@ export class AnthropicService {
    */
   private generateChatTitle(latestMessage: string, messages: any[]): string {
     // Use the first user message for the title if it's concise
-    const firstUserMessage = messages.find(msg => msg.role === 'user');
+    const firstUserMessage = messages.find((msg) => msg.role === 'user');
     if (firstUserMessage && firstUserMessage.content) {
       const content = firstUserMessage.content.trim();
       // If it's a short message, use it directly
@@ -544,22 +569,24 @@ export class AnthropicService {
         const title = firstSentence[1].trim();
         return title.length > 50 ? title.substring(0, 47) + '...' : title;
       }
-      
+
       // Fall back to first few words
       const firstWords = content.split(' ').slice(0, 6).join(' ');
-      return firstWords.length > 50 ? firstWords.substring(0, 47) + '...' : firstWords;
+      return firstWords.length > 50
+        ? firstWords.substring(0, 47) + '...'
+        : firstWords;
     }
-    
+
     // If no good first message, use the latest message
     if (latestMessage && latestMessage.trim().length > 0) {
       const content = latestMessage.trim();
       return content.length > 50 ? content.substring(0, 47) + '...' : content;
     }
-    
+
     // Last resort
     return 'Chat Conversation ' + new Date().toLocaleDateString();
   }
-  
+
   /**
    * Generate a suitable title for a conversation based on code and insight
    * @param code The source code
@@ -571,23 +598,25 @@ export class AnthropicService {
     // Look for markdown headings or the first sentence
     const headingMatch = insight.match(/^# (.+?)$/m);
     const firstSentenceMatch = insight.match(/^(.+?)[.!?](?:\s|$)/m);
-    
+
     if (headingMatch && headingMatch[1].trim().length > 0) {
       const title = headingMatch[1].trim();
       return title.length > 50 ? title.substring(0, 47) + '...' : title;
     }
-    
+
     if (firstSentenceMatch && firstSentenceMatch[1].trim().length > 0) {
       const title = firstSentenceMatch[1].trim();
       return title.length > 50 ? title.substring(0, 47) + '...' : title;
     }
-    
+
     // If no good title from insight, try to extract from code
     // Look for function/class/method name
     const functionMatch = code.match(/function\s+([a-zA-Z0-9_]+)/);
     const classMatch = code.match(/class\s+([a-zA-Z0-9_]+)/);
-    const methodMatch = code.match(/(?:public|private|protected|static|async)?\s*([a-zA-Z0-9_]+)\s*\([^)]*\)\s*[\{:]/);
-    
+    const methodMatch = code.match(
+      /(?:public|private|protected|static|async)?\s*([a-zA-Z0-9_]+)\s*\([^)]*\)\s*[\{:]/,
+    );
+
     if (functionMatch) {
       return `Function: ${functionMatch[1]}`.substring(0, 50);
     } else if (classMatch) {
@@ -595,13 +624,15 @@ export class AnthropicService {
     } else if (methodMatch) {
       return `Method: ${methodMatch[1]}`.substring(0, 50);
     }
-    
+
     // Fallback: use first line of code
     const firstLineOfCode = code.split('\n')[0].trim();
     if (firstLineOfCode && firstLineOfCode.length > 0) {
-      return firstLineOfCode.length > 50 ? firstLineOfCode.substring(0, 47) + '...' : firstLineOfCode;
+      return firstLineOfCode.length > 50
+        ? firstLineOfCode.substring(0, 47) + '...'
+        : firstLineOfCode;
     }
-    
+
     // Last resort
     return 'Code Insight ' + new Date().toLocaleDateString();
   }

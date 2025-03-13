@@ -22,8 +22,8 @@ export const sqlitePathInProd = `${appDataPath}/${dbFileName}`;
 export const schemeCopyPathInProd = `${appDataPath}/schema.prisma`;
 
 async function prisma(...args: any[]) {
-  const command = `${DBManager.prismaPath}`;
-  DBManager.migrateError += `;cmd:${command};`;
+  const command = `${DBPathMigrationManager.prismaPath}`;
+  DBPathMigrationManager.migrateError += `;cmd:${command};`;
 
   if (isDebug) {
     console.log(`Running \`prisma ${args.join(' ')}\``);
@@ -36,7 +36,7 @@ async function prisma(...args: any[]) {
 }
 
 /** NOTE: only use for packaged app */
-export class DBManager {
+export class DBPathMigrationManager {
   static databaseFilePath = '';
   static schemaPath = '';
   static serverFolderPath = '';
@@ -51,50 +51,51 @@ export class DBManager {
 
   static initPath() {
     /** TODO: remove it since this check seems to be not needed */
-    if (DBManager.serverFolderPath) {
+    if (DBPathMigrationManager.serverFolderPath) {
       // already init
       return;
     }
 
     if (isUnPackaged) {
       // it is a file path in dev mode, but after webpack bundles in production, it is just some string, e.g. 4569
-      DBManager.prismaPath = require.resolve('prisma');
-      DBManager.serverFolderPath = path.resolve(`./`); /** not directly used */
-      DBManager.schemaPath = `${DBManager.serverFolderPath}/prisma/schema.prisma`;
+      DBPathMigrationManager.prismaPath = require.resolve('prisma');
+      DBPathMigrationManager.serverFolderPath =
+        path.resolve(`./`); /** not directly used */
+      DBPathMigrationManager.schemaPath = `${DBPathMigrationManager.serverFolderPath}/prisma/schema.prisma`;
 
-      DBManager.databaseFilePath = path.resolve(
+      DBPathMigrationManager.databaseFilePath = path.resolve(
         `${process.cwd()}/prisma/dev.db`,
       );
 
       /** embed nestjs version: not really used. intel version needs different file name*/
-      DBManager.introspectionExePath = `./node_modules/@prisma/engines/introspection-engine-darwin-arm64`;
-      DBManager.fmtExePath = `./node_modules/@prisma/engines/prisma-fmt-darwin-arm64`;
-      DBManager.queryExePath = `./node_modules/@prisma/engines/libquery_engine-darwin-arm64.dylib.node`;
+      DBPathMigrationManager.introspectionExePath = `./node_modules/@prisma/engines/introspection-engine-darwin-arm64`;
+      DBPathMigrationManager.fmtExePath = `./node_modules/@prisma/engines/prisma-fmt-darwin-arm64`;
+      DBPathMigrationManager.queryExePath = `./node_modules/@prisma/engines/libquery_engine-darwin-arm64.dylib.node`;
     } else {
       // **/Resources/
       const resourcePath = path.resolve(`${app.getAppPath()}/../`);
-      DBManager.schemaPath = `${resourcePath}/app/.webpack/main/schema.prisma`;
+      DBPathMigrationManager.schemaPath = `${resourcePath}/app/.webpack/main/schema.prisma`;
 
-      DBManager.databaseFilePath = sqlitePathInProd;
+      DBPathMigrationManager.databaseFilePath = sqlitePathInProd;
 
       /** mainly it requires two files
        * 1. node_modules/prisma/build/index.js
        * 2. node_modules/prisma/package.json
        * with these structure ./index.js & ../package.json
        * */
-      DBManager.prismaPath = `${resourcePath}/prisma/build/index.js`;
-      DBManager.migrateExePath = `${resourcePath}/migration-engine-darwin`;
-      DBManager.introspectionExePath = `${resourcePath}/introspection-engine-darwin`;
-      DBManager.fmtExePath = `${resourcePath}/prisma-fmt-darwin`;
-      DBManager.queryExePath = `${resourcePath}/prisma/libquery_engine-darwin-arm64.dylib.node`;
+      DBPathMigrationManager.prismaPath = `${resourcePath}/prisma/build/index.js`;
+      DBPathMigrationManager.migrateExePath = `${resourcePath}/migration-engine-darwin`;
+      DBPathMigrationManager.introspectionExePath = `${resourcePath}/introspection-engine-darwin`;
+      DBPathMigrationManager.fmtExePath = `${resourcePath}/prisma-fmt-darwin`;
+      DBPathMigrationManager.queryExePath = `${resourcePath}/prisma/libquery_engine-darwin-arm64.dylib.node`;
     }
   }
 
   static async dbMigration() {
-    process.env.DATABASE_URL = `file:${DBManager.databaseFilePath}`;
+    process.env.DATABASE_URL = `file:${DBPathMigrationManager.databaseFilePath}`;
 
     /** !isUnPackaged */
-    if (DBManager.migrateExePath) {
+    if (DBPathMigrationManager.migrateExePath) {
       /** For migration, it also requires
        * 1. node_modules/@prisma/engines/dist !!!!!
        * 2. node_modules/@prisma/engines/package.json
@@ -102,19 +103,22 @@ export class DBManager {
        * but if it is outside /resources, not suitable for packaging
        */
 
-      process.env.PRISMA_MIGRATION_ENGINE_BINARY = DBManager.migrateExePath;
+      process.env.PRISMA_MIGRATION_ENGINE_BINARY =
+        DBPathMigrationManager.migrateExePath;
 
       process.env.PRISMA_INTROSPECTION_ENGINE_BINARY =
-        DBManager.introspectionExePath;
-      process.env.PRISMA_FMT_BINARY = DBManager.fmtExePath;
-      process.env.PRISMA_QUERY_ENGINE_BINARY = DBManager.queryExePath;
-      process.env.PRISMA_QUERY_ENGINE_LIBRARY = DBManager.queryExePath;
+        DBPathMigrationManager.introspectionExePath;
+      process.env.PRISMA_FMT_BINARY = DBPathMigrationManager.fmtExePath;
+      process.env.PRISMA_QUERY_ENGINE_BINARY =
+        DBPathMigrationManager.queryExePath;
+      process.env.PRISMA_QUERY_ENGINE_LIBRARY =
+        DBPathMigrationManager.queryExePath;
 
       /** NOTE: copy schema file to app.getPath('userData')
        * DBManager.schemaPath to schemeCopyPathInProd
        */
-      copyFileSync(DBManager.schemaPath, schemeCopyPathInProd);
-      DBManager.schemaPath = schemeCopyPathInProd;
+      copyFileSync(DBPathMigrationManager.schemaPath, schemeCopyPathInProd);
+      DBPathMigrationManager.schemaPath = schemeCopyPathInProd;
     }
 
     try {
@@ -123,18 +127,19 @@ export class DBManager {
         'dev',
         '--name',
         'init',
-        `--schema=${DBManager.schemaPath}`,
+        `--schema=${DBPathMigrationManager.schemaPath}`,
         '--skip-generate',
       );
     } catch (err) {
-      DBManager.migrateError = DBManager.migrateError + err;
+      DBPathMigrationManager.migrateError =
+        DBPathMigrationManager.migrateError + err;
 
       if (isDebug) {
         console.log({ err });
       }
     }
 
-    if (DBManager.migrateExePath) {
+    if (DBPathMigrationManager.migrateExePath) {
       /**
        * Preventive reset to avoid potential side effects.
        * No issues have been observed so far, and theoretically, not resetting should be fine.
@@ -169,22 +174,25 @@ export class DBManager {
   }
 
   static async doMigrationToVersion(ver: string) {
-    await DBManager.dbMigration();
-    DBManager.updateUsedVersion(ver);
+    await DBPathMigrationManager.dbMigration();
+    DBPathMigrationManager.updateUsedVersion(ver);
   }
 
   static async checkNeedMigration(): Promise<string> {
     this.initPath();
-    const dbVersion = DBManager.getUsedVersion();
+    const dbVersion = DBPathMigrationManager.getUsedVersion();
     const schemaPackageVersion = app.getVersion();
 
     if (isDebug) {
-      console.log('db databaseFilePath:', DBManager.databaseFilePath);
+      console.log(
+        'db databaseFilePath:',
+        DBPathMigrationManager.databaseFilePath,
+      );
     }
 
-    if (existsSync(DBManager.databaseFilePath)) {
+    if (existsSync(DBPathMigrationManager.databaseFilePath)) {
       if (dbVersion !== schemaPackageVersion) {
-        DBManager.needUpdate = true;
+        DBPathMigrationManager.needUpdate = true;
         return schemaPackageVersion;
       } else {
         if (isDebug) {
@@ -192,7 +200,7 @@ export class DBManager {
         }
       }
     } else {
-      DBManager.needUpdate = true;
+      DBPathMigrationManager.needUpdate = true;
       return schemaPackageVersion;
     }
   }
