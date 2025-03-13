@@ -6,7 +6,7 @@ export const mainConfig: Configuration = {
   // Add this for production builds
   mode: process.env.BUILD_TYPE === 'prod' ? 'production' : 'development',
   stats: {
-    errorDetails: true
+    errorDetails: true,
   },
   /**
    * This is the main entry point for your application, it's the first file
@@ -22,19 +22,14 @@ export const mainConfig: Configuration = {
     '@nestjs/websockets',
     '@nestjs/websockets/socket-module',
     '@nestjs/microservices/microservices-module',
-    'rxjs/add/observable/fromEvent',
-    'rxjs/Observable',
-    'swagger-ui-express',
-    'class-validator',
-    'class-transformer'
   ],
   resolve: {
     extensions: ['.js', '.ts', '.jsx', '.tsx', '.css', '.json'],
     fallback: {
       path: false,
       fs: false,
-      child_process: false
-    }
+      child_process: false,
+    },
   },
   // Node.js polyfills are no longer included by default in webpack 5
   target: 'electron-main',
