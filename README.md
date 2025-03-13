@@ -48,7 +48,7 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
 
 ## Dev and package Note
 
-- ~~`extension (for VS Code quick switcher feature)~~ which is for old version (master branch, not the current develop branch, and we have migrated the implemenation to use the vscode/cursor built-in sqlite instead)~~
+- (not needed anymore) `extension folder:` (for VS Code quick switcher feature) which is for old version (master branch, not the current develop branch, and we have migrated the implemenation to use the vscode/cursor built-in sqlite instead)~~
   - `yarn install`
   - either 
     - `F5 debug` for debugging or 
@@ -56,7 +56,7 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
       - install [vsce](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
       - `yarn make`, 
       - `yarn load` (first time) & `yarn reload` to install. 
-- electron (desktop app)
+- ~~electron (desktop app)~~ we have moved the electron stuff in the root level, do following in the `root folder`:
   - `yarn install`
   - DB setup 
     - For the first time or every time db scheme changes, execute `yarn db:migrate` to generate SQLite DB file (`./prisma/dev.db`) and generate TypeScript interface. `yarn db:view` can be used to view DB data.
