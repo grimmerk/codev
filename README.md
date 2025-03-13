@@ -48,7 +48,7 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
 
 ## Dev and package Note
 
-- extension (for VS Code quick switcher feature)
+- ~~`extension (for VS Code quick switcher feature)~~ which is for old version (master branch, not the current develop branch, and we have migrated the implemenation to use the vscode/cursor built-in sqlite instead)~~
   - `yarn install`
   - either 
     - `F5 debug` for debugging or 
