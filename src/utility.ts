@@ -14,7 +14,7 @@ export enum AIAssistantUIMode {
 
   // Chat interface with source code as first message, but no insight requested yet
   // User needs to ask a question first
-  INSIGHT_SOURCE_CHAT = 'insight_source_chat',
+  SELECTION_CHAT = 'selection_chat',
 
   // Smart chat interface with no code or insight
   SMART_CHAT = 'smart_chat',

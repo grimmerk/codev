@@ -362,16 +362,16 @@ const AIAssistantApp: React.FC = () => {
     if (inputRef.current) {
       inputRef.current.focus();
     }
-    
+
     // Add focus event listener to window to handle when app regains focus
     const handleWindowFocus = () => {
       if (inputRef.current) {
         inputRef.current.focus();
       }
     };
-    
+
     window.addEventListener('focus', handleWindowFocus);
-    
+
     // Clean up event listener on component unmount
     return () => {
       window.removeEventListener('focus', handleWindowFocus);
@@ -398,7 +398,7 @@ const AIAssistantApp: React.FC = () => {
   const uiModeRef = useRef(uiMode);
   useEffect(() => {
     uiModeRef.current = uiMode;
-    
+
     // Focus input whenever UI mode changes
     if (inputRef.current) {
       setTimeout(() => {
@@ -780,7 +780,7 @@ const AIAssistantApp: React.FC = () => {
   ) => {
     setIsLoading(false);
     setIsComplete(true);
-    
+
     // Focus input after insight is complete
     setTimeout(() => {
       if (inputRef.current) {
@@ -877,8 +877,8 @@ const AIAssistantApp: React.FC = () => {
     // Get the code from the data if provided, or use current code state
     const codeToUse = data?.code || codeRef.current;
 
-    // Switch to INSIGHT_SOURCE_CHAT mode (chat with code as first message, but no LLM request yet)
-    setUIMode(AIAssistantUIMode.INSIGHT_SOURCE_CHAT);
+    // Switch to SELECTION_CHAT mode (chat with code as first message, but no LLM request yet)
+    setUIMode(AIAssistantUIMode.SELECTION_CHAT);
     setShowChat(true); // For backward compatibility
 
     // Initialize chat with code as first message
@@ -902,7 +902,7 @@ const AIAssistantApp: React.FC = () => {
       setCurrentConversationId('');
 
       // The first message will initialize the conversation properly when sent
-      // with additionalContext including the sourceCode and INSIGHT_SOURCE_CHAT mode
+      // with additionalContext including the sourceCode and SELECTION_CHAT mode
     }
   };
 
@@ -925,8 +925,8 @@ const AIAssistantApp: React.FC = () => {
         case AIAssistantUIMode.INSIGHT_CHAT:
           aiAssistantMode = AIAssistantUIMode.INSIGHT_CHAT;
           break;
-        case AIAssistantUIMode.INSIGHT_SOURCE_CHAT:
-          aiAssistantMode = AIAssistantUIMode.INSIGHT_SOURCE_CHAT;
+        case AIAssistantUIMode.SELECTION_CHAT:
+          aiAssistantMode = AIAssistantUIMode.SELECTION_CHAT;
           break;
         case AIAssistantUIMode.SMART_CHAT:
           aiAssistantMode = AIAssistantUIMode.SMART_CHAT;
@@ -944,8 +944,8 @@ const AIAssistantApp: React.FC = () => {
         case AIAssistantUIMode.INSIGHT_CHAT:
           aiAssistantMode = AIAssistantUIMode.INSIGHT_CHAT;
           break;
-        case AIAssistantUIMode.INSIGHT_SOURCE_CHAT:
-          aiAssistantMode = AIAssistantUIMode.INSIGHT_SOURCE_CHAT;
+        case AIAssistantUIMode.SELECTION_CHAT:
+          aiAssistantMode = AIAssistantUIMode.SELECTION_CHAT;
           break;
         case AIAssistantUIMode.SMART_CHAT:
           aiAssistantMode = AIAssistantUIMode.SMART_CHAT;
@@ -1068,7 +1068,7 @@ const AIAssistantApp: React.FC = () => {
         }
         break;
 
-      case AIAssistantUIMode.INSIGHT_SOURCE_CHAT:
+      case AIAssistantUIMode.SELECTION_CHAT:
         // Initialize with just the code
         if (data && data.code) {
           setCode(data.code);
@@ -1321,7 +1321,7 @@ const AIAssistantApp: React.FC = () => {
         // Update state with the conversation data
         setMessages(conversation.messages);
         setCurrentConversationId(conversation.id);
-        
+
         // Force focus on input after a short delay to ensure UI is updated
         setTimeout(() => {
           if (inputRef.current) {
@@ -1389,9 +1389,9 @@ const AIAssistantApp: React.FC = () => {
     // This ensures consistent behavior regardless of the current mode
     const wasInInsightMode =
       uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
-      uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT ||
+      uiMode === AIAssistantUIMode.SELECTION_CHAT ||
       uiMode === AIAssistantUIMode.INSIGHT_SPLIT;
-      
+
     // Force focus on input after a short delay to ensure UI is updated
     setTimeout(() => {
       if (inputRef.current) {
@@ -1805,7 +1805,7 @@ const AIAssistantApp: React.FC = () => {
         conversationId: currentConversationId,
         sourceCode:
           uiModeRef.current === AIAssistantUIMode.INSIGHT_CHAT ||
-          uiModeRef.current === AIAssistantUIMode.INSIGHT_SOURCE_CHAT ||
+          uiModeRef.current === AIAssistantUIMode.SELECTION_CHAT ||
           uiModeRef.current === AIAssistantUIMode.INSIGHT_SPLIT
             ? codeRef.current
             : undefined,
@@ -1854,9 +1854,9 @@ const AIAssistantApp: React.FC = () => {
       if (insight && insight.trim()) {
         handleSetUIMode(null, AIAssistantUIMode.INSIGHT_CHAT);
       }
-      // If we have code but no insight, switch to INSIGHT_SOURCE_CHAT
+      // If we have code but no insight, switch to SELECTION_CHAT
       else if (code && code.trim()) {
-        handleSetUIMode(null, AIAssistantUIMode.INSIGHT_SOURCE_CHAT, { code });
+        handleSetUIMode(null, AIAssistantUIMode.SELECTION_CHAT, { code });
       }
       // Otherwise switch to SMART_CHAT
       else {
@@ -1987,8 +1987,8 @@ const AIAssistantApp: React.FC = () => {
     title = 'Insight Split view';
   } else if (uiMode === AIAssistantUIMode.INSIGHT_CHAT) {
     title = 'Insight Chat';
-  } else if (uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT) {
-    title = 'Chat from Selection';
+  } else if (uiMode === AIAssistantUIMode.SELECTION_CHAT) {
+    title = 'Selection Chat';
   } else if (uiMode === AIAssistantUIMode.SMART_CHAT) {
     title = 'Smart Chat';
   }
@@ -2001,7 +2001,7 @@ const AIAssistantApp: React.FC = () => {
           {/* Conversation selector dropdown */}
           {(uiMode === AIAssistantUIMode.SMART_CHAT ||
             uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
-            uiMode === AIAssistantUIMode.INSIGHT_SOURCE_CHAT) && (
+            uiMode === AIAssistantUIMode.SELECTION_CHAT) && (
             <div style={styles.conversationSelector}>
               <button
                 style={styles.conversationButton}
