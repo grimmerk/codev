@@ -455,8 +455,7 @@ export class AnthropicService {
             additionalContext &&
             (additionalContext.sourceCode ||
               additionalContext.uiMode === AIAssistantUIMode.INSIGHT_CHAT ||
-              additionalContext.uiMode ===
-                AIAssistantUIMode.INSIGHT_SOURCE_CHAT ||
+              additionalContext.uiMode === AIAssistantUIMode.SELECTION_CHAT ||
               additionalContext.uiMode === AIAssistantUIMode.INSIGHT_SPLIT);
 
           // Get UI mode from context or default to SMART_CHAT
