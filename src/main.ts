@@ -8,7 +8,7 @@ import {
 } from 'electron';
 import settings from 'electron-settings';
 import { existsSync, readdirSync } from 'fs';
-import { DBManager } from './DBManager';
+import { DBPathMigrationManager } from './DBPathMigrationManager';
 import { isMAS, TrayGenerator } from './TrayGenerator';
 import { bootstrap } from './server/server';
 import { AIAssistantUIMode, isDebug } from './utility';
@@ -560,8 +560,8 @@ import anthropicService from './AnthropicService';
 const API_URL = 'http://localhost:55688';
 
 // Import the function to update IDE mode and IDE enum
-import { updateCurrentIDEMode } from './vscode-based-ide-utility';
 import { IDEMode } from './ide-enum';
+import { updateCurrentIDEMode } from './vscode-based-ide-utility';
 
 // Track user settings
 let userSettings = {
@@ -635,9 +635,8 @@ const loadUserSettings = async () => {
         if (settings) {
           userSettings.leftClickBehavior =
             settings.leftClickBehavior || 'switcher_window';
-          userSettings.preferredIDE = 
-            settings.preferredIDE || IDEMode.VSCode;
-            
+          userSettings.preferredIDE = settings.preferredIDE || IDEMode.VSCode;
+
           // Apply the IDE mode setting
           updateCurrentIDEMode(userSettings.preferredIDE);
         }
@@ -905,18 +904,21 @@ const trayToggleEvtHandler = async () => {
   // Call this after the initial window is created
   setTimeout(setupaiAssistantWindowRebuild, 2000);
 
-  DBManager.initPath();
+  DBPathMigrationManager.initPath();
   // console.log({
   //   node: process?.env?.NODE_ENV,
   //   DEBUG_PROD: process.env.DEBUG_PROD,
   //   isUnPackaged: isUnPackaged,
   // });
-  const needVer = await DBManager.checkNeedMigration();
+  const needVer = await DBPathMigrationManager.checkNeedMigration();
   if (needVer) {
-    await DBManager.doMigrationToVersion(needVer);
+    await DBPathMigrationManager.doMigrationToVersion(needVer);
   }
   if (isDebug) {
-    console.log('check db done. USE DBPATH:', DBManager.databaseFilePath);
+    console.log(
+      'check db done. USE DBPATH:',
+      DBPathMigrationManager.databaseFilePath,
+    );
   }
 
   if (isMAS()) {
@@ -927,8 +929,8 @@ const trayToggleEvtHandler = async () => {
       app.startAccessingSecurityScopedResource(securityBookmark);
     }
   }
-  process.env.DATABASE_URL = `file:${DBManager.databaseFilePath}`;
-  process.env.PRISMA_QUERY_ENGINE_LIBRARY = DBManager.queryExePath;
+  process.env.DATABASE_URL = `file:${DBPathMigrationManager.databaseFilePath}`;
+  process.env.PRISMA_QUERY_ENGINE_LIBRARY = DBPathMigrationManager.queryExePath;
   await bootstrap();
 
   // Load user settings
@@ -940,7 +942,7 @@ const trayToggleEvtHandler = async () => {
   } else {
     // title = `CodeV(cmd+ctrl+r/e)`;
     title = `CodeV`;
-    if (DBManager.needUpdate) {
+    if (DBPathMigrationManager.needUpdate) {
       title = `${title}${'u.'}`;
     }
   }
