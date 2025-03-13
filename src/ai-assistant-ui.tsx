@@ -377,6 +377,24 @@ const AIAssistantApp: React.FC = () => {
       window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
+  
+  // Add keyboard shortcut listener for Command+N to start new conversation
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Check for Command+N (metaKey is Command on Mac)
+      if (event.metaKey && event.key === 'n') {
+        event.preventDefault(); // Prevent default browser behavior
+        startNewConversation();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Clean up event listener on component unmount
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const [inputValue, setInputValue] = useState<string>('');
 
