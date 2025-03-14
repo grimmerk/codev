@@ -29,10 +29,4 @@ export const rendererConfig: Configuration = {
   output: {
     globalObject: 'globalThis',
   },
-  // Multiple entrypoints for different HTML pages
-  entry: {
-    switcher_window: './src/switcher-renderer.ts', // Updated to new file
-    ai_assistant_window: './src/ai-assistant-renderer.ts',
-    settings_window: './src/SettingsWindow.tsx',
-  },
 };
