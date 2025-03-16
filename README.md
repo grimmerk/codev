@@ -99,7 +99,7 @@ p.s. We had tried to use VS Code debugger setting for this, but it became invali
 4. Execute `sh ./sign.sh` to convert app to pkg.
 5. Submit to app store.
 
-### Server packaging takeway notes
+### Server packaging takeaway notes
 
 ref:
 
