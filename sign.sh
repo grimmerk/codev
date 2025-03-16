@@ -2,20 +2,20 @@
 #!/bin/bash
 
 echo "try to sign app"
-cp embedded.provisionprofile ./out/SwitchV-mas-arm64/SwitchV.app/Contents/embedded.provisionprofile
+cp embedded.provisionprofile ./out/CodeV-mas-arm64/CodeV.app/Contents/embedded.provisionprofile
 
 
 ## step1: add ElectronTeamID in INfo.plist 
 # https://www.electronjs.org/docs/latest/tutorial/mac-app-store-submission-guide#extra-steps-without-electron-osx-sign
-plutil -replace ElectronTeamID -string "GL35G6YCWG" ./out/SwitchV-mas-arm64/SwitchV.app/Contents/Info.plist
+plutil -replace ElectronTeamID -string "GL35G6YCWG" ./out/CodeV-mas-arm64/CodeV.app/Contents/Info.plist
 
 
 ## step2: sign the app 
 # http://jay0lu.github.io/2017/10/11/electron-mac-app-release.html
 # Name of your app.
-APP="SwitchV"
+APP="CodeV"
 # The path of your app to sign.
-APP_PATH="./out/SwitchV-mas-arm64/SwitchV.app"
+APP_PATH="./out/CodeV-mas-arm64/CodeV.app"
 # The path to the location you want to put the signed package.
 RESULT_PATH="./out/$APP.pkg"
 

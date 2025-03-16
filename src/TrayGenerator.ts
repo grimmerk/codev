@@ -126,9 +126,9 @@ export class TrayGenerator {
     let info = '';
     if (!isMasStr) {
       info = `${isMasStr};db:${DBPathMigrationManager.databaseFilePath};schema:${DBPathMigrationManager.schemaPath};server:${DBPathMigrationManager.serverFolderPath};prismaPath:${DBPathMigrationManager.prismaPath};appPath:${appPath};info.${error}`;
-      info = `XWin app.i:${info}`;
+      info = `CodeV app.i:${info}`;
     } else {
-      info = 'SwitchV';
+      info = 'CodeV';
     }
 
     this.tray = new Tray(icon);
