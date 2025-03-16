@@ -46,7 +46,7 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
 - Explanations/Insights are streamed in real-time for a better user experience.
 - The UI is a semi-transparent floating window that can be closed when not needed.
 
-## Dev and package Note
+## Development
 
 - (not needed anymore) `extension folder:` (for VS Code quick switcher feature) which is for old version (main branch, not the current develop branch, and we have migrated the implemenation to use the vscode/cursor built-in sqlite instead)~~
   - `yarn install`
@@ -62,8 +62,6 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
     - For the first time or every time db scheme changes, execute `yarn db:migrate` to generate SQLite DB file (`./prisma/dev.db`) and generate TypeScript interface. `yarn db:view` can be used to view DB data.
       - `db:migrate` will also automatically do this part, `yarn install` will also include generated types in node_modules/.prisma/index.d.ts)
   - `yarn start` (not set VS Code debugging yet)
-  - package as mac app: `yarn make`. It (Electron part) is about 196MB. Then you can move/copy out/CodeV-darwin-arm64/CodeV.app to your application folder and use it daily.
-  - build MAC build (for app store): `yarn make_mas`. Then execute `sh ./sign.sh`.
 
 ### Setup of AI Assistant feature
 
@@ -87,12 +85,19 @@ Ref: https://www.electronjs.org/docs/latest/tutorial/application-debugging#rende
 
 p.s. We had tried to use VS Code debugger setting for this, but it became invalid after migrating to the new version of Electron.
 
-## Notes about packaging a macOS app
+## Packaging a macOS app
 
-Steps:
+### Packaging an app
 
-1. Follow [Prepare provisioning profile](https://www.electronjs.org/) section on https://www.electronjs.org/ to get `yourapp.provisionprofile` and download it as `electron/embedded.provisionprofile`.
-2. in electron, `yarn make` to generate out folder
+- package an mac app: `yarn make`. The app size is about 196MB. Then you can move/copy out/CodeV-darwin-arm64/CodeV.app to your application folder and use it daily.
+
+### Packaging an MAS built pkg for submitting to app sotre
+
+1. Follow [Prepare provisioning profile](https://www.electronjs.org/) section on https://www.electronjs.org/ to get `yourapp.provisionprofile` and save it to `embedded.provisionprofile` in root path.
+2. Prepare the deployment certificate, ref: https://www.electronjs.org/docs/latest/tutorial/code-signing#signing--notarizing-macos-builds
+3. Execute `yarn make_mas` to generate the app.
+4. Execute `sh ./sign.sh` to convert app to pkg.
+5. Submit to app store.
 
 ### Server packaging takeway notes
 
