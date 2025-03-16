@@ -58,11 +58,19 @@ const getWindowPosition = () => {
 // ref: https://blog.logrocket.com/building-a-menu-bar-application-with-electron-and-react/
 // NOTE: setVisibleOnAllWorkspaces is needed ?
 const showSwitcherWindow = () => {
+  let window = getSwitcherWindow();
+  
+  if (!window) {
+    // Recreate window if it has been destroyed
+    switcherWindow = createSwitcherWindow();
+    window = switcherWindow;
+  }
+  
   const position = getWindowPosition();
-  switcherWindow.setPosition(position.x, position.y, false);
-  switcherWindow.show();
+  window.setPosition(position.x, position.y, false);
+  window.show();
   // mainWindow.setVisibleOnAllWorkspaces(true);
-  switcherWindow.focus();
+  window.focus();
   // mainWindow.setVisibleOnAllWorkspaces(false);
 };
 
@@ -200,16 +208,28 @@ ipcMain.handle('search-conversations', async (_, searchTerm) => {
   }
 });
 
-const hideWindow = () => {
-  switcherWindow.hide();
+// Check if switcherWindow exists and is not destroyed
+const getSwitcherWindow = () => {
+  return switcherWindow && !switcherWindow.isDestroyed() ? switcherWindow : null;
+};
+
+// Hide the switcher window if it exists and is not destroyed
+const hideSwitcherWindow = () => {
+  const window = getSwitcherWindow();
+  if (window) {
+    window.hide();
+  }
 };
 
 const onBlur = (event: any) => {
-  hideWindow();
+  hideSwitcherWindow();
 };
 
 const onFocus = (event: any) => {
-  switcherWindow.webContents.send('window-focus');
+  const window = getSwitcherWindow();
+  if (window) {
+    window.webContents.send('window-focus');
+  }
 };
 
 const createAIAssistantWindow = (): BrowserWindow => {
@@ -446,14 +466,17 @@ ipcMain.on('invoke-vscode', (event, path: string, option: string) => {
       console.log('file not exist');
     }
     // send message to Electron, not really use now, just in case
-    switcherWindow.webContents.send('xwin-not-found');
-
-    dialog.showMessageBox(switcherWindow, {
+    const window = getSwitcherWindow();
+    if (window) {
+      window.webContents.send('xwin-not-found');
+      
+      dialog.showMessageBox(window, {
       message: 'Path is not a folder, neither workspace',
       buttons: ['OK'],
       defaultId: 0, // bound to buttons array
       cancelId: 1, // bound to buttons array
-    });
+      });
+    }
 
     return;
   }
@@ -462,16 +485,19 @@ ipcMain.on('invoke-vscode', (event, path: string, option: string) => {
 
   openVSCodeBasedIDE(path, ifForceReuseWin);
 
-  hideWindow();
+  hideSwitcherWindow();
 });
 
 ipcMain.on('pop-alert', (event, alert: string) => {
-  dialog.showMessageBox(switcherWindow, {
+  const window = getSwitcherWindow();
+  if (window) {
+    dialog.showMessageBox(window, {
     message: alert,
     buttons: ['OK'],
     defaultId: 0, // bound to buttons array
     cancelId: 1, // bound to buttons array
-  });
+    });
+  }
 });
 
 ipcMain.on('search-working-folder', (event, path: string) => {
@@ -519,11 +545,14 @@ ipcMain.on('search-working-folder', (event, path: string) => {
   // console.timeEnd('readdir');
   // console.log({ returnPathlist: returnPathlist.length });
 
-  switcherWindow.webContents.send('working-folder-iterated', returnPathlist);
+  const window = getSwitcherWindow();
+  if (window) {
+    window.webContents.send('working-folder-iterated', returnPathlist);
+  }
 });
 
 ipcMain.on('hide-app', (event) => {
-  hideWindow();
+  hideSwitcherWindow();
 });
 
 ipcMain.on('close-app-click', async (event) => {
@@ -596,17 +625,26 @@ ipcMain.on('open-folder-selector', async (event) => {
 
   const folderPath = filePaths[0];
 
-  switcherWindow.webContents.send('folder-selected', folderPath);
+  const window = getSwitcherWindow();
+  if (window) {
+    window.webContents.send('folder-selected', folderPath);
+  }
 });
 
 ipcMain.on('fetch-vscode-based-sqlite', async (event) => {
   const resp = readVSCodeBasedIDEState();
   // console.log('readVSCodeBasedIDEState done: sent it to ui: ', resp);
-  switcherWindow.webContents.send('vscode-based-sqlite-read', resp);
+  const window = getSwitcherWindow();
+  if (window) {
+    window.webContents.send('vscode-based-sqlite-read', resp);
+  }
 });
 ipcMain.on('delete-vscode-based-sqlite-record', async (event, path: string) => {
   deleteRecentProjectRecord(path);
-  switcherWindow.webContents.send('vscode-based-sqlite-record-deleted');
+  const window = getSwitcherWindow();
+  if (window) {
+    window.webContents.send('vscode-based-sqlite-record-deleted');
+  }
 });
 
 // Load settings from database with retry mechanism
@@ -786,16 +824,26 @@ const trayToggleEvtHandler = async () => {
       }
       switcherWindow = createSwitcherWindow();
       showSwitcherWindow();
-    } else if (switcherWindow && switcherWindow.isVisible()) {
-      if (isDebug) {
-        console.log('is visible, to hide');
+    } else {
+      const window = getSwitcherWindow();
+      
+      if (window && window.isVisible()) {
+        if (isDebug) {
+          console.log('is visible, to hide');
+        }
+        hideSwitcherWindow();
+      } else if (window) {
+        if (isDebug) {
+          console.log('is not visible, to show');
+        }
+        showSwitcherWindow();
+      } else {
+        if (isDebug) {
+          console.log('window was destroyed, creating new one');
+        }
+        switcherWindow = createSwitcherWindow();
+        showSwitcherWindow();
       }
-      hideWindow();
-    } else if (switcherWindow) {
-      if (isDebug) {
-        console.log('is not visible, to show');
-      }
-      showSwitcherWindow();
     }
   }
 };
@@ -962,16 +1010,26 @@ const trayToggleEvtHandler = async () => {
       }
       switcherWindow = createSwitcherWindow();
       showSwitcherWindow();
-    } else if (switcherWindow && switcherWindow.isVisible()) {
-      if (isDebug) {
-        console.log('Switcher window visible, hiding it');
+    } else {
+      const window = getSwitcherWindow();
+      
+      if (window && window.isVisible()) {
+        if (isDebug) {
+          console.log('Switcher window visible, hiding it');
+        }
+        hideSwitcherWindow();
+      } else if (window) {
+        if (isDebug) {
+          console.log('Switcher window exists but hidden, showing it');
+        }
+        showSwitcherWindow();
+      } else {
+        if (isDebug) {
+          console.log('Switcher window was destroyed, creating a new one');
+        }
+        switcherWindow = createSwitcherWindow();
+        showSwitcherWindow();
       }
-      hideWindow();
-    } else if (switcherWindow) {
-      if (isDebug) {
-        console.log('Switcher window exists but hidden, showing it');
-      }
-      showSwitcherWindow();
     }
   });
 

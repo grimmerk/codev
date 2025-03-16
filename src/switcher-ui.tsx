@@ -576,6 +576,10 @@ function SwitcherApp() {
         }}
         onChange={(evt: any) => {
           invokeVSCode(evt.value, optionPress.current);
+          /** in this case, when invokeVSCode triggers this ui to be hided,
+           * there will no keyup event triggered to reset optionPress.current,
+           * so we reset here */
+          optionPress.current = false;
         }}
         // Custom components
         components={{
