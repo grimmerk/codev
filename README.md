@@ -48,7 +48,7 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
 
 ## Development
 
-- (not needed anymore) `extension folder:` (for VS Code quick switcher feature) which is for old version (main branch, not the current develop branch, and we have migrated the implemenation to use the vscode/cursor built-in sqlite instead)~~
+- (not needed anymore) `extension folder:` (for VS Code quick switcher feature) which is for old version (main branch, not the current develop branch, and we have migrated the implementation to use the vscode/cursor built-in sqlite instead)~~
   - `yarn install`
   - either
     - `F5 debug` for debugging or
@@ -105,3 +105,11 @@ ref:
 
 1. https://github.com/prisma/prisma/issues/8449
 2. ~~https://github.com/vercel/pkg/issues/1508~~ (we had use vercel/pkg to package server but we have decided to embed server to electron)
+
+## Key development notes
+
+1. shared in the FOSSASIA 2025 summit talk https://slides.com/grimmer/fossasia-2025-switchv-streamlining-developer-workflow-with-an-open-source-vs-code-launcher
+2. On MacOS, the created Electron BrowserWindow object may be destroyed by the system automatically somehow due to the resource management (e.g. running in the background for a while and memory is tight), so we need to check if a windows `isDestroyed()` result when reusing them.
+3. React UI takeaway
+   1. Pay an attention to React closure trap. E.g. if we register some callback function in the `useEffect(()=>{ /*...*/}, []});`, it may always use some initial state value, even its implementation is outside this useEffect, the solution is to use the useRef version of that state.
+   2. Updating state may not take an effect immediately. If you have some logic which is checking the value as some condition, you may update `useRef` version of that state when you update the state.
