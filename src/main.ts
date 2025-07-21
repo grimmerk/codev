@@ -463,7 +463,7 @@ ipcMain.on('invoke-vscode', (event, path: string, option: string) => {
 
   if (!existsSync(path)) {
     if (isDebug) {
-      console.log('file not exist');
+      console.log('Path does not exist:', path);
     }
     // send message to Electron, not really use now, just in case
     const window = getSwitcherWindow();
@@ -471,7 +471,7 @@ ipcMain.on('invoke-vscode', (event, path: string, option: string) => {
       window.webContents.send('xwin-not-found');
       
       dialog.showMessageBox(window, {
-      message: 'Path is not a folder, neither workspace',
+      message: `Path does not exist: ${path}`,
       buttons: ['OK'],
       defaultId: 0, // bound to buttons array
       cancelId: 1, // bound to buttons array

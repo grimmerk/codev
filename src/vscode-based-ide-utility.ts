@@ -81,11 +81,11 @@ export const readVSCodeBasedIDEState = (): VSWindowModel[] => {
   // console.log('IDE state:', jsonData);
 
   if (jsonData.entries) {
-    // filter out fileUri one
+    // Include fileUri entries now for file history support
     // and limit to 100
     jsonData.entries = jsonData.entries
       .filter((entry: VSCodeBasedEntry) => {
-        return entry.folderUri || entry.workspace;
+        return entry.folderUri || entry.workspace || entry.fileUri;
       })
       .slice(0, 100);
   }
@@ -286,6 +286,10 @@ const convertVSCodeBasedSqliteToVSWindowModelArray = (
 
       path = entry.workspace.configPath.substring(7);
       isSpace = true;
+    } else if (entry.fileUri) {
+      // Handle file URIs for file history support
+      // Decode URI to handle spaces and special characters
+      path = decodeURIComponent(entry.fileUri.substring(7));
     }
 
     return {
