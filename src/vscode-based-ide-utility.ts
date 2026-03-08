@@ -81,13 +81,15 @@ export const readVSCodeBasedIDEState = (): VSWindowModel[] => {
   // console.log('IDE state:', jsonData);
 
   if (jsonData.entries) {
-    // Include fileUri entries now for file history support
-    // and limit to 100
-    jsonData.entries = jsonData.entries
-      .filter((entry: VSCodeBasedEntry) => {
-        return entry.folderUri || entry.workspace || entry.fileUri;
-      })
+    // Separate folders/workspaces and files to ensure file items
+    // are always included regardless of how many folders exist
+    const foldersAndWorkspaces = jsonData.entries
+      .filter((entry: VSCodeBasedEntry) => entry.folderUri || entry.workspace)
       .slice(0, 100);
+    const files = jsonData.entries
+      .filter((entry: VSCodeBasedEntry) => entry.fileUri)
+      .slice(0, 50);
+    jsonData.entries = [...foldersAndWorkspaces, ...files];
   }
 
   const resp = convertVSCodeBasedSqliteToVSWindowModelArray(jsonData);
