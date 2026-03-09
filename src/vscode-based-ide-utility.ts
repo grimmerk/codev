@@ -12,6 +12,9 @@ import {
 // Will be updated from settings
 let currentIDEMode = IDEMode.VSCode;
 
+// Override paths from security-scoped bookmarks (used in MAS sandbox)
+const ideDataOverridePaths: Record<string, string> = {};
+
 // Function to update the current IDE mode from settings
 export const updateCurrentIDEMode = (preferredIDE: string) => {
   if (preferredIDE === IDEMode.Cursor || preferredIDE === IDEMode.VSCode) {
@@ -19,7 +22,41 @@ export const updateCurrentIDEMode = (preferredIDE: string) => {
   }
 };
 
+/**
+ * Set an override path for IDE data access (from security-scoped bookmark).
+ * In MAS sandbox, os.homedir() may return a different path than what the
+ * bookmark grants access to. Using the actual selected path ensures access.
+ */
+export const updateIDEDataPath = (ideMode: string, folderPath: string) => {
+  ideDataOverridePaths[ideMode] = folderPath;
+  console.log(`updateIDEDataPath [${ideMode}]:`, folderPath);
+};
+
 export const VSCodeBasedIDEStateFilePath = () => {
+  // If we have an override path from security-scoped bookmark, use it.
+  // In MAS sandbox, os.homedir() may not match the bookmark-granted path.
+  const overridePath = ideDataOverridePaths[currentIDEMode];
+  if (overridePath) {
+    // The override path points to the selected folder (e.g. globalStorage or User).
+    // We need to find state.vscdb relative to it.
+    const directPath = path.join(overridePath, 'state.vscdb');
+    const nestedPath = path.join(overridePath, 'globalStorage', 'state.vscdb');
+    // Check if state.vscdb is directly in the folder or nested under globalStorage
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(directPath)) {
+        return directPath;
+      }
+      if (fs.existsSync(nestedPath)) {
+        return nestedPath;
+      }
+    } catch (e) {
+      console.error('Error checking override paths:', e);
+    }
+    // Fallback: assume it's directly in the folder
+    console.log('Override path set but state.vscdb not found at:', directPath, 'or', nestedPath);
+  }
+
   const homePath = os.homedir();
   if (currentIDEMode === IDEMode.VSCode) {
     const dbPath = path.join(
@@ -39,8 +76,11 @@ export const VSCodeBasedIDEStateFilePath = () => {
 };
 
 export const readVSCodeBasedIDEState = (): VSWindowModel[] => {
-  // console.log('readVSCodeBasedIDEState');
   const dbPath = VSCodeBasedIDEStateFilePath();
+  const fs = require('fs');
+  const fileExists = fs.existsSync(dbPath);
+  console.log('readVSCodeBasedIDEState, dbPath:', dbPath, 'exists:', fileExists, 'mode:', currentIDEMode,
+    'overridePath:', ideDataOverridePaths[currentIDEMode] || 'none');
 
   let jsonData: VSCodeBasedSqlite = {}; //VSWindowModel[] = []
 

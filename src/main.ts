@@ -16,6 +16,7 @@ import {
   deleteRecentProjectRecord,
   openVSCodeBasedIDE,
   readVSCodeBasedIDEState,
+  updateIDEDataPath,
 } from './vscode-based-ide-utility';
 
 import * as os from 'os';
@@ -635,11 +636,15 @@ ipcMain.on('open-folder-selector', async (event) => {
 });
 
 ipcMain.handle('check-ide-data-access', async (_event, ideMode: string) => {
-  const key = ideMode === 'Cursor'
+  const bookmarkKey = ideMode === 'Cursor'
     ? 'security-scoped-bookmark-ide-data-cursor'
     : 'security-scoped-bookmark-ide-data-vscode';
-  const bookmark = await settings.get(key);
-  return !!bookmark;
+  const pathKey = ideMode === 'Cursor'
+    ? 'ide-data-path-cursor'
+    : 'ide-data-path-vscode';
+  const bookmark = await settings.get(bookmarkKey);
+  const storedPath = await settings.get(pathKey);
+  return !!(bookmark || storedPath);
 });
 
 ipcMain.on('open-ide-data-selector', async (event, ideMode: string) => {
@@ -647,9 +652,12 @@ ipcMain.on('open-ide-data-selector', async (event, ideMode: string) => {
   const idePath = ideMode === 'Cursor'
     ? path.join(homePath, 'Library/Application Support/Cursor/User/globalStorage')
     : path.join(homePath, 'Library/Application Support/Code/User/globalStorage');
-  const key = ideMode === 'Cursor'
+  const bookmarkKey = ideMode === 'Cursor'
     ? 'security-scoped-bookmark-ide-data-cursor'
     : 'security-scoped-bookmark-ide-data-vscode';
+  const pathKey = ideMode === 'Cursor'
+    ? 'ide-data-path-cursor'
+    : 'ide-data-path-vscode';
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
     securityScopedBookmarks: true,
@@ -660,8 +668,12 @@ ipcMain.on('open-ide-data-selector', async (event, ideMode: string) => {
   if (canceled || filePaths.length === 0) {
     return;
   }
-  // Always store the granted state; only activate security-scoped resource in MAS
-  await settings.set(key, bookmarks?.[0] || 'granted');
+  console.log('IDE data selector result:', { filePaths, hasBookmarks: !!bookmarks?.length, ideMode });
+  // Store the bookmark and the actual selected path
+  await settings.set(bookmarkKey, bookmarks?.[0] || 'granted');
+  await settings.set(pathKey, filePaths[0]);
+  // Update the override path for reading SQLite
+  updateIDEDataPath(ideMode, filePaths[0]);
   if (isMAS() && bookmarks && bookmarks.length) {
     app.startAccessingSecurityScopedResource(bookmarks[0]);
   }
@@ -1014,10 +1026,19 @@ const trayToggleEvtHandler = async () => {
     if (securityBookmark) {
       app.startAccessingSecurityScopedResource(securityBookmark);
     }
-    for (const key of ['security-scoped-bookmark-ide-data-vscode', 'security-scoped-bookmark-ide-data-cursor']) {
-      const ideBookmark = (await settings.get(key)) as string;
+    const ideConfigs = [
+      { bookmarkKey: 'security-scoped-bookmark-ide-data-vscode', pathKey: 'ide-data-path-vscode', ideMode: 'VSCode' },
+      { bookmarkKey: 'security-scoped-bookmark-ide-data-cursor', pathKey: 'ide-data-path-cursor', ideMode: 'Cursor' },
+    ];
+    for (const { bookmarkKey, pathKey, ideMode } of ideConfigs) {
+      const ideBookmark = (await settings.get(bookmarkKey)) as string;
+      const idePath = (await settings.get(pathKey)) as string;
+      console.log(`IDE [${ideMode}] bookmark:`, ideBookmark ? 'found' : 'not found', 'path:', idePath || 'not set');
       if (ideBookmark && ideBookmark !== 'granted') {
         app.startAccessingSecurityScopedResource(ideBookmark);
+      }
+      if (idePath) {
+        updateIDEDataPath(ideMode, idePath);
       }
     }
   }
