@@ -92,9 +92,22 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
     type: 'success' | 'error';
   } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [ideDataAccessGranted, setIdeDataAccessGranted] = useState(false);
 
   useEffect(() => {
     fetchSettings();
+
+    (window as any).electronAPI.onIDEDataFolderSelected(
+      (_event: any, folderPath: string) => {
+        if (folderPath) {
+          setIdeDataAccessGranted(true);
+          setStatus({
+            message: 'Access granted! Recent projects from your IDE will now appear in the Quick Switcher.',
+            type: 'success',
+          });
+        }
+      },
+    );
   }, []);
 
   const fetchSettings = async () => {
@@ -121,6 +134,10 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleGrantAccess = () => {
+    (window as any).electronAPI.openIDEDataSelector(preferredIDE);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -166,6 +183,8 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
     );
   }
 
+  const ideName = preferredIDE === IDEMode.Cursor ? 'Cursor' : 'VS Code';
+
   return (
     <div style={styles.container}>
       <div style={styles.title}>IDE Preference Settings</div>
@@ -201,6 +220,33 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
             Use Cursor for the CodeV Quick Switcher. Opens Cursor when selecting
             a project.
           </div>
+        </div>
+
+        {/* IDE Recent Projects Access Section */}
+        <div style={{
+          padding: '12px',
+          backgroundColor: '#252525',
+          borderRadius: '4px',
+          marginBottom: '10px',
+        }}>
+          <div style={{ fontSize: '14px', fontWeight: 'bold' as 'bold', marginBottom: '8px' }}>
+            Recent Projects Access
+          </div>
+          <div style={{ fontSize: '12px', color: '#999', marginBottom: '12px' }}>
+            Grant access to {ideName}&apos;s data folder so CodeV can read your
+            recent projects list. A folder picker will open pre-navigated to the
+            correct location — just click &quot;Open&quot; to confirm.
+          </div>
+          <button
+            type="button"
+            onClick={handleGrantAccess}
+            style={{
+              ...styles.button,
+              backgroundColor: ideDataAccessGranted ? '#28a745' : '#00BCD4',
+            }}
+          >
+            {ideDataAccessGranted ? 'Access Granted' : `Grant Access to ${ideName} Data`}
+          </button>
         </div>
 
         <div style={styles.buttonContainer}>
