@@ -93,7 +93,7 @@ p.s. We had tried to use VS Code debugger setting for this, but it became invali
 
 ### Packaging an MAS built pkg for submitting to app sotre
 
-1. Follow [Prepare provisioning profile](https://www.electronjs.org/) section on https://www.electronjs.org/ to get `yourapp.provisionprofile` and save it to `embedded.provisionprofile` in root path.
+1. Follow [Prepare provisioning profile](https://www.electronjs.org/docs/latest/tutorial/mac-app-store-submission-guide#prepare-provisioning-profile) section on https://www.electronjs.org/ to get `yourapp.provisionprofile` and save it to `embedded.provisionprofile` in root path.
 2. Prepare the deployment certificate, ref: https://www.electronjs.org/docs/latest/tutorial/code-signing#signing--notarizing-macos-builds
 3. Execute `yarn make_mas` to generate the app.
 4. Execute `sh ./sign.sh` to convert app to pkg.
