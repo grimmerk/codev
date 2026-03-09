@@ -1,7 +1,7 @@
 {
   "name": "CodeV",
   "productName": "CodeV",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "description": "My Electron application description",
   "main": ".webpack/main",
   "scripts": {
