@@ -636,7 +636,7 @@ ipcMain.on('open-folder-selector', async (event) => {
 });
 
 ipcMain.on('ide-preference-changed', (_event, preferredIDE: string) => {
-  userSettings.preferredIDE = preferredIDE;
+  userSettings.preferredIDE = preferredIDE as IDEMode;
   updateCurrentIDEMode(preferredIDE);
   console.log('IDE preference updated to:', preferredIDE);
 });
