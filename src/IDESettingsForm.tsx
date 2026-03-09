@@ -96,7 +96,6 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
 
   useEffect(() => {
     fetchSettings();
-    checkExistingAccess();
 
     (window as any).electronAPI.onIDEDataFolderSelected(
       (_event: any, folderPath: string) => {
@@ -107,8 +106,12 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
     );
   }, []);
 
-  const checkExistingAccess = async () => {
-    const hasAccess = await (window as any).electronAPI.checkIDEDataAccess();
+  useEffect(() => {
+    checkExistingAccess(preferredIDE);
+  }, [preferredIDE]);
+
+  const checkExistingAccess = async (ide: string) => {
+    const hasAccess = await (window as any).electronAPI.checkIDEDataAccess(ide);
     setIdeDataAccessGranted(hasAccess);
   };
 
@@ -236,8 +239,8 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
           </div>
           <div style={{ fontSize: '12px', color: '#999', marginBottom: '12px' }}>
             Grant access to {ideName}&apos;s data folder so CodeV can read your
-            recent projects list. A folder picker will open pre-navigated to the
-            correct location — just click &quot;Open&quot; to confirm.
+            recent projects list. A folder picker will open at the correct folder —
+            just click &quot;Open&quot; directly without selecting any file or navigating elsewhere.
           </div>
           <button
             type="button"

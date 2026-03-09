@@ -634,8 +634,11 @@ ipcMain.on('open-folder-selector', async (event) => {
   }
 });
 
-ipcMain.handle('check-ide-data-access', async () => {
-  const bookmark = await settings.get('security-scoped-bookmark-ide-data');
+ipcMain.handle('check-ide-data-access', async (_event, ideMode: string) => {
+  const key = ideMode === 'Cursor'
+    ? 'security-scoped-bookmark-ide-data-cursor'
+    : 'security-scoped-bookmark-ide-data-vscode';
+  const bookmark = await settings.get(key);
   return !!bookmark;
 });
 
@@ -644,6 +647,9 @@ ipcMain.on('open-ide-data-selector', async (event, ideMode: string) => {
   const idePath = ideMode === 'Cursor'
     ? path.join(homePath, 'Library/Application Support/Cursor/User/globalStorage')
     : path.join(homePath, 'Library/Application Support/Code/User/globalStorage');
+  const key = ideMode === 'Cursor'
+    ? 'security-scoped-bookmark-ide-data-cursor'
+    : 'security-scoped-bookmark-ide-data-vscode';
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
     securityScopedBookmarks: true,
@@ -654,11 +660,10 @@ ipcMain.on('open-ide-data-selector', async (event, ideMode: string) => {
   if (canceled || filePaths.length === 0) {
     return;
   }
-  if (bookmarks && bookmarks.length) {
-    if (isMAS()) {
-      await settings.set('security-scoped-bookmark-ide-data', bookmarks[0]);
-      app.startAccessingSecurityScopedResource(bookmarks[0]);
-    }
+  // Always store the granted state; only activate security-scoped resource in MAS
+  await settings.set(key, bookmarks?.[0] || 'granted');
+  if (isMAS() && bookmarks && bookmarks.length) {
+    app.startAccessingSecurityScopedResource(bookmarks[0]);
   }
   // Notify the settings window that access was granted
   event.sender.send('ide-data-folder-selected', filePaths[0]);
@@ -1009,11 +1014,11 @@ const trayToggleEvtHandler = async () => {
     if (securityBookmark) {
       app.startAccessingSecurityScopedResource(securityBookmark);
     }
-    const ideDataBookmark = (await settings.get(
-      'security-scoped-bookmark-ide-data',
-    )) as string;
-    if (ideDataBookmark) {
-      app.startAccessingSecurityScopedResource(ideDataBookmark);
+    for (const key of ['security-scoped-bookmark-ide-data-vscode', 'security-scoped-bookmark-ide-data-cursor']) {
+      const ideBookmark = (await settings.get(key)) as string;
+      if (ideBookmark && ideBookmark !== 'granted') {
+        app.startAccessingSecurityScopedResource(ideBookmark);
+      }
     }
   }
   process.env.DATABASE_URL = `file:${DBPathMigrationManager.databaseFilePath}`;
