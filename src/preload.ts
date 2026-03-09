@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onIDEDataFolderSelected: (callback: any) =>
     ipcRenderer.on('ide-data-folder-selected', callback),
   checkIDEDataAccess: (ideMode: string) => ipcRenderer.invoke('check-ide-data-access', ideMode),
+  notifyIDEPreferenceChanged: (preferredIDE: string) => ipcRenderer.send('ide-preference-changed', preferredIDE),
 
   /** for reading VS Code built-in sqlite */
   fetchVSCodeBasedIDESqlite: () => ipcRenderer.send('fetch-vscode-based-sqlite'),

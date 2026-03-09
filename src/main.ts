@@ -635,6 +635,12 @@ ipcMain.on('open-folder-selector', async (event) => {
   }
 });
 
+ipcMain.on('ide-preference-changed', (_event, preferredIDE: string) => {
+  userSettings.preferredIDE = preferredIDE;
+  updateCurrentIDEMode(preferredIDE);
+  console.log('IDE preference updated to:', preferredIDE);
+});
+
 ipcMain.handle('check-ide-data-access', async (_event, ideMode: string) => {
   const bookmarkKey = ideMode === 'Cursor'
     ? 'security-scoped-bookmark-ide-data-cursor'

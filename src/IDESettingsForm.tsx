@@ -162,6 +162,8 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
       });
 
       if (response.ok) {
+        // Notify main process to apply IDE preference immediately
+        (window as any).electronAPI.notifyIDEPreferenceChanged(preferredIDE);
         setStatus({
           message: 'Settings saved successfully!',
           type: 'success',
@@ -293,7 +295,7 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
         border: '1px dashed #555',
         borderRadius: '4px',
       }}>
-        Note: Changes to IDE preference will take effect after restarting the application.
+        Note: Changes to IDE preference will take effect immediately after saving.
       </div>
     </div>
   );
