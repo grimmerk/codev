@@ -96,19 +96,21 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
 
   useEffect(() => {
     fetchSettings();
+    checkExistingAccess();
 
     (window as any).electronAPI.onIDEDataFolderSelected(
       (_event: any, folderPath: string) => {
         if (folderPath) {
           setIdeDataAccessGranted(true);
-          setStatus({
-            message: 'Access granted! Recent projects from your IDE will now appear in the Quick Switcher.',
-            type: 'success',
-          });
         }
       },
     );
   }, []);
+
+  const checkExistingAccess = async () => {
+    const hasAccess = await (window as any).electronAPI.checkIDEDataAccess();
+    setIdeDataAccessGranted(hasAccess);
+  };
 
   const fetchSettings = async () => {
     try {
@@ -245,7 +247,7 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
               backgroundColor: ideDataAccessGranted ? '#28a745' : '#00BCD4',
             }}
           >
-            {ideDataAccessGranted ? 'Access Granted' : `Grant Access to ${ideName} Data`}
+            {ideDataAccessGranted ? `${ideName} Access Granted` : `Grant Access to ${ideName} Data`}
           </button>
         </div>
 

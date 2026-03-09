@@ -634,6 +634,11 @@ ipcMain.on('open-folder-selector', async (event) => {
   }
 });
 
+ipcMain.handle('check-ide-data-access', async () => {
+  const bookmark = await settings.get('security-scoped-bookmark-ide-data');
+  return !!bookmark;
+});
+
 ipcMain.on('open-ide-data-selector', async (event, ideMode: string) => {
   const homePath = os.homedir();
   const idePath = ideMode === 'Cursor'
