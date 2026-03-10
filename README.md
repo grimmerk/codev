@@ -4,7 +4,7 @@ Use this to quickly open and switch VS Code/Cursor projects, and use AI assistan
 
 ## Features
 
-- use shortcut/tray (`Ctrl+Cmd+R`) menu to quickly launch a UI listing recent opened window with different project paths, then select one to open it in VS Code or Cursor.
+- use shortcut/tray (`Ctrl+Cmd+R`) menu to quickly launch a UI listing recent projects (folders, workspaces, and files), then select one to open it in VS Code or Cursor.
 - AI Assistant features. CodeV now includes a Code AI Assistant feature powered by Anthropic's Claude AI. This feature allows you to get detailed explanations of code snippets with a simple keyboard shortcut.
 
 ### AI Assistant feature
@@ -53,7 +53,7 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
   - DB setup
     - For the first time or every time db scheme changes, execute `yarn db:migrate` to generate SQLite DB file (`./prisma/dev.db`) and generate TypeScript interface. `yarn db:view` can be used to view DB data.
       - `db:migrate` will also automatically do this part, `yarn install` will also include generated types in node_modules/.prisma/index.d.ts)
-  - `yarn start` (not set VS Code debugging yet)
+  - `yarn start`
 
 ### Setup of AI Assistant feature
 
