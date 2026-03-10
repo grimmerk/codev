@@ -1,10 +1,10 @@
 # CodeV
 
-Use this to quickly open and switch VS Code projects, and use AI assistant to analyze your code and chat with it instantly.
+Use this to quickly open and switch VS Code/Cursor projects, and use AI assistant to analyze your code and chat with it instantly.
 
 ## Features
 
-- use shortcut/tray (`Ctrl+Cmd+R`) menu to quickly launch a UI listing recent opened window with different project paths, then select one to open it in VS Code.
+- use shortcut/tray (`Ctrl+Cmd+R`) menu to quickly launch a UI listing recent projects (folders, workspaces, and files), then select one to open it in VS Code or Cursor.
 - AI Assistant features. CodeV now includes a Code AI Assistant feature powered by Anthropic's Claude AI. This feature allows you to get detailed explanations of code snippets with a simple keyboard shortcut.
 
 ### AI Assistant feature
@@ -48,26 +48,18 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
 
 ## Development
 
-- (not needed anymore) `extension folder:` (for VS Code quick switcher feature) which is for old version (main branch, not the current develop branch, and we have migrated the implementation to use the vscode/cursor built-in sqlite instead)~~
-  - `yarn install`
-  - either
-    - `F5 debug` for debugging or
-    - built it and install it. Firstly
-      - install [vsce](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
-      - `yarn make`,
-      - `yarn load` (first time) & `yarn reload` to install.
-- ~~electron (desktop app)~~ we have moved the electron stuff in the root level, do following in the `root folder`:
+- Do the following in the `root folder`:
   - `yarn install`
   - DB setup
     - For the first time or every time db scheme changes, execute `yarn db:migrate` to generate SQLite DB file (`./prisma/dev.db`) and generate TypeScript interface. `yarn db:view` can be used to view DB data.
       - `db:migrate` will also automatically do this part, `yarn install` will also include generated types in node_modules/.prisma/index.d.ts)
-  - `yarn start` (not set VS Code debugging yet)
+  - `yarn start`
 
 ### Setup of AI Assistant feature
 
 1. Make sure you have an Anthropic API key. You can get one from [Anthropic's website](https://console.anthropic.com/).
 
-2. Set up your API key on the menu bar (-> Setting -> API key setting), or add your API key to the `.env` file in the `electron` directory:
+2. Set up your API key on the menu bar (-> Setting -> API key setting), or add your API key to the `.env` file in the root directory:
 
    ```
    ANTHROPIC_API_KEY=your_api_key_here
@@ -89,15 +81,16 @@ p.s. We had tried to use VS Code debugger setting for this, but it became invali
 
 ### Packaging an app
 
-- package an mac app: `yarn make`. The app size is about 196MB. Then you can move/copy out/CodeV-darwin-arm64/CodeV.app to your application folder and use it daily.
+- package a mac app: `yarn make`. Then you can move/copy out/CodeV-darwin-arm64/CodeV.app to your application folder and use it daily.
 
-### Packaging an MAS built pkg for submitting to app sotre
+### Packaging an MAS built pkg for submitting to App Store
 
 1. Follow [Prepare provisioning profile](https://www.electronjs.org/docs/latest/tutorial/mac-app-store-submission-guide#prepare-provisioning-profile) section on https://www.electronjs.org/ to get `yourapp.provisionprofile` and save it to `embedded.provisionprofile` in root path.
 2. Prepare the deployment certificate, ref: https://www.electronjs.org/docs/latest/tutorial/code-signing#signing--notarizing-macos-builds
 3. Execute `yarn make_mas` to generate the app.
 4. Execute `sh ./sign.sh` to convert app to pkg.
-5. Submit to app store.
+5. Use [Transporter](https://apps.apple.com/app/transporter/id1450874784) to upload the pkg to App Store Connect, then submit for review.
+6. Note: The MAS build runs in a sandbox. Users need to grant access to IDE data via IDE Settings → Grant Access so CodeV can read the recent projects list.
 
 ### Server packaging takeaway notes
 

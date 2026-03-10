@@ -92,10 +92,28 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
     type: 'success' | 'error';
   } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [ideDataAccessGranted, setIdeDataAccessGranted] = useState(false);
 
   useEffect(() => {
     fetchSettings();
+
+    (window as any).electronAPI.onIDEDataFolderSelected(
+      (_event: any, folderPath: string) => {
+        if (folderPath) {
+          setIdeDataAccessGranted(true);
+        }
+      },
+    );
   }, []);
+
+  useEffect(() => {
+    checkExistingAccess(preferredIDE);
+  }, [preferredIDE]);
+
+  const checkExistingAccess = async (ide: string) => {
+    const hasAccess = await (window as any).electronAPI.checkIDEDataAccess(ide);
+    setIdeDataAccessGranted(hasAccess);
+  };
 
   const fetchSettings = async () => {
     try {
@@ -123,6 +141,10 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
     }
   };
 
+  const handleGrantAccess = () => {
+    (window as any).electronAPI.openIDEDataSelector(preferredIDE);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -140,6 +162,8 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
       });
 
       if (response.ok) {
+        // Notify main process to apply IDE preference immediately
+        (window as any).electronAPI.notifyIDEPreferenceChanged(preferredIDE);
         setStatus({
           message: 'Settings saved successfully!',
           type: 'success',
@@ -165,6 +189,8 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
       </div>
     );
   }
+
+  const ideName = preferredIDE === IDEMode.Cursor ? 'Cursor' : 'VS Code';
 
   return (
     <div style={styles.container}>
@@ -201,6 +227,33 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
             Use Cursor for the CodeV Quick Switcher. Opens Cursor when selecting
             a project.
           </div>
+        </div>
+
+        {/* IDE Recent Projects Access Section */}
+        <div style={{
+          padding: '12px',
+          backgroundColor: '#252525',
+          borderRadius: '4px',
+          marginBottom: '10px',
+        }}>
+          <div style={{ fontSize: '14px', fontWeight: 'bold' as 'bold', marginBottom: '8px' }}>
+            Recent Projects Access
+          </div>
+          <div style={{ fontSize: '12px', color: '#999', marginBottom: '12px' }}>
+            Grant access to {ideName}&apos;s data folder so CodeV can read your
+            recent projects list. A folder picker will open at the correct folder —
+            just click &quot;Open&quot; directly without selecting any file or navigating elsewhere.
+          </div>
+          <button
+            type="button"
+            onClick={handleGrantAccess}
+            style={{
+              ...styles.button,
+              backgroundColor: ideDataAccessGranted ? '#28a745' : '#00BCD4',
+            }}
+          >
+            {ideDataAccessGranted ? `${ideName} Access Granted` : `Grant Access to ${ideName} Data`}
+          </button>
         </div>
 
         <div style={styles.buttonContainer}>
@@ -242,7 +295,7 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
         border: '1px dashed #555',
         borderRadius: '4px',
       }}>
-        Note: Changes to IDE preference will take effect after restarting the application.
+        Note: Changes to IDE preference will take effect immediately after saving.
       </div>
     </div>
   );

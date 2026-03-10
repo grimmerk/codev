@@ -2,7 +2,12 @@
 #!/bin/bash
 
 echo "try to sign app"
+
+## step0: remove quarantine attribute from all files in the app bundle
+xattr -cr ./out/CodeV-mas-arm64/CodeV.app
+
 cp embedded.provisionprofile ./out/CodeV-mas-arm64/CodeV.app/Contents/embedded.provisionprofile
+xattr -cr ./out/CodeV-mas-arm64/CodeV.app/Contents/embedded.provisionprofile
 
 
 ## step1: add ElectronTeamID in INfo.plist 
@@ -70,6 +75,7 @@ codesign -s "$APP_KEY" -f --entitlements "$CHILD_PLIST" "$APP_PATH/Contents/Reso
 codesign -s "$APP_KEY" -f --entitlements "$CHILD_PLIST" "$APP_PATH/Contents/Resources/prisma/build/index.js"
 codesign -s "$APP_KEY" -f --entitlements "$CHILD_PLIST" "$APP_PATH/Contents/Resources/prisma/libquery_engine-darwin-arm64.dylib.node"
 codesign -s "$APP_KEY" -f --entitlements "$CHILD_PLIST" "$APP_PATH/Contents/Resources/app/.webpack/main/native_modules/client/libquery_engine-darwin-arm64.dylib.node"
+codesign -s "$APP_KEY" -f --entitlements "$CHILD_PLIST" "$APP_PATH/Contents/Resources/app/.webpack/main/native_modules/build/Release/better_sqlite3.node"
 # codesign -s "$APP_KEY" -f --entitlements "$CHILD_PLIST" "$APP_PATH/Contents/Resources/prisma-fmt-darwin"
 # codesign -s "$APP_KEY" -f --entitlements "$CHILD_PLIST" "$APP_PATH/Contents/Resources/introspection-engine-darwin"
 
