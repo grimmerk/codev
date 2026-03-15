@@ -55,6 +55,26 @@ Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude 
       - `db:migrate` will also automatically do this part, `yarn install` will also include generated types in node_modules/.prisma/index.d.ts)
   - `yarn start`
 
+### SQLite database locations
+
+CodeV uses its own SQLite database (via Prisma) for storing user settings, AI assistant settings, and conversation history. Recent projects data is read directly from VS Code/Cursor's `state.vscdb`.
+
+- **Development:** `./prisma/dev.db`
+- **Production (non-MAS):** `~/Library/Application\ Support/CodeV/dev.db`
+- **Production (MAS sandbox):** `~/Library/Containers/com.lifeoverflow.switchv/Data/Library/Application\ Support/CodeV/dev.db`
+
+Note: paths with spaces require escaping with `\` in the terminal (e.g. `Application\ Support`).
+
+Database models and their current usage:
+
+| Model | Purpose | Status |
+|-------|---------|--------|
+| User | Stores `workingFolder` path | Active |
+| AIAssistantSettings | API key, custom prompt, IDE preference, left click behavior | Active |
+| Conversation | AI chat conversation history | Active |
+| Message | AI chat messages | Active |
+| VSWindow | Legacy — was used by the old VS Code extension to send window records via HTTP. No longer written to since migrating to reading VS Code/Cursor's `state.vscdb` directly. | Deprecated |
+
 ### Setup of AI Assistant feature
 
 1. Make sure you have an Anthropic API key. You can get one from [Anthropic's website](https://console.anthropic.com/).
