@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkIDEDataAccess: (ideMode: string) => ipcRenderer.invoke('check-ide-data-access', ideMode),
   notifyIDEPreferenceChanged: (preferredIDE: string) => ipcRenderer.send('ide-preference-changed', preferredIDE),
 
+  getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
+  setLoginItemSettings: (openAtLogin: boolean) => ipcRenderer.send('set-login-item-settings', openAtLogin),
+
   /** for reading VS Code built-in sqlite */
   fetchVSCodeBasedIDESqlite: () => ipcRenderer.send('fetch-vscode-based-sqlite'),
   onVSCodeBasedSqliteRead: (callback: any) =>

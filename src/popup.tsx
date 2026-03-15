@@ -2,7 +2,7 @@
 import Button from '@atlaskit/button';
 import Popup from '@atlaskit/popup';
 import { css } from '@emotion/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { closeAppClick, openFolderSelector } from './switcher-ui';
 
 // Brand color theme matching app.tsx
@@ -84,6 +84,20 @@ const PopupDefaultExample = ({
   openCallback?: any;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [launchAtLogin, setLaunchAtLogin] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      (window as any).electronAPI.getLoginItemSettings().then((settings: any) => {
+        setLaunchAtLogin(settings.openAtLogin);
+      });
+    }
+  }, [isOpen]);
+
+  const handleLaunchAtLoginChange = (checked: boolean) => {
+    setLaunchAtLogin(checked);
+    (window as any).electronAPI.setLoginItemSettings(checked);
+  };
 
   return (
     <Popup
@@ -195,6 +209,65 @@ const PopupDefaultExample = ({
                 Change Folder
               </Button>
             </div>
+          </div>
+
+          {/* Launch at Login Section */}
+          <div
+            style={{
+              padding: '0 20px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '15px',
+                color: THEME.text.primary,
+              }}
+            >
+              Launch at Login
+            </div>
+            <label
+              style={{
+                position: 'relative',
+                display: 'inline-block',
+                width: '44px',
+                height: '24px',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={launchAtLogin}
+                onChange={(e) => handleLaunchAtLoginChange(e.target.checked)}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: launchAtLogin ? THEME.primary : '#555',
+                  borderRadius: '12px',
+                  transition: 'background-color 0.2s',
+                }}
+              />
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '2px',
+                  left: launchAtLogin ? '22px' : '2px',
+                  width: '20px',
+                  height: '20px',
+                  backgroundColor: '#fff',
+                  borderRadius: '50%',
+                  transition: 'left 0.2s',
+                }}
+              />
+            </label>
           </div>
 
           {/* App Info and Quit Section */}
