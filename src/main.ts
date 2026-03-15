@@ -1392,8 +1392,17 @@ app.once('before-quit', () => {
   }
 });
 
-app.setLoginItemSettings({
-  openAtLogin: true,
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
+// Login item settings are now controlled by the user via Settings UI toggle
+ipcMain.handle('get-login-item-settings', () => {
+  return app.getLoginItemSettings();
+});
+
+ipcMain.on('set-login-item-settings', (_event, openAtLogin: boolean) => {
+  app.setLoginItemSettings({ openAtLogin });
 });
 
 app.dock.hide();
