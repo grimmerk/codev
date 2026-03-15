@@ -1392,6 +1392,10 @@ app.once('before-quit', () => {
   }
 });
 
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
 // Login item settings are now controlled by the user via Settings UI toggle
 ipcMain.handle('get-login-item-settings', () => {
   return app.getLoginItemSettings();

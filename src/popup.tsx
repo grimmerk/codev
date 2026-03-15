@@ -85,6 +85,13 @@ const PopupDefaultExample = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    (window as any).electronAPI.getAppVersion().then((version: string) => {
+      setAppVersion(version);
+    });
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -288,7 +295,7 @@ const PopupDefaultExample = ({
                 color: '#888',
               }}
             >
-              CodeV v1.0
+              CodeV v{appVersion}
             </div>
 
             <Button
