@@ -105,12 +105,23 @@ p.s. We had tried to use VS Code debugger setting for this, but it became invali
 
 ### Packaging an MAS built pkg for submitting to App Store
 
-1. Follow [Prepare provisioning profile](https://www.electronjs.org/docs/latest/tutorial/mac-app-store-submission-guide#prepare-provisioning-profile) section on https://www.electronjs.org/ to get `yourapp.provisionprofile` and save it to `embedded.provisionprofile` in root path.
-2. Prepare the deployment certificate, ref: https://www.electronjs.org/docs/latest/tutorial/code-signing#signing--notarizing-macos-builds
-3. Execute `yarn make_mas` to generate the app.
-4. Execute `sh ./sign.sh` to convert app to pkg.
-5. Use [Transporter](https://apps.apple.com/app/transporter/id1450874784) to upload the pkg to App Store Connect, then submit for review.
-6. Note: The MAS build runs in a sandbox. Users need to grant access to IDE data via IDE Settings → Grant Access so CodeV can read the recent projects list.
+#### Prerequisites: Certificates and Provisioning Profile
+
+1. **Create certificates** in Xcode → Settings → Accounts → Manage Certificates, or via [Apple Developer website](https://developer.apple.com/account/resources/certificates/list). You need:
+   - `Apple Distribution: Your Name (TEAM_ID)` — for signing the app
+   - `3rd Party Mac Developer Installer: Your Name (TEAM_ID)` — for signing the pkg
+2. **Download and import** the certificates: double-click the `.cer` files or use Keychain Access → File → Import Items.
+3. **Import the intermediate certificate**: If code signing fails with "valid signing identity not found", you may be missing the intermediate certificate. Download [Apple Worldwide Developer Relations Certification Authority](https://www.apple.com/certificateauthority/) and import it into Keychain Access (System keychain).
+4. **Create a provisioning profile** on the [Apple Developer website](https://developer.apple.com/account/resources/profiles/list) → Profiles → Mac App Store distribution. Select the App ID and distribution certificate. No device registration is needed for MAS profiles (that's only for iOS/Ad Hoc). Download and save as `embedded.provisionprofile` in the project root.
+
+Ref: [Electron MAS submission guide](https://www.electronjs.org/docs/latest/tutorial/mac-app-store-submission-guide#prepare-provisioning-profile), [Electron code signing](https://www.electronjs.org/docs/latest/tutorial/code-signing#signing--notarizing-macos-builds)
+
+#### Build and submit
+
+1. Execute `yarn make_mas` to generate the app.
+2. Execute `sh ./sign.sh` to convert app to pkg.
+3. Use [Transporter](https://apps.apple.com/app/transporter/id1450874784) to upload the pkg to App Store Connect, then submit for review.
+4. Note: The MAS build runs in a sandbox. Users need to grant access to IDE data via IDE Settings → Grant Access so CodeV can read the recent projects list.
 
 ### Server packaging takeaway notes
 
