@@ -95,7 +95,15 @@ echo "Signature verified OK"
 
 echo "=== Step 3: Creating DMG ==="
 rm -f "$DMG_PATH"
-hdiutil create -volname "$APP" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
+create-dmg \
+  --volname "$APP" \
+  --window-pos 200 120 \
+  --window-size 600 400 \
+  --icon-size 128 \
+  --icon "$APP.app" 150 185 \
+  --app-drop-link 450 185 \
+  "$DMG_PATH" \
+  "$APP_PATH"
 codesign -s "$SIGN_KEY" "$DMG_PATH"
 echo "DMG created at $DMG_PATH"
 
