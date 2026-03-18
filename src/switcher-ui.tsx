@@ -318,6 +318,7 @@ function SwitcherApp() {
   const [workingPathInfoArray, setWorkingPathInfoArray] = useState<string[]>(
     [],
   );
+  const [allSessions, setAllSessions] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(0);
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
@@ -337,11 +338,19 @@ function SwitcherApp() {
     fetchVSCodeBasedIDESqlite(); //retryFetchRecentProjectRecord();
   };
 
+  const filterSessionsLocally = (allItems: any[], query: string) => {
+    if (!query.trim()) return allItems;
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return allItems.filter((s) => {
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
+      return words.every((w: string) => searchTarget.includes(w));
+    });
+  };
+
   const fetchClaudeSessions = async () => {
     // Step 1: Show sessions immediately (fast, from cache)
-    console.time('getClaudeSessions');
     const result = await (window as any).electronAPI.getClaudeSessions(100);
-    console.timeEnd('getClaudeSessions');
+    setAllSessions(result || []);
     setSessions(result || []);
 
     // Step 2: Detect active sessions in background (slow, spawns processes)
@@ -677,22 +686,17 @@ function SwitcherApp() {
             <input
               ref={sessionSearchRef}
               value={sessionSearchValue}
-            onChange={async (e) => {
+            onChange={(e) => {
               const val = e.target.value;
               setSessionSearchValue(val);
-              if (val.trim()) {
-                const result = await (window as any).electronAPI.searchClaudeSessions(val);
-                setSessions(result || []);
-              } else {
-                fetchClaudeSessions();
-              }
+              setSessions(filterSessionsLocally(allSessions, val));
               setSelectedSessionIndex(0);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 if (sessionSearchValue) {
                   setSessionSearchValue('');
-                  fetchClaudeSessions();
+                  setSessions(allSessions);
                 } else {
                   hideApp();
                 }
