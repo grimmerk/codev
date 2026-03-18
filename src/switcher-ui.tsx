@@ -706,7 +706,7 @@ function SwitcherApp() {
               {sessions.length} sessions
             </span>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
             {sessions.length === 0 ? (
               <div style={{ color: THEME.text.secondary, textAlign: 'center', padding: '20px 0' }}>
                 {sessionSearchValue ? '⚠️ No matching sessions found' : '🤖 No Claude Code sessions found'}
@@ -732,7 +732,7 @@ function SwitcherApp() {
                   {/* Fixed-width dot container for alignment */}
                   <div style={{ width: '14px', flexShrink: 0, paddingTop: '4px' }}>
                     {session.isActive && (
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', display: 'inline-block' }} />
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#42A5F5', display: 'inline-block' }} />
                     )}
                   </div>
                   {/* Content area */}
