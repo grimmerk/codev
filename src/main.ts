@@ -1433,27 +1433,16 @@ ipcMain.on('set-session-display-mode', async (_event, mode: string) => {
 
 // Claude Code session handlers
 ipcMain.handle('get-claude-sessions', (_event, limit?: number) => {
-  const sessions = readClaudeSessions(limit);
-  const activeMap = detectActiveSessions();
-  sessions.forEach((s: any) => {
-    s.isActive = activeMap.has(s.sessionId);
-    if (s.isActive) {
-      s.activePid = activeMap.get(s.sessionId);
-    }
-  });
-  return sessions;
+  return readClaudeSessions(limit);
 });
 
 ipcMain.handle('search-claude-sessions', (_event, query: string) => {
-  const sessions = searchClaudeSessions(query);
+  return searchClaudeSessions(query);
+});
+
+ipcMain.handle('detect-active-sessions', () => {
   const activeMap = detectActiveSessions();
-  sessions.forEach((s: any) => {
-    s.isActive = activeMap.has(s.sessionId);
-    if (s.isActive) {
-      s.activePid = activeMap.get(s.sessionId);
-    }
-  });
-  return sessions;
+  return Object.fromEntries(activeMap);
 });
 
 ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number) => {
