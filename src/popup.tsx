@@ -345,9 +345,10 @@ const PopupDefaultExample = ({
             <select
               value={sessionDisplayMode}
               onChange={(e) => {
-                const mode = e.target.value;
-                setSessionDisplayMode(mode);
-                (window as any).electronAPI.setSessionDisplayMode(mode);
+                const val = e.target.value;
+                setSessionDisplayMode(val);
+                (window as any).electronAPI.setSessionDisplayMode(val);
+                if (saveCallback) saveCallback();
               }}
               style={{
                 backgroundColor: '#333',

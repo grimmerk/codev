@@ -614,7 +614,15 @@ function SwitcherApp() {
               Sessions
             </button>
           </div>
-          <PopupDefaultExample workingFolderPath={workingFolderPath} />
+          <PopupDefaultExample
+            workingFolderPath={workingFolderPath}
+            saveCallback={() => {
+              // Refresh display mode when settings change
+              (window as any).electronAPI.getSessionDisplayMode().then((m: string) => {
+                setSessionDisplayMode(m || 'first');
+              });
+            }}
+          />
         </div>
       </div>
 
