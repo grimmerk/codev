@@ -218,7 +218,7 @@ export const openSessionInITerm2 = (
   if (isActive && activePid) {
     // Try to switch to existing iTerm2 tab via tty matching
     const tmpScript = '/tmp/codev-iterm-switch.scpt';
-    const switchScript = `set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null || echo ''"
+    const switchScript = `set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
 if targetTty is not "" then
   tell application "iTerm2"
     activate
