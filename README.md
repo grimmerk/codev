@@ -123,6 +123,34 @@ Ref: [Electron MAS submission guide](https://www.electronjs.org/docs/latest/tuto
 3. Use [Transporter](https://apps.apple.com/app/transporter/id1450874784) to upload the pkg to App Store Connect, then submit for review.
 4. Note: The MAS build runs in a sandbox. Users need to grant access to IDE data via IDE Settings → Grant Access so CodeV can read the recent projects list.
 
+### Packaging for non-App Store distribution (with notarization)
+
+macOS 10.15+ requires notarization for apps distributed outside the App Store, otherwise Gatekeeper will block them.
+
+#### Prerequisites
+
+1. **Create a "Developer ID Application" certificate** on the [Apple Developer website](https://developer.apple.com/account/resources/certificates/list) → Certificates → + → Developer ID Application. Choose G2 Sub-CA. You'll need a CSR file (Keychain Access → Certificate Assistant → Request a Certificate From a Certificate Authority → Save to disk).
+2. **Import the certificate** and its intermediate cert. If codesign fails with "unable to build chain to self-signed root", download the [Developer ID G2 intermediate certificate](https://www.apple.com/certificateauthority/) (`DeveloperIDG2CA.cer`) and import it: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain DeveloperIDG2CA.cer`
+3. **Create an App-Specific Password** at [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → App-Specific Passwords. This is used by `notarytool`.
+4. **Set environment variables** in `.env`:
+   ```
+   APPLE_ID=your@email.com
+   APPLE_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+   APPLE_TEAM_ID=GL35G6YCWG
+   ```
+
+No provisioning profile is needed for non-MAS distribution.
+
+#### Build, sign, and notarize
+
+1. Execute `yarn make` to generate the app.
+2. Execute `sh ./sign-notarize.sh` — this will sign with Developer ID, create a DMG, submit for notarization (takes ~2-5 min), and staple the ticket.
+3. The output `./out/CodeV.dmg` is ready to distribute.
+
+Key differences from MAS build: uses Developer ID (not Apple Distribution) certificate, no sandbox, hardened runtime required, entitlements are in `notarize-parent.plist` (main app: hardened runtime + network + file access) / `notarize-child.plist` (helpers: hardened runtime only). Since there's no sandbox, using a single plist for both would also work, but we split them for consistency with the MAS build's `parent.plist` / `child.plist` pattern and to follow the principle of least privilege.
+
+Ref: [Electron code signing & notarization](https://www.electronjs.org/docs/latest/tutorial/code-signing#signing--notarizing-macos-builds)
+
 ### Server packaging takeaway notes
 
 ref:
