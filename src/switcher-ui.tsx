@@ -831,11 +831,14 @@ function SwitcherApp() {
                             />
                           </span>
                         )}
-                        {session.isActive && assistantResponses[session.sessionId] && (
-                          <span style={{ color: '#64B5F6', fontSize: '12px' }}>
-                            {'  ◀ '}{assistantResponses[session.sessionId].slice(0, 50)}
-                          </span>
-                        )}
+                      </div>
+                    )}
+                    {/* Line 3: Last assistant response (only for active sessions) */}
+                    {session.isActive && assistantResponses[session.sessionId] && (
+                      <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
+                        <span style={{ color: '#64B5F6', fontSize: '11px' }}>
+                          ◀ {assistantResponses[session.sessionId].slice(0, 80)}
+                        </span>
                       </div>
                     )}
                   </div>
