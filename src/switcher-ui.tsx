@@ -627,9 +627,10 @@ function SwitcherApp() {
 
       {mode === 'sessions' ? (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <input
-            ref={sessionSearchRef}
-            value={sessionSearchValue}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 15px 0' }}>
+            <input
+              ref={sessionSearchRef}
+              value={sessionSearchValue}
             onChange={async (e) => {
               const val = e.target.value;
               setSessionSearchValue(val);
@@ -660,19 +661,23 @@ function SwitcherApp() {
                 (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid);
               }
             }}
-            placeholder="Search sessions..."
-            autoFocus
-            style={{
-              backgroundColor: '#2d2d2d',
-              border: '1px solid #444',
-              borderRadius: '4px',
-              padding: '10px 12px',
-              margin: '10px 15px',
-              color: THEME.text.primary,
-              fontSize: '14px',
-              outline: 'none',
-            }}
-          />
+              placeholder="Search sessions..."
+              autoFocus
+              style={{
+                backgroundColor: '#2d2d2d',
+                border: '1px solid #444',
+                borderRadius: '4px',
+                padding: '10px 12px',
+                flex: 1,
+                color: THEME.text.primary,
+                fontSize: '14px',
+                outline: 'none',
+              }}
+            />
+            <span style={{ color: THEME.text.secondary, fontSize: '12px', whiteSpace: 'nowrap' }}>
+              {sessions.length} sessions
+            </span>
+          </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
             {sessions.length === 0 ? (
               <div style={{ color: THEME.text.secondary, textAlign: 'center', padding: '20px 0' }}>
