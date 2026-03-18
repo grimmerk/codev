@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSessionTerminalMode: (mode: string) => ipcRenderer.send('set-session-terminal-mode', mode),
   getSessionDisplayMode: () => ipcRenderer.invoke('get-session-display-mode'),
   setSessionDisplayMode: (mode: string) => ipcRenderer.send('set-session-display-mode', mode),
+  getDefaultSwitcherMode: () => ipcRenderer.invoke('get-default-switcher-mode'),
+  setDefaultSwitcherMode: (mode: string) => ipcRenderer.send('set-default-switcher-mode', mode),
   getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
   setLoginItemSettings: (openAtLogin: boolean) => ipcRenderer.send('set-login-item-settings', openAtLogin),
 

@@ -470,6 +470,15 @@ function SwitcherApp() {
     fetchRecentProjectRecord();
     fetchWorkingFolderAndUpdate();
 
+    // Load default switcher mode
+    (window as any).electronAPI.getDefaultSwitcherMode().then((defaultMode: string) => {
+      if (defaultMode === 'sessions') {
+        modeRef.current = 'sessions';
+        setMode('sessions');
+        fetchClaudeSessions();
+      }
+    });
+
     // Don't forget to clean up
     return function cleanup() {
       document.removeEventListener('keydown', handleKeyDown);

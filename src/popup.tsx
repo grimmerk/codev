@@ -88,6 +88,7 @@ const PopupDefaultExample = ({
   const [appVersion, setAppVersion] = useState('');
   const [sessionTerminalMode, setSessionTerminalMode] = useState('tab');
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
+  const [defaultSwitcherMode, setDefaultSwitcherMode] = useState('projects');
 
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
@@ -98,6 +99,9 @@ const PopupDefaultExample = ({
     });
     (window as any).electronAPI.getSessionDisplayMode().then((mode: string) => {
       setSessionDisplayMode(mode || 'first');
+    });
+    (window as any).electronAPI.getDefaultSwitcherMode().then((mode: string) => {
+      setDefaultSwitcherMode(mode || 'projects');
     });
   }, []);
 
@@ -283,6 +287,46 @@ const PopupDefaultExample = ({
                 }}
               />
             </label>
+          </div>
+
+          {/* Default Tab */}
+          <div
+            style={{
+              padding: '0 20px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '15px',
+                color: THEME.text.primary,
+              }}
+            >
+              Default Tab
+            </div>
+            <select
+              value={defaultSwitcherMode}
+              onChange={(e) => {
+                const mode = e.target.value;
+                setDefaultSwitcherMode(mode);
+                (window as any).electronAPI.setDefaultSwitcherMode(mode);
+              }}
+              style={{
+                backgroundColor: '#333',
+                color: THEME.text.primary,
+                border: '1px solid #555',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="projects">Projects</option>
+              <option value="sessions">Sessions</option>
+            </select>
           </div>
 
           {/* Session Terminal Mode */}

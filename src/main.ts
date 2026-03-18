@@ -1431,6 +1431,14 @@ ipcMain.on('set-session-display-mode', async (_event, mode: string) => {
   await settings.set('session-display-mode', mode);
 });
 
+ipcMain.handle('get-default-switcher-mode', async () => {
+  return (await settings.get('default-switcher-mode')) || 'projects';
+});
+
+ipcMain.on('set-default-switcher-mode', async (_event, mode: string) => {
+  await settings.set('default-switcher-mode', mode);
+});
+
 // Claude Code session handlers
 ipcMain.handle('get-claude-sessions', (_event, limit?: number) => {
   return readClaudeSessions(limit);
