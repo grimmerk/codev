@@ -80,7 +80,7 @@ const PopupDefaultExample = ({
   openCallback,
 }: {
   workingFolderPath?: string;
-  saveCallback?: any;
+  saveCallback?: (key: string, value: string) => void;
   openCallback?: any;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -348,7 +348,7 @@ const PopupDefaultExample = ({
                 const val = e.target.value;
                 setSessionDisplayMode(val);
                 (window as any).electronAPI.setSessionDisplayMode(val);
-                if (saveCallback) saveCallback();
+                if (saveCallback) saveCallback('sessionDisplayMode', val);
               }}
               style={{
                 backgroundColor: '#333',

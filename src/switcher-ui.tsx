@@ -616,11 +616,10 @@ function SwitcherApp() {
           </div>
           <PopupDefaultExample
             workingFolderPath={workingFolderPath}
-            saveCallback={() => {
-              // Refresh display mode when settings change
-              (window as any).electronAPI.getSessionDisplayMode().then((m: string) => {
-                setSessionDisplayMode(m || 'first');
-              });
+            saveCallback={(key: string, value: string) => {
+              if (key === 'sessionDisplayMode') {
+                setSessionDisplayMode(value);
+              }
             }}
           />
         </div>
@@ -717,10 +716,10 @@ function SwitcherApp() {
                         />
                       </span>
                       {(sessionDisplayMode === 'first' || sessionDisplayMode === 'both') && (
-                        <span style={{ color: THEME.text.secondary, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ color: '#b0b0b0', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           · <Highlighter
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
-                            textToHighlight={(session.firstUserMessage || '').slice(0, 60)}
+                            textToHighlight={(session.firstUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 40 : 60)}
                             highlightStyle={{
                               backgroundColor: 'rgba(0, 188, 212, 0.1)',
                               color: '#ccc',
@@ -730,23 +729,19 @@ function SwitcherApp() {
                           />
                         </span>
                       )}
-                      {sessionDisplayMode === 'last' && (
-                        <span style={{ color: THEME.text.secondary, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          · <Highlighter
+                      {(sessionDisplayMode === 'last' || sessionDisplayMode === 'both') && session.lastUserMessage && (sessionDisplayMode === 'last' || session.lastUserMessage !== session.firstUserMessage) && (
+                        <span style={{ color: '#e8a946', fontSize: sessionDisplayMode === 'both' ? '12px' : '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {sessionDisplayMode === 'both' ? ' → ' : '· '}
+                          <Highlighter
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
-                            textToHighlight={(session.lastUserMessage || '').slice(0, 60)}
+                            textToHighlight={(session.lastUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 30 : 60)}
                             highlightStyle={{
-                              backgroundColor: 'rgba(0, 188, 212, 0.1)',
-                              color: '#ccc',
+                              backgroundColor: 'rgba(232, 169, 70, 0.15)',
+                              color: '#e8a946',
                               padding: '0 2px',
                               borderRadius: '2px',
                             }}
                           />
-                        </span>
-                      )}
-                      {sessionDisplayMode === 'both' && session.lastUserMessage && session.lastUserMessage !== session.firstUserMessage && (
-                        <span style={{ color: '#888', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          ... {(session.lastUserMessage || '').slice(0, 40)}
                         </span>
                       )}
                     </div>
