@@ -733,6 +733,20 @@ function SwitcherApp() {
                   }
                   return next;
                 });
+              } else if (e.key === 'PageDown') {
+                e.preventDefault();
+                setSelectedSessionIndex((i) => {
+                  const next = Math.min(i + 5, sessions.length - 1);
+                  setTimeout(() => document.querySelector(`[data-session-index="${next}"]`)?.scrollIntoView({ block: 'nearest' }), 0);
+                  return next;
+                });
+              } else if (e.key === 'PageUp') {
+                e.preventDefault();
+                setSelectedSessionIndex((i) => {
+                  const next = Math.max(i - 5, 0);
+                  setTimeout(() => document.querySelector(`[data-session-index="${next}"]`)?.scrollIntoView({ block: 'nearest' }), 0);
+                  return next;
+                });
               } else if (e.key === 'Enter') {
                 const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
                 const s = sessions[idx];
