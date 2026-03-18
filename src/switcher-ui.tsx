@@ -719,10 +719,20 @@ function SwitcherApp() {
                 }
               } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                setSelectedSessionIndex((i) => Math.min(i + 1, sessions.length - 1));
+                setSelectedSessionIndex((i) => {
+                  const next = Math.min(i + 1, sessions.length - 1);
+                  setTimeout(() => document.querySelector(`[data-session-index="${next}"]`)?.scrollIntoView({ block: 'nearest' }), 0);
+                  return next;
+                });
               } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                setSelectedSessionIndex((i) => i <= 0 ? -1 : i - 1);
+                setSelectedSessionIndex((i) => {
+                  const next = i <= 0 ? -1 : i - 1;
+                  if (next >= 0) {
+                    setTimeout(() => document.querySelector(`[data-session-index="${next}"]`)?.scrollIntoView({ block: 'nearest' }), 0);
+                  }
+                  return next;
+                });
               } else if (e.key === 'Enter') {
                 const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
                 const s = sessions[idx];
@@ -757,6 +767,7 @@ function SwitcherApp() {
               sessions.map((session, index) => (
                 <div
                   key={session.sessionId}
+                  data-session-index={index}
                   onClick={() => {
                     (window as any).electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid);
                   }}
