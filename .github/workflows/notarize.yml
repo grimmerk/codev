@@ -49,7 +49,7 @@ jobs:
 
           # Import Developer ID G2 intermediate certificate
           curl -sO https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
-          security import DeveloperIDG2CA.cer -k $KEYCHAIN_PATH
+          security import DeveloperIDG2CA.cer -k $KEYCHAIN_PATH || true
           rm DeveloperIDG2CA.cer
 
       - name: Build app
