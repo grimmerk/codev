@@ -2,7 +2,7 @@
 # Sign and notarize CodeV for non-App Store distribution
 # Prerequisites:
 #   1. "Developer ID Application" certificate in Keychain
-#   2. .env file with APPLE_ID, APPLE_APP_PASSWORD, APPLE_TEAM_ID
+#   2. Environment variables or .env file: APPLE_ID, APPLE_APP_PASSWORD, APPLE_TEAM_ID
 
 set -e
 
@@ -12,7 +12,7 @@ if [ -f .env ]; then
 fi
 
 if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
-  echo "Error: Missing APPLE_ID, APPLE_APP_PASSWORD, or APPLE_TEAM_ID in .env"
+  echo "Error: Missing APPLE_ID, APPLE_APP_PASSWORD, or APPLE_TEAM_ID in environment or .env"
   exit 1
 fi
 
