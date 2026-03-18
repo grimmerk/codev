@@ -1,71 +1,105 @@
 /**
  * Claude Code session history reader
- * Reads session metadata from ~/.claude/cache/session-metadata.db
+ * Primary source: ~/.claude/history.jsonl (real-time, append-only log)
+ * Fallback enrichment: ~/.claude/cache/session-metadata.db (cached metadata)
  */
 
 import * as path from 'path';
 import * as os from 'os';
-
-// Use the same Database import pattern as vscode-based-ide-utility.ts
-const Database = require('better-sqlite3');
+import * as fs from 'fs';
 
 export interface ClaudeSession {
   sessionId: string;
   project: string;         // full path, e.g. /Users/grimmer/git/fred-ff
   projectName: string;     // folder name, e.g. fred-ff
   firstUserMessage: string;
-  firstTimestamp: string;
-  lastTimestamp: string;
+  lastTimestamp: number;    // unix ms
   messageCount: number;
-  totalTokens: number;
-  modelsUsed: string;
   isActive: boolean;       // whether a claude process is running for this session
 }
 
-const getSessionDbPath = (): string => {
-  return path.join(os.homedir(), '.claude', 'cache', 'session-metadata.db');
+interface HistoryLine {
+  sessionId?: string;
+  display?: string;
+  timestamp?: number;
+  project?: string;
+}
+
+interface SessionAccum {
+  sessionId: string;
+  project: string;
+  firstDisplay: string;
+  firstTimestamp: number;
+  lastTimestamp: number;
+  promptCount: number;
+}
+
+const getHistoryPath = (): string => {
+  return path.join(os.homedir(), '.claude', 'history.jsonl');
 };
 
 /**
- * Read Claude Code sessions from session-metadata.db
- * Sorted by last_timestamp descending (most recent first)
+ * Read Claude Code sessions from ~/.claude/history.jsonl
+ * Deduplicates by session ID, keeps first prompt display text,
+ * uses latest timestamp for sorting (newest first).
  */
 export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
-  const dbPath = getSessionDbPath();
+  const historyPath = getHistoryPath();
 
   try {
-    const fs = require('fs');
-    if (!fs.existsSync(dbPath)) {
-      console.log('Claude session DB not found:', dbPath);
+    if (!fs.existsSync(historyPath)) {
+      console.log('Claude history.jsonl not found:', historyPath);
       return [];
     }
 
-    const db = new Database(dbPath, { readonly: true });
+    const content = fs.readFileSync(historyPath, 'utf-8');
+    const bySession = new Map<string, SessionAccum>();
 
-    const rows = db
-      .prepare(
-        `SELECT session_id, project, first_user_message, first_timestamp,
-                last_timestamp, message_count, total_tokens, models_used
-         FROM session_metadata
-         ORDER BY last_timestamp DESC
-         LIMIT ?`
-      )
-      .all(limit);
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const raw: HistoryLine = JSON.parse(line);
+        if (!raw.sessionId) continue;
 
-    db.close();
+        const existing = bySession.get(raw.sessionId);
+        if (existing) {
+          existing.promptCount++;
+          if (raw.timestamp && raw.timestamp > existing.lastTimestamp) {
+            existing.lastTimestamp = raw.timestamp;
+          }
+          if (raw.timestamp && raw.timestamp < existing.firstTimestamp) {
+            existing.firstDisplay = raw.display || existing.firstDisplay;
+            existing.firstTimestamp = raw.timestamp;
+          }
+        } else {
+          bySession.set(raw.sessionId, {
+            sessionId: raw.sessionId,
+            project: raw.project || '',
+            firstDisplay: raw.display || '',
+            firstTimestamp: raw.timestamp || 0,
+            lastTimestamp: raw.timestamp || 0,
+            promptCount: 1,
+          });
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
 
-    return rows.map((row: any) => ({
-      sessionId: row.session_id,
-      project: row.project,
-      projectName: path.basename(row.project),
-      firstUserMessage: row.first_user_message || '',
-      firstTimestamp: row.first_timestamp || '',
-      lastTimestamp: row.last_timestamp || '',
-      messageCount: row.message_count || 0,
-      totalTokens: row.total_tokens || 0,
-      modelsUsed: row.models_used || '',
-      isActive: false, // will be set by detectActiveSessions
-    }));
+    const sessions = Array.from(bySession.values())
+      .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
+      .slice(0, limit)
+      .map((s) => ({
+        sessionId: s.sessionId,
+        project: s.project,
+        projectName: path.basename(s.project) || s.project,
+        firstUserMessage: s.firstDisplay,
+        lastTimestamp: s.lastTimestamp,
+        messageCount: s.promptCount,
+        isActive: false,
+      }));
+
+    return sessions;
   } catch (error) {
     console.error('Error reading Claude sessions:', error);
     return [];
@@ -73,50 +107,19 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
 };
 
 /**
- * Search Claude Code sessions using FTS5 index
+ * Search Claude Code sessions by project name or first message
  */
 export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[] => {
-  const dbPath = getSessionDbPath();
+  const allSessions = readClaudeSessions(500);
+  const lowerQuery = query.toLowerCase();
 
-  try {
-    const fs = require('fs');
-    if (!fs.existsSync(dbPath)) return [];
-
-    const db = new Database(dbPath, { readonly: true });
-
-    // FTS5 search on first_user_message
-    // Also search project name via LIKE
-    const rows = db
-      .prepare(
-        `SELECT session_id, project, first_user_message, first_timestamp,
-                last_timestamp, message_count, total_tokens, models_used
-         FROM session_metadata
-         WHERE session_id IN (
-           SELECT session_id FROM session_fts WHERE session_fts MATCH ?
-         ) OR project LIKE ?
-         ORDER BY last_timestamp DESC
-         LIMIT ?`
-      )
-      .all(query, `%${query}%`, limit);
-
-    db.close();
-
-    return rows.map((row: any) => ({
-      sessionId: row.session_id,
-      project: row.project,
-      projectName: path.basename(row.project),
-      firstUserMessage: row.first_user_message || '',
-      firstTimestamp: row.first_timestamp || '',
-      lastTimestamp: row.last_timestamp || '',
-      messageCount: row.message_count || 0,
-      totalTokens: row.total_tokens || 0,
-      modelsUsed: row.models_used || '',
-      isActive: false,
-    }));
-  } catch (error) {
-    console.error('Error searching Claude sessions:', error);
-    return [];
-  }
+  return allSessions
+    .filter((s) =>
+      s.projectName.toLowerCase().includes(lowerQuery) ||
+      s.firstUserMessage.toLowerCase().includes(lowerQuery) ||
+      s.project.toLowerCase().includes(lowerQuery)
+    )
+    .slice(0, limit);
 };
 
 /**
@@ -131,14 +134,13 @@ export const detectActiveSessions = (): Set<string> => {
     const output = execSync('pgrep -af "claude"', { encoding: 'utf-8', timeout: 3000 });
 
     for (const line of output.split('\n')) {
-      // Match --resume <session-id> pattern
       const match = line.match(/--resume\s+([a-f0-9-]{36})/);
       if (match) {
         activeIds.add(match[1]);
       }
     }
   } catch {
-    // pgrep returns exit code 1 if no matches, which is fine
+    // pgrep returns exit code 1 if no matches
   }
 
   return activeIds;
@@ -159,52 +161,54 @@ export const openSessionInITerm2 = (
 
   if (isActive && activePid) {
     // Try to switch to existing iTerm2 tab via tty matching
-    const switchScript = `
-      set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null || echo ''"
-      if targetTty is not "" then
-        tell application "iTerm2"
-          activate
-          repeat with w in windows
-            repeat with t in tabs of w
-              repeat with s in sessions of t
-                if tty of s ends with targetTty then
-                  select s
-                  select t
-                  set index of w to 1
-                  return "found"
-                end if
-              end repeat
-            end repeat
-          end repeat
-          return "not found"
-        end tell
-      else
-        tell application "iTerm2" to activate
-      end if
-    `;
-    exec(`osascript -e '${switchScript.replace(/'/g, "'\\''")}'`, (error: any) => {
+    const tmpScript = '/tmp/codev-iterm-switch.scpt';
+    const switchScript = `set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null || echo ''"
+if targetTty is not "" then
+  tell application "iTerm2"
+    activate
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with s in sessions of t
+          if tty of s ends with targetTty then
+            select s
+            select t
+            set index of w to 1
+            return "found"
+          end if
+        end repeat
+      end repeat
+    end repeat
+    return "not found"
+  end tell
+else
+  tell application "iTerm2" to activate
+end if`;
+    fs.writeFileSync(tmpScript, switchScript);
+    exec(`osascript ${tmpScript}`, (error: any) => {
       if (error) {
         console.error('Error switching to iTerm2 session:', error);
       }
+      try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
     // Open new tab and run claude --resume
     const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
-    const launchScript = `
-      tell application "iTerm2"
-        activate
-        tell current window
-          create tab with default profile
-          tell current session
-            write text "${command}"
-          end tell
-        end tell
-      end tell
-    `;
-    exec(`osascript -e '${launchScript.replace(/'/g, "'\\''")}'`, (error: any) => {
+    const tmpScript = '/tmp/codev-iterm-launch.scpt';
+    const launchScript = `tell application "iTerm2"
+  activate
+  tell current window
+    create tab with default profile
+    tell current session
+      write text "${command.replace(/"/g, '\\"')}"
+    end tell
+  end tell
+end tell`;
+    fs.writeFileSync(tmpScript, launchScript);
+    exec(`osascript ${tmpScript}`, (error: any) => {
       if (error) {
         console.error('Error launching iTerm2 session:', error);
       }
+      try { fs.unlinkSync(tmpScript); } catch {}
     });
   }
 };
