@@ -692,10 +692,28 @@ function SwitcherApp() {
                         <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', flexShrink: 0 }} />
                       )}
                       <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
-                        {session.projectName}
+                        <Highlighter
+                          searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                          textToHighlight={session.projectName}
+                          highlightStyle={{
+                            backgroundColor: 'rgba(0, 188, 212, 0.2)',
+                            color: '#fff',
+                            padding: '0 2px',
+                            borderRadius: '2px',
+                          }}
+                        />
                       </span>
                       <span style={{ color: THEME.text.secondary, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        · {(session.firstUserMessage || '').slice(0, 60)}
+                        · <Highlighter
+                          searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                          textToHighlight={(session.firstUserMessage || '').slice(0, 60)}
+                          highlightStyle={{
+                            backgroundColor: 'rgba(0, 188, 212, 0.1)',
+                            color: '#ccc',
+                            padding: '0 2px',
+                            borderRadius: '2px',
+                          }}
+                        />
                       </span>
                     </div>
                   </div>
