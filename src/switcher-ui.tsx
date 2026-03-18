@@ -720,10 +720,8 @@ function SwitcherApp() {
                   }}
                   style={{
                     display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '8px 10px',
-                    margin: '2px 0',
+                    padding: '6px 10px',
+                    margin: '1px 0',
                     borderRadius: '3px',
                     backgroundColor: index === selectedSessionIndex ? THEME.background.hover : 'transparent',
                     cursor: 'pointer',
@@ -731,47 +729,92 @@ function SwitcherApp() {
                   }}
                   onMouseEnter={() => setSelectedSessionIndex(index)}
                 >
-                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', maxWidth: '100%' }}>
-                      {session.isActive && (
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', flexShrink: 0, display: 'inline-block' }} />
-                      )}
-                      <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary, flexShrink: 0 }}>
-                        <Highlighter
-                          searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
-                          textToHighlight={session.projectName}
-                          highlightStyle={{
-                            backgroundColor: 'rgba(0, 188, 212, 0.2)',
-                            color: '#fff',
-                            padding: '0 2px',
-                            borderRadius: '2px',
-                          }}
-                        />
-                      </span>
-                      {customTitles[session.sessionId] && (
-                        <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500', flexShrink: 0 }}>
-                          · "{customTitles[session.sessionId].slice(0, 30)}"
-                        </span>
-                      )}
-                      {(sessionDisplayMode === 'first' || sessionDisplayMode === 'both') && (
-                        <span style={{ color: '#b0b0b0', fontSize: '13px' }}>
-                          · {(session.firstUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 30 : 50)}
-                        </span>
-                      )}
-                      {(sessionDisplayMode === 'last' || sessionDisplayMode === 'both') && session.lastUserMessage && (sessionDisplayMode === 'last' || session.lastUserMessage !== session.firstUserMessage) && (
-                        <span style={{ color: '#e8a946', fontSize: '12px' }}>
-                          {sessionDisplayMode === 'both' ? ' → ' : '· '}{(session.lastUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 25 : 50)}
-                        </span>
-                      )}
-                    </span>
+                  {/* Fixed-width dot container for alignment */}
+                  <div style={{ width: '14px', flexShrink: 0, paddingTop: '4px' }}>
+                    {session.isActive && (
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', display: 'inline-block' }} />
+                    )}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, marginLeft: '10px' }}>
-                    <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
-                      {session.messageCount} msgs
-                    </span>
-                    <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
-                      {formatRelativeTime(session.lastTimestamp)}
-                    </span>
+                  {/* Content area */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* Line 1: project name + custom title + metadata */}
+                    <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
+                          <Highlighter
+                            searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                            textToHighlight={session.projectName}
+                            highlightStyle={{
+                              backgroundColor: 'rgba(0, 188, 212, 0.2)',
+                              color: '#fff',
+                              padding: '0 2px',
+                              borderRadius: '2px',
+                            }}
+                          />
+                        </span>
+                        {customTitles[session.sessionId] && (
+                          <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
+                            {' '}· "{customTitles[session.sessionId].slice(0, 35)}"
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
+                        <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
+                          {session.messageCount} msgs
+                        </span>
+                        <span style={{ color: THEME.text.secondary, fontSize: '12px', minWidth: '50px', textAlign: 'right' }}>
+                          {formatRelativeTime(session.lastTimestamp)}
+                        </span>
+                      </div>
+                    </div>
+                    {/* Line 2: first/last prompt (smaller text, only if content exists) */}
+                    {(session.firstUserMessage || session.lastUserMessage) && (
+                      <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '2px' }}>
+                        {(sessionDisplayMode === 'first' || sessionDisplayMode === 'both') && session.firstUserMessage && (
+                          <span style={{ color: '#999', fontSize: '12px' }}>
+                            <Highlighter
+                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              textToHighlight={(session.firstUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 50 : 80)}
+                              highlightStyle={{
+                                backgroundColor: 'rgba(0, 188, 212, 0.1)',
+                                color: '#bbb',
+                                padding: '0 2px',
+                                borderRadius: '2px',
+                              }}
+                            />
+                          </span>
+                        )}
+                        {sessionDisplayMode === 'last' && session.lastUserMessage && (
+                          <span style={{ color: '#c89030', fontSize: '12px' }}>
+                            <Highlighter
+                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              textToHighlight={(session.lastUserMessage || '').slice(0, 80)}
+                              highlightStyle={{
+                                backgroundColor: 'rgba(232, 169, 70, 0.15)',
+                                color: '#e8a946',
+                                padding: '0 2px',
+                                borderRadius: '2px',
+                              }}
+                            />
+                          </span>
+                        )}
+                        {sessionDisplayMode === 'both' && session.lastUserMessage && session.lastUserMessage !== session.firstUserMessage && (
+                          <span style={{ color: '#c89030', fontSize: '12px' }}>
+                            {'  →  '}
+                            <Highlighter
+                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              textToHighlight={(session.lastUserMessage || '').slice(0, 40)}
+                              highlightStyle={{
+                                backgroundColor: 'rgba(232, 169, 70, 0.15)',
+                                color: '#e8a946',
+                                padding: '0 2px',
+                                borderRadius: '2px',
+                              }}
+                            />
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
