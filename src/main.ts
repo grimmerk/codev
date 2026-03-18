@@ -239,7 +239,7 @@ const onBlur = (event: any) => {
 };
 
 const onFocus = (event: any) => {
-  invalidateSessionCache();
+  // Don't invalidate session cache on every focus - cache has 5s TTL
   const window = getSwitcherWindow();
   if (window) {
     window.webContents.send('window-focus');
@@ -1440,8 +1440,8 @@ ipcMain.handle('search-claude-sessions', (_event, query: string) => {
   return searchClaudeSessions(query);
 });
 
-ipcMain.handle('detect-active-sessions', () => {
-  const activeMap = detectActiveSessions();
+ipcMain.handle('detect-active-sessions', async () => {
+  const activeMap = await detectActiveSessions();
   return Object.fromEntries(activeMap);
 });
 
@@ -1454,8 +1454,8 @@ ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPat
   copyResumeCommand(sessionId, projectPath);
 });
 
-ipcMain.handle('load-custom-titles', (_event, sessions: any[]) => {
-  const titleMap = loadCustomTitles(sessions);
+ipcMain.handle('load-custom-titles', async (_event, sessions: any[]) => {
+  const titleMap = await loadCustomTitles(sessions);
   return Object.fromEntries(titleMap);
 });
 

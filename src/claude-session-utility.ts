@@ -165,24 +165,29 @@ export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[]
  *    to find which project directory it's working in, then look up the latest
  *    session for that project from history.jsonl
  */
-export const detectActiveSessions = (): Map<string, number> => {
+export const detectActiveSessions = async (): Promise<Map<string, number>> => {
   const now = Date.now();
   if (cachedActiveMap && (now - activeCacheTimestamp) < ACTIVE_CACHE_TTL_MS) {
     return cachedActiveMap;
   }
 
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 3000 }, (err: any, stdout: string) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
   const activeMap = new Map<string, number>();
 
   try {
-    const { execSync } = require('child_process');
-    // Get all claude processes (filter out grep itself and non-CLI processes)
-    let output: string;
-    try {
-      output = execSync(
-        'ps aux | grep -E "[c]laude" | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory" | grep -v "node"',
-        { encoding: 'utf-8', timeout: 3000 }
-      );
-    } catch {
+    const output = await execPromise(
+      'ps aux | grep -E "[c]laude" | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory" | grep -v "node"'
+    );
+    if (!output) {
+      cachedActiveMap = activeMap;
+      activeCacheTimestamp = now;
       return activeMap;
     }
 
@@ -193,38 +198,27 @@ export const detectActiveSessions = (): Map<string, number> => {
       const pid = parseInt(parts[1], 10);
       if (!pid) continue;
 
-      // Try to extract session ID from --resume <id>
       const resumeMatch = line.match(/--resume\s+([a-f0-9-]{36})/);
       if (resumeMatch) {
         activeMap.set(resumeMatch[1], pid);
         continue;
       }
 
-      // Check if this is a claude -r or claude process (without explicit session ID)
       if (line.includes('claude')) {
-        // Try to find session ID by checking the process's working directory
-        // via lsof, then matching to latest session in history.jsonl
-        try {
-          const cwdOutput = execSync(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`, {
-            encoding: 'utf-8',
-            timeout: 2000,
-          });
-          const cwdMatch = cwdOutput.match(/^n(.+)$/m);
-          if (cwdMatch) {
-            const cwd = cwdMatch[1];
-            const allSessions = readClaudeSessions(500);
-            const match = allSessions.find((s) => s.project === cwd);
-            if (match) {
-              activeMap.set(match.sessionId, pid);
-            }
+        const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
+        const cwdMatch = cwdOutput.match(/^n(.+)$/m);
+        if (cwdMatch) {
+          const cwd = cwdMatch[1];
+          const allSessions = readClaudeSessions(500);
+          const match = allSessions.find((s) => s.project === cwd);
+          if (match) {
+            activeMap.set(match.sessionId, pid);
           }
-        } catch {
-          // lsof might fail, skip
         }
       }
     }
   } catch {
-    // ps/grep returns exit code 1 if no matches
+    // ignore
   }
 
   cachedActiveMap = activeMap;
@@ -313,40 +307,43 @@ end tell`;
  * Reads each session's JSONL file and greps for "custom-title" entries.
  * Returns a map of sessionId -> customTitle.
  */
-export const loadCustomTitles = (sessions: ClaudeSession[]): Map<string, string> => {
+export const loadCustomTitles = async (sessions: ClaudeSession[]): Promise<Map<string, string>> => {
   const now = Date.now();
   if (cachedCustomTitles && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
     return cachedCustomTitles;
   }
 
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 3000 }, (err: any, stdout: string) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
   const titles = new Map<string, string>();
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
-  for (const session of sessions) {
+  // Batch all greps in parallel
+  const promises = sessions.map(async (session) => {
     const encodedProject = session.project.replace(/\//g, '-');
     const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
 
-    try {
-      if (!fs.existsSync(jsonlPath)) continue;
+    if (!fs.existsSync(jsonlPath)) return;
 
-      // Use grep to find custom-title lines (much faster than reading entire file)
-      const { execSync } = require('child_process');
-      const output = execSync(
-        `grep "custom-title" "${jsonlPath}" 2>/dev/null | tail -1`,
-        { encoding: 'utf-8', timeout: 2000 }
-      );
-
-      if (output.trim()) {
+    const output = await execPromise(`grep "custom-title" "${jsonlPath}" 2>/dev/null | tail -1`);
+    if (output.trim()) {
+      try {
         const parsed = JSON.parse(output.trim());
         const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
         if (title) {
           titles.set(session.sessionId, title);
         }
-      }
-    } catch {
-      // skip files that can't be read or parsed
+      } catch {}
     }
-  }
+  });
+
+  await Promise.all(promises);
 
   cachedCustomTitles = titles;
   titlesCacheTimestamp = now;

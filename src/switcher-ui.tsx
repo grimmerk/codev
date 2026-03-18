@@ -338,11 +338,15 @@ function SwitcherApp() {
 
   const fetchClaudeSessions = async () => {
     // Step 1: Show sessions immediately (fast, from cache)
+    console.time('getClaudeSessions');
     const result = await (window as any).electronAPI.getClaudeSessions(100);
+    console.timeEnd('getClaudeSessions');
     setSessions(result || []);
 
     // Step 2: Detect active sessions in background (slow, spawns processes)
+    console.time('detectActiveSessions');
     (window as any).electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
+      console.timeEnd('detectActiveSessions');
       if (activeMap && Object.keys(activeMap).length > 0) {
         setSessions((prev: any[]) => prev.map((s) => ({
           ...s,
@@ -353,8 +357,10 @@ function SwitcherApp() {
     });
 
     // Step 3: Load custom titles in background (slow, grep files)
+    console.time('loadCustomTitles');
     if (result && result.length > 0) {
       (window as any).electronAPI.loadCustomTitles(result.slice(0, 100)).then((titles: Record<string, string>) => {
+        console.timeEnd('loadCustomTitles');
         if (titles && Object.keys(titles).length > 0) {
           setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...titles }));
         }
