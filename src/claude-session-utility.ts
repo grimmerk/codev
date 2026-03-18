@@ -149,7 +149,7 @@ export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[]
 
   return allSessions
     .filter((s) => {
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage}`.toLowerCase();
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage}`.toLowerCase();
       return words.every((word) => searchTarget.includes(word));
     })
     .slice(0, limit);
