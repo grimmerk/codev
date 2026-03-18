@@ -38,12 +38,26 @@ const getHistoryPath = (): string => {
   return path.join(os.homedir(), '.claude', 'history.jsonl');
 };
 
+// Cache for parsed sessions to avoid re-reading history.jsonl on every keystroke
+let cachedSessions: ClaudeSession[] | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL_MS = 5000; // refresh cache after 5 seconds
+
+export const invalidateSessionCache = () => {
+  cachedSessions = null;
+};
+
 /**
  * Read Claude Code sessions from ~/.claude/history.jsonl
  * Deduplicates by session ID, keeps first prompt display text,
  * uses latest timestamp for sorting (newest first).
  */
 export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
+  const now = Date.now();
+  if (cachedSessions && (now - cacheTimestamp) < CACHE_TTL_MS) {
+    return cachedSessions.slice(0, limit);
+  }
+
   const historyPath = getHistoryPath();
 
   try {
@@ -86,9 +100,8 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
       }
     }
 
-    const sessions = Array.from(bySession.values())
+    const allSessions = Array.from(bySession.values())
       .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
-      .slice(0, limit)
       .map((s) => ({
         sessionId: s.sessionId,
         project: s.project,
@@ -99,7 +112,9 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
         isActive: false,
       }));
 
-    return sessions;
+    cachedSessions = allSessions;
+    cacheTimestamp = now;
+    return allSessions.slice(0, limit);
   } catch (error) {
     console.error('Error reading Claude sessions:', error);
     return [];

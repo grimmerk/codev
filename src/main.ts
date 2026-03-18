@@ -18,6 +18,7 @@ import {
   detectActiveSessions,
   openSessionInITerm2,
   copyResumeCommand,
+  invalidateSessionCache,
 } from './claude-session-utility';
 import {
   deleteRecentProjectRecord,
@@ -237,6 +238,7 @@ const onBlur = (event: any) => {
 };
 
 const onFocus = (event: any) => {
+  invalidateSessionCache();
   const window = getSwitcherWindow();
   if (window) {
     window.webContents.send('window-focus');
