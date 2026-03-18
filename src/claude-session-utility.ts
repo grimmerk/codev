@@ -51,9 +51,14 @@ let cachedActiveMap: Map<string, number> | null = null;
 let activeCacheTimestamp = 0;
 const ACTIVE_CACHE_TTL_MS = 5000;
 
+// Cache for custom titles
+let cachedCustomTitles: Map<string, string> | null = null;
+let titlesCacheTimestamp = 0;
+
 export const invalidateSessionCache = () => {
   cachedSessions = null;
   cachedActiveMap = null;
+  cachedCustomTitles = null;
 };
 
 /**
@@ -309,6 +314,11 @@ end tell`;
  * Returns a map of sessionId -> customTitle.
  */
 export const loadCustomTitles = (sessions: ClaudeSession[]): Map<string, string> => {
+  const now = Date.now();
+  if (cachedCustomTitles && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
+    return cachedCustomTitles;
+  }
+
   const titles = new Map<string, string>();
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
@@ -338,6 +348,8 @@ export const loadCustomTitles = (sessions: ClaudeSession[]): Map<string, string>
     }
   }
 
+  cachedCustomTitles = titles;
+  titlesCacheTimestamp = now;
   return titles;
 };
 

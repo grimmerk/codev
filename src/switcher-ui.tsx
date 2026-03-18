@@ -341,7 +341,7 @@ function SwitcherApp() {
     setSessions(result || []);
     // Lazy load custom titles in background
     if (result && result.length > 0) {
-      const titles = await (window as any).electronAPI.loadCustomTitles(result.slice(0, 50));
+      const titles = await (window as any).electronAPI.loadCustomTitles(result.slice(0, 100));
       if (titles && Object.keys(titles).length > 0) {
         setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...titles }));
       }
@@ -711,12 +711,12 @@ function SwitcherApp() {
                   }}
                   onMouseEnter={() => setSelectedSessionIndex(index)}
                 >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', maxWidth: '100%' }}>
                       {session.isActive && (
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', flexShrink: 0 }} />
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', flexShrink: 0, display: 'inline-block' }} />
                       )}
-                      <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
+                      <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary, flexShrink: 0 }}>
                         <Highlighter
                           searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                           textToHighlight={session.projectName}
@@ -729,40 +729,21 @@ function SwitcherApp() {
                         />
                       </span>
                       {customTitles[session.sessionId] && (
-                        <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
-                          · "{customTitles[session.sessionId]}"
+                        <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500', flexShrink: 0 }}>
+                          · "{customTitles[session.sessionId].slice(0, 30)}"
                         </span>
                       )}
                       {(sessionDisplayMode === 'first' || sessionDisplayMode === 'both') && (
-                        <span style={{ color: '#b0b0b0', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          · <Highlighter
-                            searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
-                            textToHighlight={(session.firstUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 40 : 60)}
-                            highlightStyle={{
-                              backgroundColor: 'rgba(0, 188, 212, 0.1)',
-                              color: '#ccc',
-                              padding: '0 2px',
-                              borderRadius: '2px',
-                            }}
-                          />
+                        <span style={{ color: '#b0b0b0', fontSize: '13px' }}>
+                          · {(session.firstUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 30 : 50)}
                         </span>
                       )}
                       {(sessionDisplayMode === 'last' || sessionDisplayMode === 'both') && session.lastUserMessage && (sessionDisplayMode === 'last' || session.lastUserMessage !== session.firstUserMessage) && (
-                        <span style={{ color: '#e8a946', fontSize: sessionDisplayMode === 'both' ? '12px' : '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {sessionDisplayMode === 'both' ? ' → ' : '· '}
-                          <Highlighter
-                            searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
-                            textToHighlight={(session.lastUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 30 : 60)}
-                            highlightStyle={{
-                              backgroundColor: 'rgba(232, 169, 70, 0.15)',
-                              color: '#e8a946',
-                              padding: '0 2px',
-                              borderRadius: '2px',
-                            }}
-                          />
+                        <span style={{ color: '#e8a946', fontSize: '12px' }}>
+                          {sessionDisplayMode === 'both' ? ' → ' : '· '}{(session.lastUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 25 : 50)}
                         </span>
                       )}
-                    </div>
+                    </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, marginLeft: '10px' }}>
                     <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
