@@ -765,7 +765,7 @@ function SwitcherApp() {
                     padding: '6px 10px',
                     margin: '1px 0',
                     borderRadius: '3px',
-                    backgroundColor: index === selectedSessionIndex ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+                    backgroundColor: 'transparent',
                     borderLeft: index === selectedSessionIndex ? `3px solid ${THEME.primary}` : '3px solid transparent',
                     cursor: 'pointer',
                     transition: 'background-color 0.15s',
