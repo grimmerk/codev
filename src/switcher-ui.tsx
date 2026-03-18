@@ -731,6 +731,14 @@ function SwitcherApp() {
         placeholder="Search projects..."
         classNamePrefix="codev-select"
         onKeyDown={(evt) => {
+          if (evt.key === 'Tab') {
+            evt.preventDefault();
+            evt.stopPropagation();
+            modeRef.current = 'sessions';
+            setMode('sessions');
+            fetchClaudeSessions();
+            return;
+          }
           // here first, then handleKeyDown
           if (evt.key == 'Escape') {
             // this will prevent "handleKeyDown"
