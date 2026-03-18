@@ -13,9 +13,11 @@ export interface ClaudeSession {
   project: string;         // full path, e.g. /Users/grimmer/git/fred-ff
   projectName: string;     // folder name, e.g. fred-ff
   firstUserMessage: string;
+  lastUserMessage: string;
   lastTimestamp: number;    // unix ms
   messageCount: number;
   isActive: boolean;       // whether a claude process is running for this session
+  activePid?: number;
 }
 
 interface HistoryLine {
@@ -29,6 +31,7 @@ interface SessionAccum {
   sessionId: string;
   project: string;
   firstDisplay: string;
+  lastDisplay: string;
   firstTimestamp: number;
   lastTimestamp: number;
   promptCount: number;
@@ -86,6 +89,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
           existing.promptCount++;
           if (raw.timestamp && raw.timestamp > existing.lastTimestamp) {
             existing.lastTimestamp = raw.timestamp;
+            existing.lastDisplay = raw.display || existing.lastDisplay;
           }
           if (raw.timestamp && raw.timestamp < existing.firstTimestamp) {
             existing.firstDisplay = raw.display || existing.firstDisplay;
@@ -96,6 +100,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
             sessionId: raw.sessionId,
             project: raw.project || '',
             firstDisplay: raw.display || '',
+            lastDisplay: raw.display || '',
             firstTimestamp: raw.timestamp || 0,
             lastTimestamp: raw.timestamp || 0,
             promptCount: 1,
@@ -113,6 +118,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
         project: s.project,
         projectName: path.basename(s.project) || s.project,
         firstUserMessage: s.firstDisplay,
+        lastUserMessage: s.lastDisplay,
         lastTimestamp: s.lastTimestamp,
         messageCount: s.promptCount,
         isActive: false,

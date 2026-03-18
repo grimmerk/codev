@@ -87,6 +87,7 @@ const PopupDefaultExample = ({
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   const [sessionTerminalMode, setSessionTerminalMode] = useState('tab');
+  const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
 
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
@@ -94,6 +95,9 @@ const PopupDefaultExample = ({
     });
     (window as any).electronAPI.getSessionTerminalMode().then((mode: string) => {
       setSessionTerminalMode(mode || 'tab');
+    });
+    (window as any).electronAPI.getSessionDisplayMode().then((mode: string) => {
+      setSessionDisplayMode(mode || 'first');
     });
   }, []);
 
@@ -318,6 +322,47 @@ const PopupDefaultExample = ({
             >
               <option value="tab">New Tab</option>
               <option value="window">New Window</option>
+            </select>
+          </div>
+
+          {/* Session Display Mode */}
+          <div
+            style={{
+              padding: '0 20px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '15px',
+                color: THEME.text.primary,
+              }}
+            >
+              Session Preview
+            </div>
+            <select
+              value={sessionDisplayMode}
+              onChange={(e) => {
+                const mode = e.target.value;
+                setSessionDisplayMode(mode);
+                (window as any).electronAPI.setSessionDisplayMode(mode);
+              }}
+              style={{
+                backgroundColor: '#333',
+                color: THEME.text.primary,
+                border: '1px solid #555',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="first">First Prompt</option>
+              <option value="last">Last Prompt</option>
+              <option value="both">First + Last</option>
             </select>
           </div>
 

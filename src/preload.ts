@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getSessionTerminalMode: () => ipcRenderer.invoke('get-session-terminal-mode'),
   setSessionTerminalMode: (mode: string) => ipcRenderer.send('set-session-terminal-mode', mode),
+  getSessionDisplayMode: () => ipcRenderer.invoke('get-session-display-mode'),
+  setSessionDisplayMode: (mode: string) => ipcRenderer.send('set-session-display-mode', mode),
   getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
   setLoginItemSettings: (openAtLogin: boolean) => ipcRenderer.send('set-login-item-settings', openAtLogin),
 

@@ -1422,6 +1422,14 @@ ipcMain.on('set-session-terminal-mode', async (_event, mode: string) => {
   await settings.set('session-terminal-mode', mode);
 });
 
+ipcMain.handle('get-session-display-mode', async () => {
+  return (await settings.get('session-display-mode')) || 'first';
+});
+
+ipcMain.on('set-session-display-mode', async (_event, mode: string) => {
+  await settings.set('session-display-mode', mode);
+});
+
 // Claude Code session handlers
 ipcMain.handle('get-claude-sessions', (_event, limit?: number) => {
   const sessions = readClaudeSessions(limit);
