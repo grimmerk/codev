@@ -111,14 +111,14 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
  */
 export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[] => {
   const allSessions = readClaudeSessions(500);
-  const lowerQuery = query.toLowerCase();
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return allSessions.slice(0, limit);
 
   return allSessions
-    .filter((s) =>
-      s.projectName.toLowerCase().includes(lowerQuery) ||
-      s.firstUserMessage.toLowerCase().includes(lowerQuery) ||
-      s.project.toLowerCase().includes(lowerQuery)
-    )
+    .filter((s) => {
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage}`.toLowerCase();
+      return words.every((word) => searchTarget.includes(word));
+    })
     .slice(0, limit);
 };
 
