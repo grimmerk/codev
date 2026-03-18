@@ -348,20 +348,27 @@ function SwitcherApp() {
   };
 
   const fetchClaudeSessions = async () => {
-    // Step 1: Show sessions immediately (fast, from cache)
+    // Step 1: Show sessions immediately, preserve old active states (SWR)
     const result = await (window as any).electronAPI.getClaudeSessions(100);
-    setAllSessions(result || []);
-    setSessions(result || []);
+    const newSessions = (result || []).map((s: any) => {
+      const oldSession = allSessions.find((old: any) => old.sessionId === s.sessionId);
+      return oldSession ? { ...s, isActive: oldSession.isActive, activePid: oldSession.activePid } : s;
+    });
+    setAllSessions(newSessions);
+    setSessions(sessionSearchValue.trim() ? filterSessionsLocally(newSessions, sessionSearchValue) : newSessions);
 
     // Step 2: Detect active sessions in background (slow, spawns processes)
     (window as any).electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
       if (activeMap && Object.keys(activeMap).length > 0) {
-        const activeSessions = (result || []).filter((s: any) => s.sessionId in activeMap);
-        setSessions((prev: any[]) => prev.map((s) => ({
+        const updateActive = (list: any[]) => list.map((s) => ({
           ...s,
           isActive: s.sessionId in activeMap,
           activePid: activeMap[s.sessionId],
-        })));
+        }));
+        setAllSessions((prev: any[]) => updateActive(prev));
+        setSessions((prev: any[]) => updateActive(prev));
+
+        const activeSessions = (result || []).filter((s: any) => s.sessionId in activeMap);
 
         // Step 2b: Load last assistant responses for active sessions only
         if (activeSessions.length > 0) {
@@ -754,7 +761,7 @@ function SwitcherApp() {
                   {/* Fixed-width dot container for alignment */}
                   <div style={{ width: '14px', flexShrink: 0, paddingTop: '4px' }}>
                     {session.isActive && (
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#42A5F5', display: 'inline-block' }} />
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', display: 'inline-block' }} />
                     )}
                   </div>
                   {/* Content area */}
@@ -776,7 +783,16 @@ function SwitcherApp() {
                         </span>
                         {customTitles[session.sessionId] && (
                           <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
-                            {' '}· "{customTitles[session.sessionId].slice(0, 35)}"
+                            {' '}· "<Highlighter
+                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              textToHighlight={customTitles[session.sessionId].slice(0, 35)}
+                              highlightStyle={{
+                                backgroundColor: 'rgba(126, 200, 126, 0.2)',
+                                color: '#a0e8a0',
+                                padding: '0 2px',
+                                borderRadius: '2px',
+                              }}
+                            />"
                           </span>
                         )}
                       </div>
@@ -841,7 +857,16 @@ function SwitcherApp() {
                     {session.isActive && assistantResponses[session.sessionId] && (
                       <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
                         <span style={{ color: '#64B5F6', fontSize: '11px' }}>
-                          ◀ {assistantResponses[session.sessionId].slice(0, 80)}
+                          ◀ <Highlighter
+                            searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                            textToHighlight={assistantResponses[session.sessionId].slice(0, 80)}
+                            highlightStyle={{
+                              backgroundColor: 'rgba(100, 181, 246, 0.2)',
+                              color: '#90CAF9',
+                              padding: '0 2px',
+                              borderRadius: '2px',
+                            }}
+                          />
                         </span>
                       </div>
                     )}
