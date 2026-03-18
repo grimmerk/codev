@@ -361,8 +361,8 @@ const PopupDefaultExample = ({
                 outline: 'none',
               }}
             >
-              <option value="first">First Prompt</option>
-              <option value="last">Last Prompt</option>
+              <option value="first">First User Prompt</option>
+              <option value="last">Last User Prompt</option>
               <option value="both">First + Last</option>
             </select>
           </div>
