@@ -321,6 +321,7 @@ function SwitcherApp() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(0);
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
+  const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
 
   const updateWorkingPathUIAndList = async (path: string) => {
@@ -338,6 +339,13 @@ function SwitcherApp() {
   const fetchClaudeSessions = async () => {
     const result = await (window as any).electronAPI.getClaudeSessions(100);
     setSessions(result || []);
+    // Lazy load custom titles in background
+    if (result && result.length > 0) {
+      const titles = await (window as any).electronAPI.loadCustomTitles(result.slice(0, 50));
+      if (titles && Object.keys(titles).length > 0) {
+        setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...titles }));
+      }
+    }
   };
 
   const fetchWorkingFolderAndUpdate = async () => {
@@ -720,6 +728,11 @@ function SwitcherApp() {
                           }}
                         />
                       </span>
+                      {customTitles[session.sessionId] && (
+                        <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
+                          · "{customTitles[session.sessionId]}"
+                        </span>
+                      )}
                       {(sessionDisplayMode === 'first' || sessionDisplayMode === 'both') && (
                         <span style={{ color: '#b0b0b0', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           · <Highlighter

@@ -19,6 +19,7 @@ import {
   openSessionInITerm2,
   copyResumeCommand,
   invalidateSessionCache,
+  loadCustomTitles,
 } from './claude-session-utility';
 import {
   deleteRecentProjectRecord,
@@ -1462,6 +1463,11 @@ ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath:
 
 ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {
   copyResumeCommand(sessionId, projectPath);
+});
+
+ipcMain.handle('load-custom-titles', (_event, sessions: any[]) => {
+  const titleMap = loadCustomTitles(sessions);
+  return Object.fromEntries(titleMap);
 });
 
 app.dock.hide();

@@ -304,6 +304,44 @@ end tell`;
 };
 
 /**
+ * Load custom titles for a list of sessions.
+ * Reads each session's JSONL file and greps for "custom-title" entries.
+ * Returns a map of sessionId -> customTitle.
+ */
+export const loadCustomTitles = (sessions: ClaudeSession[]): Map<string, string> => {
+  const titles = new Map<string, string>();
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+
+  for (const session of sessions) {
+    const encodedProject = session.project.replace(/\//g, '-');
+    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+
+    try {
+      if (!fs.existsSync(jsonlPath)) continue;
+
+      // Use grep to find custom-title lines (much faster than reading entire file)
+      const { execSync } = require('child_process');
+      const output = execSync(
+        `grep "custom-title" "${jsonlPath}" 2>/dev/null | tail -1`,
+        { encoding: 'utf-8', timeout: 2000 }
+      );
+
+      if (output.trim()) {
+        const parsed = JSON.parse(output.trim());
+        const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
+        if (title) {
+          titles.set(session.sessionId, title);
+        }
+      }
+    } catch {
+      // skip files that can't be read or parsed
+    }
+  }
+
+  return titles;
+};
+
+/**
  * Copy resume command to clipboard (fallback for unsupported terminals)
  */
 export const copyResumeCommand = (sessionId: string, projectPath: string): string => {
