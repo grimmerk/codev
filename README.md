@@ -147,7 +147,7 @@ No provisioning profile is needed for non-MAS distribution.
 2. Execute `sh ./sign-notarize.sh` — this will sign with Developer ID, create a DMG, submit for notarization (takes ~2-5 min), and staple the ticket.
 3. The output `./out/CodeV.dmg` is ready to distribute.
 
-Key differences from MAS build: uses Developer ID (not Apple Distribution) certificate, no sandbox, hardened runtime required, entitlements are in `notarize-parent.plist` / `notarize-child.plist`.
+Key differences from MAS build: uses Developer ID (not Apple Distribution) certificate, no sandbox, hardened runtime required, entitlements are in `notarize-parent.plist` (main app: hardened runtime + network + file access) / `notarize-child.plist` (helpers: hardened runtime only). Since there's no sandbox, using a single plist for both would also work, but we split them for consistency with the MAS build's `parent.plist` / `child.plist` pattern and to follow the principle of least privilege.
 
 Ref: [Electron code signing & notarization](https://www.electronjs.org/docs/latest/tutorial/code-signing#signing--notarizing-macos-builds)
 
