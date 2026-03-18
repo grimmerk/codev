@@ -13,6 +13,16 @@ import { isMAS, TrayGenerator } from './TrayGenerator';
 import { bootstrap } from './server/server';
 import { AIAssistantUIMode, isDebug } from './utility';
 import {
+  readClaudeSessions,
+  searchClaudeSessions,
+  detectActiveSessions,
+  openSessionInITerm2,
+  copyResumeCommand,
+  invalidateSessionCache,
+  loadSessionEnrichment,
+  loadLastAssistantResponses,
+} from './claude-session-utility';
+import {
   deleteRecentProjectRecord,
   openVSCodeBasedIDE,
   readVSCodeBasedIDEState,
@@ -230,6 +240,7 @@ const onBlur = (event: any) => {
 };
 
 const onFocus = (event: any) => {
+  // Don't invalidate session cache on every focus - cache has 5s TTL
   const window = getSwitcherWindow();
   if (window) {
     window.webContents.send('window-focus');
@@ -1403,6 +1414,66 @@ ipcMain.handle('get-login-item-settings', () => {
 
 ipcMain.on('set-login-item-settings', (_event, openAtLogin: boolean) => {
   app.setLoginItemSettings({ openAtLogin });
+});
+
+ipcMain.handle('get-session-terminal-mode', async () => {
+  return (await settings.get('session-terminal-mode')) || 'tab';
+});
+
+ipcMain.on('set-session-terminal-mode', async (_event, mode: string) => {
+  await settings.set('session-terminal-mode', mode);
+});
+
+ipcMain.handle('get-session-display-mode', async () => {
+  return (await settings.get('session-display-mode')) || 'first';
+});
+
+ipcMain.on('set-session-display-mode', async (_event, mode: string) => {
+  await settings.set('session-display-mode', mode);
+});
+
+ipcMain.handle('get-default-switcher-mode', async () => {
+  return (await settings.get('default-switcher-mode')) || 'projects';
+});
+
+ipcMain.on('set-default-switcher-mode', async (_event, mode: string) => {
+  await settings.set('default-switcher-mode', mode);
+});
+
+// Claude Code session handlers
+ipcMain.handle('get-claude-sessions', (_event, limit?: number) => {
+  return readClaudeSessions(limit);
+});
+
+ipcMain.handle('search-claude-sessions', (_event, query: string) => {
+  return searchClaudeSessions(query);
+});
+
+ipcMain.handle('detect-active-sessions', async () => {
+  const activeMap = await detectActiveSessions();
+  return Object.fromEntries(activeMap);
+});
+
+ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number) => {
+  const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+  openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode);
+});
+
+ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {
+  copyResumeCommand(sessionId, projectPath);
+});
+
+ipcMain.handle('load-session-enrichment', async (_event, sessions: any[]) => {
+  const { titles, branches } = await loadSessionEnrichment(sessions);
+  return {
+    titles: Object.fromEntries(titles),
+    branches: Object.fromEntries(branches),
+  };
+});
+
+ipcMain.handle('load-last-assistant-responses', async (_event, sessions: any[]) => {
+  const responseMap = await loadLastAssistantResponses(sessions);
+  return Object.fromEntries(responseMap);
 });
 
 app.dock.hide();

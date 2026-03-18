@@ -80,16 +80,28 @@ const PopupDefaultExample = ({
   openCallback,
 }: {
   workingFolderPath?: string;
-  saveCallback?: any;
+  saveCallback?: (key: string, value: string) => void;
   openCallback?: any;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [appVersion, setAppVersion] = useState('');
+  const [sessionTerminalMode, setSessionTerminalMode] = useState('tab');
+  const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
+  const [defaultSwitcherMode, setDefaultSwitcherMode] = useState('projects');
 
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
       setAppVersion(version);
+    });
+    (window as any).electronAPI.getSessionTerminalMode().then((mode: string) => {
+      setSessionTerminalMode(mode || 'tab');
+    });
+    (window as any).electronAPI.getSessionDisplayMode().then((mode: string) => {
+      setSessionDisplayMode(mode || 'first');
+    });
+    (window as any).electronAPI.getDefaultSwitcherMode().then((mode: string) => {
+      setDefaultSwitcherMode(mode || 'projects');
     });
   }, []);
 
@@ -275,6 +287,128 @@ const PopupDefaultExample = ({
                 }}
               />
             </label>
+          </div>
+
+          {/* Default Tab */}
+          <div
+            style={{
+              padding: '0 20px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '15px',
+                color: THEME.text.primary,
+              }}
+            >
+              Default Tab
+            </div>
+            <select
+              value={defaultSwitcherMode}
+              onChange={(e) => {
+                const mode = e.target.value;
+                setDefaultSwitcherMode(mode);
+                (window as any).electronAPI.setDefaultSwitcherMode(mode);
+              }}
+              style={{
+                backgroundColor: '#333',
+                color: THEME.text.primary,
+                border: '1px solid #555',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="projects">Projects</option>
+              <option value="sessions">Sessions</option>
+            </select>
+          </div>
+
+          {/* Session Terminal Mode */}
+          <div
+            style={{
+              padding: '0 20px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '15px',
+                color: THEME.text.primary,
+              }}
+            >
+              Session Terminal
+            </div>
+            <select
+              value={sessionTerminalMode}
+              onChange={(e) => {
+                const mode = e.target.value;
+                setSessionTerminalMode(mode);
+                (window as any).electronAPI.setSessionTerminalMode(mode);
+              }}
+              style={{
+                backgroundColor: '#333',
+                color: THEME.text.primary,
+                border: '1px solid #555',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="tab">New Tab</option>
+              <option value="window">New Window</option>
+            </select>
+          </div>
+
+          {/* Session Display Mode */}
+          <div
+            style={{
+              padding: '0 20px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '15px',
+                color: THEME.text.primary,
+              }}
+            >
+              Session Preview
+            </div>
+            <select
+              value={sessionDisplayMode}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSessionDisplayMode(val);
+                (window as any).electronAPI.setSessionDisplayMode(val);
+                if (saveCallback) saveCallback('sessionDisplayMode', val);
+              }}
+              style={{
+                backgroundColor: '#333',
+                color: THEME.text.primary,
+                border: '1px solid #555',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="first">First User Prompt</option>
+              <option value="last">Last User Prompt</option>
+              <option value="both">First + Last</option>
+            </select>
           </div>
 
           {/* App Info and Quit Section */}

@@ -22,8 +22,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   notifyIDEPreferenceChanged: (preferredIDE: string) => ipcRenderer.send('ide-preference-changed', preferredIDE),
 
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getSessionTerminalMode: () => ipcRenderer.invoke('get-session-terminal-mode'),
+  setSessionTerminalMode: (mode: string) => ipcRenderer.send('set-session-terminal-mode', mode),
+  getSessionDisplayMode: () => ipcRenderer.invoke('get-session-display-mode'),
+  setSessionDisplayMode: (mode: string) => ipcRenderer.send('set-session-display-mode', mode),
+  getDefaultSwitcherMode: () => ipcRenderer.invoke('get-default-switcher-mode'),
+  setDefaultSwitcherMode: (mode: string) => ipcRenderer.send('set-default-switcher-mode', mode),
   getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
   setLoginItemSettings: (openAtLogin: boolean) => ipcRenderer.send('set-login-item-settings', openAtLogin),
+
+  // Claude Code session APIs
+  getClaudeSessions: (limit?: number) => ipcRenderer.invoke('get-claude-sessions', limit),
+  searchClaudeSessions: (query: string) => ipcRenderer.invoke('search-claude-sessions', query),
+  detectActiveSessions: () => ipcRenderer.invoke('detect-active-sessions'),
+  openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number) =>
+    ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid),
+  copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>
+    ipcRenderer.send('copy-claude-session-command', sessionId, projectPath),
+  loadSessionEnrichment: (sessions: any[]) => ipcRenderer.invoke('load-session-enrichment', sessions),
+  loadLastAssistantResponses: (sessions: any[]) => ipcRenderer.invoke('load-last-assistant-responses', sessions),
 
   /** for reading VS Code built-in sqlite */
   fetchVSCodeBasedIDESqlite: () => ipcRenderer.send('fetch-vscode-based-sqlite'),

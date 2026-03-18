@@ -11,6 +11,10 @@ on:
         description: 'Release tag (e.g. v1.0.33). Leave empty to auto-generate from package.json'
         type: string
         default: ''
+      release_notes:
+        description: 'Release notes (e.g. "Add session list feature")'
+        type: string
+        default: 'Non-App Store notarized build'
 
 jobs:
   build-and-notarize:
@@ -86,7 +90,7 @@ jobs:
           fi
           gh release create "$TAG" ./out/CodeV.dmg \
             --title "$TAG" \
-            --notes "Non-App Store notarized build"
+            --notes "${{ inputs.release_notes }}"
 
       - name: Cleanup keychain
         if: always()
