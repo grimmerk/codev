@@ -43,8 +43,14 @@ let cachedSessions: ClaudeSession[] | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 5000; // refresh cache after 5 seconds
 
+// Cache for active session detection to avoid spawning processes on every keystroke
+let cachedActiveMap: Map<string, number> | null = null;
+let activeCacheTimestamp = 0;
+const ACTIVE_CACHE_TTL_MS = 5000;
+
 export const invalidateSessionCache = () => {
   cachedSessions = null;
+  cachedActiveMap = null;
 };
 
 /**
@@ -149,6 +155,11 @@ export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[]
  *    session for that project from history.jsonl
  */
 export const detectActiveSessions = (): Map<string, number> => {
+  const now = Date.now();
+  if (cachedActiveMap && (now - activeCacheTimestamp) < ACTIVE_CACHE_TTL_MS) {
+    return cachedActiveMap;
+  }
+
   const activeMap = new Map<string, number>();
 
   try {
@@ -163,7 +174,6 @@ export const detectActiveSessions = (): Map<string, number> => {
     } catch {
       return activeMap;
     }
-    console.log('[detectActiveSessions] found processes:', output.trim().split('\n').length);
 
     for (const line of output.split('\n')) {
       if (!line.trim()) continue;
@@ -175,11 +185,9 @@ export const detectActiveSessions = (): Map<string, number> => {
       // Try to extract session ID from --resume <id>
       const resumeMatch = line.match(/--resume\s+([a-f0-9-]{36})/);
       if (resumeMatch) {
-        console.log(`[detectActiveSessions] found --resume session: ${resumeMatch[1]}, pid: ${pid}`);
         activeMap.set(resumeMatch[1], pid);
         continue;
       }
-      console.log(`[detectActiveSessions] claude process without --resume ID, pid: ${pid}, cmd: ${line.slice(line.indexOf('claude')).substring(0, 80)}`);
 
       // Check if this is a claude -r or claude process (without explicit session ID)
       if (line.includes('claude')) {
@@ -193,15 +201,10 @@ export const detectActiveSessions = (): Map<string, number> => {
           const cwdMatch = cwdOutput.match(/^n(.+)$/m);
           if (cwdMatch) {
             const cwd = cwdMatch[1];
-            console.log(`[detectActiveSessions] pid ${pid} cwd: ${cwd}`);
-            // Find the latest session for this project path from history
             const allSessions = readClaudeSessions(500);
             const match = allSessions.find((s) => s.project === cwd);
             if (match) {
-              console.log(`[detectActiveSessions] matched session: ${match.sessionId} for cwd: ${cwd}`);
               activeMap.set(match.sessionId, pid);
-            } else {
-              console.log(`[detectActiveSessions] no session match for cwd: ${cwd}`);
             }
           }
         } catch {
@@ -213,6 +216,8 @@ export const detectActiveSessions = (): Map<string, number> => {
     // ps/grep returns exit code 1 if no matches
   }
 
+  cachedActiveMap = activeMap;
+  activeCacheTimestamp = now;
   return activeMap;
 };
 
@@ -230,7 +235,6 @@ export const openSessionInITerm2 = (
 ): void => {
   const { exec } = require('child_process');
 
-  console.log(`[openSessionInITerm2] sessionId=${sessionId}, isActive=${isActive}, activePid=${activePid}`);
   if (isActive && activePid) {
     // Try to switch to existing iTerm2 tab via tty matching
     const tmpScript = '/tmp/codev-iterm-switch.scpt';
