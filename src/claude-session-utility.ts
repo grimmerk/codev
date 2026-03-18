@@ -359,7 +359,7 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
 
     if (branchOutput.trim()) {
       const match = branchOutput.match(/"gitBranch":"([^"]*)"/);
-      if (match && match[1]) {
+      if (match && match[1] && match[1] !== 'HEAD') {
         branches.set(session.sessionId, match[1]);
       }
     }

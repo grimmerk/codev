@@ -320,7 +320,7 @@ function SwitcherApp() {
   );
   const [allSessions, setAllSessions] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
-  const [selectedSessionIndex, setSelectedSessionIndex] = useState(0);
+  const [selectedSessionIndex, setSelectedSessionIndex] = useState(-1);
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<Record<string, string>>({});
@@ -722,10 +722,13 @@ function SwitcherApp() {
                 setSelectedSessionIndex((i) => Math.min(i + 1, sessions.length - 1));
               } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                setSelectedSessionIndex((i) => Math.max(i - 1, 0));
-              } else if (e.key === 'Enter' && sessions[selectedSessionIndex]) {
-                const s = sessions[selectedSessionIndex];
-                (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid);
+                setSelectedSessionIndex((i) => i <= 0 ? -1 : i - 1);
+              } else if (e.key === 'Enter') {
+                const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
+                const s = sessions[idx];
+                if (s) {
+                  (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid);
+                }
               }
             }}
               placeholder="Search sessions..."
@@ -762,7 +765,8 @@ function SwitcherApp() {
                     padding: '6px 10px',
                     margin: '1px 0',
                     borderRadius: '3px',
-                    backgroundColor: index === selectedSessionIndex ? THEME.background.hover : 'transparent',
+                    backgroundColor: index === selectedSessionIndex ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
+                    borderLeft: index === selectedSessionIndex ? `3px solid ${THEME.primary}` : '3px solid transparent',
                     cursor: 'pointer',
                     transition: 'background-color 0.15s',
                   }}
