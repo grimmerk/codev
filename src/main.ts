@@ -13,6 +13,13 @@ import { isMAS, TrayGenerator } from './TrayGenerator';
 import { bootstrap } from './server/server';
 import { AIAssistantUIMode, isDebug } from './utility';
 import {
+  readClaudeSessions,
+  searchClaudeSessions,
+  detectActiveSessions,
+  openSessionInITerm2,
+  copyResumeCommand,
+} from './claude-session-utility';
+import {
   deleteRecentProjectRecord,
   openVSCodeBasedIDE,
   readVSCodeBasedIDEState,
@@ -1403,6 +1410,33 @@ ipcMain.handle('get-login-item-settings', () => {
 
 ipcMain.on('set-login-item-settings', (_event, openAtLogin: boolean) => {
   app.setLoginItemSettings({ openAtLogin });
+});
+
+// Claude Code session handlers
+ipcMain.handle('get-claude-sessions', (_event, limit?: number) => {
+  const sessions = readClaudeSessions(limit);
+  const activeIds = detectActiveSessions();
+  sessions.forEach((s) => {
+    s.isActive = activeIds.has(s.sessionId);
+  });
+  return sessions;
+});
+
+ipcMain.handle('search-claude-sessions', (_event, query: string) => {
+  const sessions = searchClaudeSessions(query);
+  const activeIds = detectActiveSessions();
+  sessions.forEach((s) => {
+    s.isActive = activeIds.has(s.sessionId);
+  });
+  return sessions;
+});
+
+ipcMain.on('open-claude-session', (_event, sessionId: string, projectPath: string, isActive: boolean) => {
+  openSessionInITerm2(sessionId, projectPath, isActive);
+});
+
+ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {
+  copyResumeCommand(sessionId, projectPath);
 });
 
 app.dock.hide();

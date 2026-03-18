@@ -5,6 +5,8 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
+
+type SwitcherMode = 'projects' | 'sessions';
 // import { fetchVSCodeBasedOpenedWindows, SERVER_URL, deleteRecentProjectRecord } from "./vscode-based-ide-utility"
 export const SERVER_URL = 'http://localhost:55688';
 
@@ -279,23 +281,46 @@ const OptionUI: FC<OptionProps<SelectInputOptionInterface>> = (
   );
 };
 
+/** Format relative time for session display */
+const formatRelativeTime = (timestamp: string): string => {
+  if (!timestamp) return '';
+  const diff = Date.now() - new Date(timestamp).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+};
+
 /** Caution it will be invoked twice due to <React.StrictMode> !! */
 let loadTimes = 0;
 function SwitcherApp() {
   const optionPress = useRef(false);
 
   const ref = useRef(null);
+  const sessionSearchRef = useRef<HTMLInputElement>(null);
   const forceFocusOnInput = () => {
-    ref.current.focus();
+    if (mode === 'projects') {
+      ref.current?.focus();
+    } else {
+      sessionSearchRef.current?.focus();
+    }
   };
 
+  const [mode, setMode] = useState<SwitcherMode>('projects');
   const [inputValue, setInputValue] = useState('');
+  const [sessionSearchValue, setSessionSearchValue] = useState('');
   const [selectedOptions, setSelectedOptions] = useState([]);
   const [pathInfoArray, setPathInfoArray] = useState<VSWindowModel[]>([]);
   const [workingFolderPath, setWorkingFolderPath] = useState('');
   const [workingPathInfoArray, setWorkingPathInfoArray] = useState<string[]>(
     [],
   );
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [selectedSessionIndex, setSelectedSessionIndex] = useState(0);
+  const modeRef = useRef<SwitcherMode>('projects');
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -307,9 +332,11 @@ function SwitcherApp() {
 
   const fetchRecentProjectRecord = async () => {
     fetchVSCodeBasedIDESqlite(); //retryFetchRecentProjectRecord();
-    // if (json && Array.isArray(json)) {
-    //   setPathInfoArray(json);
-    // }
+  };
+
+  const fetchClaudeSessions = async () => {
+    const result = await (window as any).electronAPI.getClaudeSessions(100);
+    setSessions(result || []);
   };
 
   const fetchWorkingFolderAndUpdate = async () => {
@@ -328,6 +355,16 @@ function SwitcherApp() {
       if (e.keyCode === OPTION_KEY) {
         optionPress.current = true;
       }
+      // Tab to toggle between projects and sessions
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const newMode = modeRef.current === 'projects' ? 'sessions' : 'projects';
+        modeRef.current = newMode;
+        setMode(newMode);
+        if (newMode === 'sessions') {
+          fetchClaudeSessions();
+        }
+      }
     }
     function handleKeyUp(e: any) {
       if (e.keyCode === OPTION_KEY) {
@@ -343,11 +380,10 @@ function SwitcherApp() {
 
     (window as any).electronAPI.onFocusWindow((_event: any) => {
       fetchRecentProjectRecord();
-
-      /** pros: use the latest list
-       * cons: query workingFolder multiple times
-       */
       fetchWorkingFolderAndUpdate();
+      if (modeRef.current === 'sessions') {
+        fetchClaudeSessions();
+      }
     });
 
     (window as any).electronAPI.onWorkingFolderIterated(
@@ -531,13 +567,152 @@ function SwitcherApp() {
               fontSize: '18px',
             }}
           >
-            📂
+            {mode === 'projects' ? '📂' : '🤖'}
           </span>
           CodeV Quick Switcher
         </div>
-        <PopupDefaultExample workingFolderPath={workingFolderPath} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div
+            style={{
+              display: 'flex',
+              backgroundColor: '#333',
+              borderRadius: '4px',
+              overflow: 'hidden',
+            }}
+          >
+            <button
+              onClick={() => { modeRef.current = 'projects'; setMode('projects'); }}
+              style={{
+                padding: '4px 10px',
+                fontSize: '12px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: mode === 'projects' ? THEME.primary : 'transparent',
+                color: mode === 'projects' ? '#fff' : THEME.text.secondary,
+                transition: 'background-color 0.2s',
+              }}
+            >
+              Projects
+            </button>
+            <button
+              onClick={() => { modeRef.current = 'sessions'; setMode('sessions'); fetchClaudeSessions(); }}
+              style={{
+                padding: '4px 10px',
+                fontSize: '12px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: mode === 'sessions' ? THEME.primary : 'transparent',
+                color: mode === 'sessions' ? '#fff' : THEME.text.secondary,
+                transition: 'background-color 0.2s',
+              }}
+            >
+              Sessions
+            </button>
+          </div>
+          <PopupDefaultExample workingFolderPath={workingFolderPath} />
+        </div>
       </div>
 
+      {mode === 'sessions' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <input
+            ref={sessionSearchRef}
+            value={sessionSearchValue}
+            onChange={async (e) => {
+              const val = e.target.value;
+              setSessionSearchValue(val);
+              if (val.trim()) {
+                const result = await (window as any).electronAPI.searchClaudeSessions(val);
+                setSessions(result || []);
+              } else {
+                fetchClaudeSessions();
+              }
+              setSelectedSessionIndex(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                if (sessionSearchValue) {
+                  setSessionSearchValue('');
+                  fetchClaudeSessions();
+                } else {
+                  hideApp();
+                }
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedSessionIndex((i) => Math.min(i + 1, sessions.length - 1));
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedSessionIndex((i) => Math.max(i - 1, 0));
+              } else if (e.key === 'Enter' && sessions[selectedSessionIndex]) {
+                const s = sessions[selectedSessionIndex];
+                (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive);
+              }
+            }}
+            placeholder="Search sessions..."
+            autoFocus
+            style={{
+              backgroundColor: '#2d2d2d',
+              border: '1px solid #444',
+              borderRadius: '4px',
+              padding: '10px 12px',
+              margin: '10px 15px',
+              color: THEME.text.primary,
+              fontSize: '14px',
+              outline: 'none',
+            }}
+          />
+          <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
+            {sessions.length === 0 ? (
+              <div style={{ color: THEME.text.secondary, textAlign: 'center', padding: '20px 0' }}>
+                {sessionSearchValue ? '⚠️ No matching sessions found' : '🤖 No Claude Code sessions found'}
+              </div>
+            ) : (
+              sessions.map((session, index) => (
+                <div
+                  key={session.sessionId}
+                  onClick={() => {
+                    (window as any).electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive);
+                  }}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 10px',
+                    margin: '2px 0',
+                    borderRadius: '3px',
+                    backgroundColor: index === selectedSessionIndex ? THEME.background.hover : 'transparent',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s',
+                  }}
+                  onMouseEnter={() => setSelectedSessionIndex(index)}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {session.isActive && (
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', flexShrink: 0 }} />
+                      )}
+                      <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
+                        {session.projectName}
+                      </span>
+                      <span style={{ color: THEME.text.secondary, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        · {(session.firstUserMessage || '').slice(0, 60)}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, marginLeft: '10px' }}>
+                    <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
+                      {session.messageCount} msgs
+                    </span>
+                    <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
+                      {formatRelativeTime(session.lastTimestamp)}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ) : (
       <Select
         filterOption={filterOptions}
         ref={ref}
@@ -635,6 +810,7 @@ function SwitcherApp() {
           }),
         }}
       />
+      )}
     </div>
   );
 }
