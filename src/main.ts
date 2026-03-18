@@ -1412,6 +1412,14 @@ ipcMain.on('set-login-item-settings', (_event, openAtLogin: boolean) => {
   app.setLoginItemSettings({ openAtLogin });
 });
 
+ipcMain.handle('get-session-terminal-mode', async () => {
+  return (await settings.get('session-terminal-mode')) || 'tab';
+});
+
+ipcMain.on('set-session-terminal-mode', async (_event, mode: string) => {
+  await settings.set('session-terminal-mode', mode);
+});
+
 // Claude Code session handlers
 ipcMain.handle('get-claude-sessions', (_event, limit?: number) => {
   const sessions = readClaudeSessions(limit);
@@ -1437,8 +1445,9 @@ ipcMain.handle('search-claude-sessions', (_event, query: string) => {
   return sessions;
 });
 
-ipcMain.on('open-claude-session', (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number) => {
-  openSessionInITerm2(sessionId, projectPath, isActive, activePid);
+ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number) => {
+  const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+  openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode);
 });
 
 ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {

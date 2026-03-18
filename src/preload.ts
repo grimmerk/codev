@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   notifyIDEPreferenceChanged: (preferredIDE: string) => ipcRenderer.send('ide-preference-changed', preferredIDE),
 
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getSessionTerminalMode: () => ipcRenderer.invoke('get-session-terminal-mode'),
+  setSessionTerminalMode: (mode: string) => ipcRenderer.send('set-session-terminal-mode', mode),
   getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
   setLoginItemSettings: (openAtLogin: boolean) => ipcRenderer.send('set-login-item-settings', openAtLogin),
 

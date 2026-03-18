@@ -211,6 +211,7 @@ export const openSessionInITerm2 = (
   projectPath: string,
   isActive: boolean,
   activePid?: number,
+  terminalMode: string = 'tab',
 ): void => {
   const { exec } = require('child_process');
 
@@ -247,10 +248,18 @@ end if`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    // Open new tab and run claude --resume
+    // Open new tab or window and run claude --resume
     const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
     const tmpScript = '/tmp/codev-iterm-launch.scpt';
-    const launchScript = `tell application "iTerm2"
+    const launchScript = terminalMode === 'window'
+      ? `tell application "iTerm2"
+  activate
+  set newWindow to (create window with default profile)
+  tell current session of newWindow
+    write text "${command.replace(/"/g, '\\"')}"
+  end tell
+end tell`
+      : `tell application "iTerm2"
   activate
   tell current window
     create tab with default profile
