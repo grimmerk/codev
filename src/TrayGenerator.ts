@@ -72,6 +72,7 @@ export class TrayGenerator {
         label: 'Keyboard Shortcuts',
         submenu: [
           { label: 'Cmd+Ctrl+R: Open CodeV Quick Switcher', enabled: false },
+          { label: 'Tab: Switch Projects / Sessions', enabled: false },
           { label: 'Cmd+Ctrl+E: AI Assistant Insight', enabled: false },
           { label: 'Cmd+Ctrl+C: AI Assistant Smart Chat', enabled: false },
         ],
