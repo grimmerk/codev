@@ -322,6 +322,7 @@ function SwitcherApp() {
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(0);
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
+  const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
 
   const updateWorkingPathUIAndList = async (path: string) => {
@@ -344,15 +345,23 @@ function SwitcherApp() {
     setSessions(result || []);
 
     // Step 2: Detect active sessions in background (slow, spawns processes)
-    console.time('detectActiveSessions');
     (window as any).electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
-      console.timeEnd('detectActiveSessions');
       if (activeMap && Object.keys(activeMap).length > 0) {
+        const activeSessions = (result || []).filter((s: any) => s.sessionId in activeMap);
         setSessions((prev: any[]) => prev.map((s) => ({
           ...s,
           isActive: s.sessionId in activeMap,
           activePid: activeMap[s.sessionId],
         })));
+
+        // Step 2b: Load last assistant responses for active sessions only
+        if (activeSessions.length > 0) {
+          (window as any).electronAPI.loadLastAssistantResponses(activeSessions).then((responses: Record<string, string>) => {
+            if (responses && Object.keys(responses).length > 0) {
+              setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+            }
+          });
+        }
       }
     });
 
@@ -820,6 +829,11 @@ function SwitcherApp() {
                                 borderRadius: '2px',
                               }}
                             />
+                          </span>
+                        )}
+                        {session.isActive && assistantResponses[session.sessionId] && (
+                          <span style={{ color: '#64B5F6', fontSize: '12px' }}>
+                            {'  ◀ '}{assistantResponses[session.sessionId].slice(0, 50)}
                           </span>
                         )}
                       </div>

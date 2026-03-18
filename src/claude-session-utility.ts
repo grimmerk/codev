@@ -14,6 +14,7 @@ export interface ClaudeSession {
   projectName: string;     // folder name, e.g. fred-ff
   firstUserMessage: string;
   lastUserMessage: string;
+  lastAssistantMessage?: string; // only loaded for active sessions
   lastTimestamp: number;    // unix ms
   messageCount: number;
   isActive: boolean;       // whether a claude process is running for this session
@@ -348,6 +349,58 @@ export const loadCustomTitles = async (sessions: ClaudeSession[]): Promise<Map<s
   cachedCustomTitles = titles;
   titlesCacheTimestamp = now;
   return titles;
+};
+
+/**
+ * Load last assistant response for active sessions.
+ * Uses tail -n 200 to read the end of the JSONL file (fast even on 80MB files: ~19ms).
+ * Returns a map of sessionId -> last assistant text.
+ */
+export const loadLastAssistantResponses = async (
+  sessions: ClaudeSession[]
+): Promise<Map<string, string>> => {
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 5000, maxBuffer: 10 * 1024 * 1024 }, (err: any, stdout: string) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
+  const responses = new Map<string, string>();
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+
+  const promises = sessions.map(async (session) => {
+    const encodedProject = session.project.replace(/\//g, '-');
+    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+
+    if (!fs.existsSync(jsonlPath)) return;
+
+    const output = await execPromise(`tail -n 200 "${jsonlPath}" | grep '"type":"assistant"' | tail -1`);
+    if (!output.trim()) return;
+
+    try {
+      const obj = JSON.parse(output.trim());
+      const content = obj?.message?.content;
+      if (!Array.isArray(content)) return;
+
+      // Find last text block in the assistant message (search from end)
+      for (let i = content.length - 1; i >= 0; i--) {
+        if (content[i]?.type === 'text' && content[i]?.text) {
+          const text = content[i].text.trim();
+          if (text) {
+            responses.set(session.sessionId, text);
+            return;
+          }
+        }
+      }
+    } catch {
+      // skip parse errors
+    }
+  });
+
+  await Promise.all(promises);
+  return responses;
 };
 
 /**

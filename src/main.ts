@@ -20,6 +20,7 @@ import {
   copyResumeCommand,
   invalidateSessionCache,
   loadCustomTitles,
+  loadLastAssistantResponses,
 } from './claude-session-utility';
 import {
   deleteRecentProjectRecord,
@@ -1465,6 +1466,11 @@ ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPat
 ipcMain.handle('load-custom-titles', async (_event, sessions: any[]) => {
   const titleMap = await loadCustomTitles(sessions);
   return Object.fromEntries(titleMap);
+});
+
+ipcMain.handle('load-last-assistant-responses', async (_event, sessions: any[]) => {
+  const responseMap = await loadLastAssistantResponses(sessions);
+  return Object.fromEntries(responseMap);
 });
 
 app.dock.hide();
