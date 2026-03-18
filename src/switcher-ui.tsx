@@ -325,6 +325,7 @@ function SwitcherApp() {
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
+  const activeStateRef = useRef<Record<string, number>>({});
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -348,25 +349,32 @@ function SwitcherApp() {
   };
 
   const fetchClaudeSessions = async () => {
-    // Step 1: Show sessions immediately, preserve old active states (SWR)
+    // Step 1: Show sessions immediately, preserve old active states (SWR via ref)
     const result = await (window as any).electronAPI.getClaudeSessions(100);
+    const cachedActive = activeStateRef.current;
     const newSessions = (result || []).map((s: any) => {
-      const oldSession = allSessions.find((old: any) => old.sessionId === s.sessionId);
-      return oldSession ? { ...s, isActive: oldSession.isActive, activePid: oldSession.activePid } : s;
+      if (s.sessionId in cachedActive) {
+        return { ...s, isActive: true, activePid: cachedActive[s.sessionId] };
+      }
+      return s;
     });
     setAllSessions(newSessions);
     setSessions(sessionSearchValue.trim() ? filterSessionsLocally(newSessions, sessionSearchValue) : newSessions);
 
     // Step 2: Detect active sessions in background (slow, spawns processes)
     (window as any).electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
+      // Save to ref for SWR on next refresh
+      activeStateRef.current = activeMap || {};
+
+      const updateActive = (list: any[]) => list.map((s) => ({
+        ...s,
+        isActive: s.sessionId in (activeMap || {}),
+        activePid: (activeMap || {})[s.sessionId],
+      }));
+      setAllSessions((prev: any[]) => updateActive(prev));
+      setSessions((prev: any[]) => updateActive(prev));
+
       if (activeMap && Object.keys(activeMap).length > 0) {
-        const updateActive = (list: any[]) => list.map((s) => ({
-          ...s,
-          isActive: s.sessionId in activeMap,
-          activePid: activeMap[s.sessionId],
-        }));
-        setAllSessions((prev: any[]) => updateActive(prev));
-        setSessions((prev: any[]) => updateActive(prev));
 
         const activeSessions = (result || []).filter((s: any) => s.sessionId in activeMap);
 
@@ -761,7 +769,7 @@ function SwitcherApp() {
                   {/* Fixed-width dot container for alignment */}
                   <div style={{ width: '14px', flexShrink: 0, paddingTop: '4px' }}>
                     {session.isActive && (
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4CAF50', display: 'inline-block' }} />
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#CE93D8', display: 'inline-block' }} />
                     )}
                   </div>
                   {/* Content area */}
