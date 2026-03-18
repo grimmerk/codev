@@ -645,7 +645,7 @@ function SwitcherApp() {
                 setSelectedSessionIndex((i) => Math.max(i - 1, 0));
               } else if (e.key === 'Enter' && sessions[selectedSessionIndex]) {
                 const s = sessions[selectedSessionIndex];
-                (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive);
+                (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid);
               }
             }}
             placeholder="Search sessions..."
@@ -671,7 +671,7 @@ function SwitcherApp() {
                 <div
                   key={session.sessionId}
                   onClick={() => {
-                    (window as any).electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive);
+                    (window as any).electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid);
                   }}
                   style={{
                     display: 'flex',

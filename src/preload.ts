@@ -28,8 +28,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Claude Code session APIs
   getClaudeSessions: (limit?: number) => ipcRenderer.invoke('get-claude-sessions', limit),
   searchClaudeSessions: (query: string) => ipcRenderer.invoke('search-claude-sessions', query),
-  openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean) =>
-    ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive),
+  openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number) =>
+    ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid),
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>
     ipcRenderer.send('copy-claude-session-command', sessionId, projectPath),
 

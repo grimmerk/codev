@@ -123,27 +123,70 @@ export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[]
 };
 
 /**
- * Detect active Claude Code sessions by checking running processes
- * Returns a Set of active session IDs
+ * Detect active Claude Code sessions by checking running processes.
+ * Returns a Map of session ID -> PID.
+ *
+ * Detection strategy:
+ * 1. Find all claude processes via `ps aux | grep claude`
+ * 2. For processes with `--resume <id>` or `-r <id>`, extract the session ID directly
+ * 3. For processes with just `-r` (no ID), check the process's open files
+ *    to find which project directory it's working in, then look up the latest
+ *    session for that project from history.jsonl
  */
-export const detectActiveSessions = (): Set<string> => {
-  const activeIds = new Set<string>();
+export const detectActiveSessions = (): Map<string, number> => {
+  const activeMap = new Map<string, number>();
 
   try {
     const { execSync } = require('child_process');
-    const output = execSync('pgrep -af "claude"', { encoding: 'utf-8', timeout: 3000 });
+    // Get all claude processes (filter out grep itself and non-CLI processes)
+    const output = execSync(
+      'ps aux | grep -E "claude (--resume|-r|$)" | grep -v grep | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory"',
+      { encoding: 'utf-8', timeout: 3000 }
+    );
 
     for (const line of output.split('\n')) {
-      const match = line.match(/--resume\s+([a-f0-9-]{36})/);
-      if (match) {
-        activeIds.add(match[1]);
+      if (!line.trim()) continue;
+
+      const parts = line.trim().split(/\s+/);
+      const pid = parseInt(parts[1], 10);
+      if (!pid) continue;
+
+      // Try to extract session ID from --resume <id>
+      const resumeMatch = line.match(/--resume\s+([a-f0-9-]{36})/);
+      if (resumeMatch) {
+        activeMap.set(resumeMatch[1], pid);
+        continue;
+      }
+
+      // Check if this is a claude -r or claude process (without explicit session ID)
+      if (line.includes('claude')) {
+        // Try to find session ID by checking the process's working directory
+        // via lsof, then matching to latest session in history.jsonl
+        try {
+          const cwdOutput = execSync(`lsof -p ${pid} -Fn 2>/dev/null | head -1`, {
+            encoding: 'utf-8',
+            timeout: 2000,
+          });
+          const cwdMatch = cwdOutput.match(/^n(.+)$/m);
+          if (cwdMatch) {
+            const cwd = cwdMatch[1];
+            // Find the latest session for this project path from history
+            const allSessions = readClaudeSessions(500);
+            const match = allSessions.find((s) => s.project === cwd);
+            if (match) {
+              activeMap.set(match.sessionId, pid);
+            }
+          }
+        } catch {
+          // lsof might fail, skip
+        }
       }
     }
   } catch {
-    // pgrep returns exit code 1 if no matches
+    // ps/grep returns exit code 1 if no matches
   }
 
-  return activeIds;
+  return activeMap;
 };
 
 /**
