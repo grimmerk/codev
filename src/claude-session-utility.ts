@@ -60,6 +60,7 @@ export const invalidateSessionCache = () => {
   cachedSessions = null;
   cachedActiveMap = null;
   cachedCustomTitles = null;
+  cachedBranches = null;
 };
 
 /**
@@ -308,10 +309,18 @@ end tell`;
  * Reads each session's JSONL file and greps for "custom-title" entries.
  * Returns a map of sessionId -> customTitle.
  */
-export const loadCustomTitles = async (sessions: ClaudeSession[]): Promise<Map<string, string>> => {
+export interface SessionEnrichment {
+  titles: Map<string, string>;
+  branches: Map<string, string>;
+}
+
+// Cache for branches
+let cachedBranches: Map<string, string> | null = null;
+
+export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<SessionEnrichment> => {
   const now = Date.now();
-  if (cachedCustomTitles && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
-    return cachedCustomTitles;
+  if (cachedCustomTitles && cachedBranches && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
+    return { titles: cachedCustomTitles, branches: cachedBranches };
   }
 
   const { exec } = require('child_process');
@@ -323,32 +332,45 @@ export const loadCustomTitles = async (sessions: ClaudeSession[]): Promise<Map<s
     });
 
   const titles = new Map<string, string>();
+  const branches = new Map<string, string>();
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
-  // Batch all greps in parallel
   const promises = sessions.map(async (session) => {
     const encodedProject = session.project.replace(/\//g, '-');
     const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
 
     if (!fs.existsSync(jsonlPath)) return;
 
-    const output = await execPromise(`grep "custom-title" "${jsonlPath}" 2>/dev/null | tail -1`);
-    if (output.trim()) {
+    // Run title grep and branch tail in parallel for each file
+    const [titleOutput, branchOutput] = await Promise.all([
+      execPromise(`grep "custom-title" "${jsonlPath}" 2>/dev/null | tail -1`),
+      execPromise(`tail -n 5 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
+    ]);
+
+    if (titleOutput.trim()) {
       try {
-        const parsed = JSON.parse(output.trim());
+        const parsed = JSON.parse(titleOutput.trim());
         const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
         if (title) {
           titles.set(session.sessionId, title);
         }
       } catch {}
     }
+
+    if (branchOutput.trim()) {
+      const match = branchOutput.match(/"gitBranch":"([^"]*)"/);
+      if (match && match[1]) {
+        branches.set(session.sessionId, match[1]);
+      }
+    }
   });
 
   await Promise.all(promises);
 
   cachedCustomTitles = titles;
+  cachedBranches = branches;
   titlesCacheTimestamp = now;
-  return titles;
+  return { titles, branches };
 };
 
 /**

@@ -19,7 +19,7 @@ import {
   openSessionInITerm2,
   copyResumeCommand,
   invalidateSessionCache,
-  loadCustomTitles,
+  loadSessionEnrichment,
   loadLastAssistantResponses,
 } from './claude-session-utility';
 import {
@@ -1463,9 +1463,12 @@ ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPat
   copyResumeCommand(sessionId, projectPath);
 });
 
-ipcMain.handle('load-custom-titles', async (_event, sessions: any[]) => {
-  const titleMap = await loadCustomTitles(sessions);
-  return Object.fromEntries(titleMap);
+ipcMain.handle('load-session-enrichment', async (_event, sessions: any[]) => {
+  const { titles, branches } = await loadSessionEnrichment(sessions);
+  return {
+    titles: Object.fromEntries(titles),
+    branches: Object.fromEntries(branches),
+  };
 });
 
 ipcMain.handle('load-last-assistant-responses', async (_event, sessions: any[]) => {
