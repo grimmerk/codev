@@ -6,9 +6,9 @@
 
 set -e
 
-# Load env vars
+# Load env vars (only non-empty values, so CI secrets aren't overwritten)
 if [ -f .env ]; then
-  export $(grep -E '^(APPLE_ID|APPLE_APP_PASSWORD|APPLE_TEAM_ID)=' .env | xargs)
+  export $(grep -E '^(APPLE_ID|APPLE_APP_PASSWORD|APPLE_TEAM_ID)=.+' .env | xargs)
 fi
 
 if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
