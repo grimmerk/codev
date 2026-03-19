@@ -290,15 +290,60 @@ In the Settings popup:
 
 ## Terminal Support Matrix
 
-| Terminal | Detect | Switch | Launch |
-|----------|--------|--------|--------|
-| iTerm2 ✅ | `ps` + `lsof` + tty | AppleScript tty focus | AppleScript: new tab/window + execute |
-| Terminal.app | `ps` + tty | AppleScript focus | AppleScript: new tab + execute |
-| Ghostty | `ps` + parent check | AppleScript activate | Activate + paste command / clipboard |
-| cmux | `ps` + `cmux list-panes` | `cmux select-workspace` | Activate + paste command / clipboard |
-| Custom | — | — | User command template / clipboard |
+| Terminal | Detect | Switch | Launch | External Access |
+|----------|--------|--------|--------|----------------|
+| iTerm2 ✅ | `ps` + `lsof` + tty | AppleScript tty focus | AppleScript: new tab/window + execute | No restriction |
+| cmux ✅ | `ps` + `lsof` | `cmux select-workspace` + `cmux focus-panel` | `cmux new-workspace --cwd --command` | Requires socket mode change (see below) |
+| Terminal.app | `ps` + tty | AppleScript focus | AppleScript: new tab + execute | No restriction |
+| Ghostty | `ps` + parent check | AppleScript activate (app level only, no tab precision) | `open -na Ghostty.app --args -e <cmd>` (opens new instance) or clipboard | macOS `+new-window` not supported |
+| Custom | — | — | User command template / clipboard | — |
 
-**MVP: iTerm2 only.** Others planned for Phase 2+.
+### cmux Integration Details
+
+**CLI commands available:**
+- `cmux new-workspace --cwd <path> --command "claude --resume <id>"` — create new workspace with command
+- `cmux select-workspace --workspace <id>` — switch to workspace
+- `cmux focus-panel --panel surface:N` — switch to specific tab within workspace
+- `cmux send "text"` / `cmux send-key enter` — send text/keys to focused terminal
+- `cmux list-workspaces [--json]` / `cmux list-pane-surfaces --pane pane:N` — inspect topology
+
+**Socket access restriction:**
+cmux CLI communicates via Unix socket (`/tmp/cmux.sock`). By default, only processes started inside cmux can connect (`cmuxOnly` mode). External apps like CodeV need the user to change the socket mode:
+
+| Mode | Access | How to enable |
+|------|--------|---------------|
+| `cmuxOnly` (default) | cmux child processes only | Default |
+| `automation` | Automation-friendly access | cmux Settings UI |
+| `allowAll` | Any local process | `CMUX_SOCKET_MODE=allowAll` or Settings UI |
+| `password` | Password-authenticated | Settings UI |
+| `off` | Disabled | Settings UI |
+
+**Recommended:** Ask user to set `automation` or `allowAll` mode in cmux Settings. Security impact is minimal — only local processes on the same machine can connect.
+
+**Switch strategy for cmux:**
+1. `ps aux` to find claude process PID
+2. Try connecting to `/tmp/cmux.sock` — if access denied, fallback to clipboard
+3. If connected: `cmux list-workspaces --json` to find which workspace has the session
+4. `cmux select-workspace` + `cmux focus-panel` to switch to correct tab
+
+**Launch strategy for cmux:**
+1. Try `cmux new-workspace --cwd <project> --command "claude --resume <id>"`
+2. If socket access denied: activate cmux + copy command to clipboard
+
+### Ghostty Integration Details
+
+**macOS limitations:**
+- `ghostty +new-window` is **not supported on macOS** ("not supported on this platform")
+- On macOS, Ghostty recommends `open -na Ghostty.app --args -e <command>` but this opens a **new Ghostty instance**, not a new tab in existing window
+- No AppleScript dictionary (no .sdef file) — only basic `activate` works
+- No CLI for sending text/keys to existing sessions
+- No tab-level window switching
+
+**Fallback approach:** Activate Ghostty app + copy `cd <path> && claude --resume <id>` to clipboard. User pastes with ⌘V + Enter.
+
+### Branch Name: Why Not `git branch --show-current`
+
+`git branch --show-current` returns the repo's **current** branch, but a session may have been created on a different branch that has since been switched away. The JSONL `gitBranch` field preserves the branch at the time of each session entry, which is the correct value to display.
 
 ## Phase Plan
 
