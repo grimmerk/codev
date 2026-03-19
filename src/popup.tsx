@@ -370,12 +370,12 @@ const PopupDefaultExample = ({
             >
               <option value="iterm2">iTerm2</option>
               <option value="cmux">cmux</option>
-              <option value="ghostty">Ghostty (clipboard)</option>
+              <option value="ghostty">Ghostty</option>
             </select>
           </div>
 
-          {/* Session Terminal Mode (only for iTerm2) */}
-          {sessionTerminalApp === 'iterm2' && (
+          {/* Session Terminal Mode (for iTerm2 and Ghostty) */}
+          {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'ghostty') && (
           <div
             style={{
               padding: '0 20px 20px',
@@ -390,7 +390,7 @@ const PopupDefaultExample = ({
                 color: THEME.text.primary,
               }}
             >
-              iTerm2 Open Mode
+              Open Mode
             </div>
             <select
               value={sessionTerminalMode}

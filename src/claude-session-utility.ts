@@ -285,7 +285,7 @@ export const openSession = async (
       openSessionInCmux(sessionId, projectPath, isActive, activePid);
       break;
     case 'ghostty':
-      openSessionInGhostty(sessionId, projectPath, isActive);
+      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode);
       break;
     case 'iterm2':
     default:
@@ -499,6 +499,7 @@ export const openSessionInGhostty = (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
+  terminalMode: string = 'tab',
 ): void => {
   const { exec } = require('child_process');
 
@@ -534,7 +535,13 @@ end tell`;
     // Use initial working directory for cd, and initialInput to type the resume command
     const tmpScript = '/tmp/codev-ghostty-launch.scpt';
     const resumeCmd = `claude --resume ${sessionId}`;
-    const launchScript = `tell application "Ghostty"
+    const launchScript = terminalMode === 'window'
+      ? `tell application "Ghostty"
+  activate
+  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${resumeCmd}\\n"}
+  new window with configuration cfg
+end tell`
+      : `tell application "Ghostty"
   activate
   set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${resumeCmd}\\n"}
   if (count windows) > 0 then
