@@ -482,13 +482,15 @@ export const openSessionInCmux = (
 
   console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid });
   if (isActive) {
+    // NOTE: cmux has AppleScript dictionary with terminal.workingDirectory and focus,
+    // but testing shows count windows returns 0 — AppleScript interface may be buggy.
+    // Using CLI (sidebar-state + tree) approach instead.
     const execPromise = (cmd: string): Promise<string> =>
       new Promise((resolve) => {
         exec(cmd, { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 1024 }, (_e: any, out: string) => resolve(out || ''));
       });
 
     (async () => {
-      // Step 1: Get all workspace IDs and check cwd via sidebar-state
       const wsListOutput = await execPromise(`${CMUX_CLI} list-workspaces 2>/dev/null`);
       if (!wsListOutput) {
         copyResumeCommand(sessionId, projectPath);
@@ -497,17 +499,16 @@ export const openSessionInCmux = (
       }
 
       const wsIds = wsListOutput.match(/workspace:\d+/g) || [];
-      console.log('[cmux] found workspaces:', wsIds.length);
 
-      // Pass 1: match by sidebar-state cwd (parallel for speed)
-      const cwdResults = await Promise.all(wsIds.map(async (wsId) => {
+      // Pass 1: parallel sidebar-state cwd match
+      const cwdResults = await Promise.all(wsIds.map(async (wsId: string) => {
         const state = await execPromise(`${CMUX_CLI} sidebar-state --workspace ${wsId} 2>/dev/null`);
         const cwdMatch = state.match(/^cwd=(.+)$/m);
         const focusedCwdMatch = state.match(/^focused_cwd=(.+)$/m);
         return { wsId, cwd: cwdMatch?.[1], focusedCwd: focusedCwdMatch?.[1] };
       }));
 
-      const cwdHit = cwdResults.find(r => r.cwd === projectPath || r.focusedCwd === projectPath);
+      const cwdHit = cwdResults.find((r: any) => r.cwd === projectPath || r.focusedCwd === projectPath);
       if (cwdHit) {
         console.log('[cmux] matched workspace by cwd:', cwdHit.wsId);
         exec(`${CMUX_CLI} select-workspace --workspace ${cwdHit.wsId}`);
@@ -515,21 +516,18 @@ export const openSessionInCmux = (
         return;
       }
 
-      // Pass 2: use tree to find surface title matching project name
+      // Pass 2: tree surface title match
       const projectName = path.basename(projectPath);
       if (projectName && projectName !== path.basename(os.homedir())) {
         const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
-        // Parse tree to find workspace containing a surface with matching project name
         const treeLines = treeOutput.split('\n');
         let currentWorkspace: string | null = null;
         for (const line of treeLines) {
           const wsMatch = line.match(/workspace (workspace:\d+)/);
-          if (wsMatch) {
-            currentWorkspace = wsMatch[1];
-          }
+          if (wsMatch) currentWorkspace = wsMatch[1];
           const surfaceMatch = line.match(/surface (surface:\d+)/);
           if (surfaceMatch && currentWorkspace && line.toLowerCase().includes(projectName.toLowerCase())) {
-            console.log('[cmux] matched by tree surface title:', currentWorkspace, 'surface:', surfaceMatch[1]);
+            console.log('[cmux] matched by tree surface title:', currentWorkspace);
             exec(`${CMUX_CLI} select-workspace --workspace ${currentWorkspace}`);
             exec('osascript -e \'tell application "cmux" to activate\'');
             return;
