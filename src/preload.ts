@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   notifyIDEPreferenceChanged: (preferredIDE: string) => ipcRenderer.send('ide-preference-changed', preferredIDE),
 
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getSessionTerminalApp: () => ipcRenderer.invoke('get-session-terminal-app'),
+  setSessionTerminalApp: (app: string) => ipcRenderer.send('set-session-terminal-app', app),
   getSessionTerminalMode: () => ipcRenderer.invoke('get-session-terminal-mode'),
   setSessionTerminalMode: (mode: string) => ipcRenderer.send('set-session-terminal-mode', mode),
   getSessionDisplayMode: () => ipcRenderer.invoke('get-session-display-mode'),
@@ -35,6 +37,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getClaudeSessions: (limit?: number) => ipcRenderer.invoke('get-claude-sessions', limit),
   searchClaudeSessions: (query: string) => ipcRenderer.invoke('search-claude-sessions', query),
   detectActiveSessions: () => ipcRenderer.invoke('detect-active-sessions'),
+  detectTerminalApps: (pidMap: Record<string, number>) => ipcRenderer.invoke('detect-terminal-apps', pidMap),
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number) =>
     ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid),
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>

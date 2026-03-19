@@ -78,14 +78,17 @@ const PopupDefaultExample = ({
   workingFolderPath,
   saveCallback,
   openCallback,
+  switcherMode,
 }: {
   workingFolderPath?: string;
   saveCallback?: (key: string, value: string) => void;
   openCallback?: any;
+  switcherMode?: string;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [appVersion, setAppVersion] = useState('');
+  const [sessionTerminalApp, setSessionTerminalApp] = useState('iterm2');
   const [sessionTerminalMode, setSessionTerminalMode] = useState('tab');
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
   const [defaultSwitcherMode, setDefaultSwitcherMode] = useState('projects');
@@ -93,6 +96,9 @@ const PopupDefaultExample = ({
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
       setAppVersion(version);
+    });
+    (window as any).electronAPI.getSessionTerminalApp().then((app: string) => {
+      setSessionTerminalApp(app || 'iterm2');
     });
     (window as any).electronAPI.getSessionTerminalMode().then((mode: string) => {
       setSessionTerminalMode(mode || 'tab');
@@ -289,6 +295,7 @@ const PopupDefaultExample = ({
             </label>
           </div>
 
+          {switcherMode === 'sessions' && (<>
           {/* Default Tab */}
           <div
             style={{
@@ -329,7 +336,7 @@ const PopupDefaultExample = ({
             </select>
           </div>
 
-          {/* Session Terminal Mode */}
+          {/* Session Terminal App */}
           <div
             style={{
               padding: '0 20px 20px',
@@ -344,7 +351,49 @@ const PopupDefaultExample = ({
                 color: THEME.text.primary,
               }}
             >
-              Session Terminal
+              Launch Terminal
+            </div>
+            <select
+              value={sessionTerminalApp}
+              onChange={(e) => {
+                const app = e.target.value;
+                setSessionTerminalApp(app);
+                (window as any).electronAPI.setSessionTerminalApp(app);
+              }}
+              style={{
+                backgroundColor: '#333',
+                color: THEME.text.primary,
+                border: '1px solid #555',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '13px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              <option value="iterm2">iTerm2</option>
+              <option value="ghostty">Ghostty</option>
+              <option value="cmux">cmux</option>
+            </select>
+          </div>
+
+          {/* Session Terminal Mode (for iTerm2 and Ghostty) */}
+          {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'ghostty') && (
+          <div
+            style={{
+              padding: '0 20px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '15px',
+                color: THEME.text.primary,
+              }}
+            >
+              Launch Mode
             </div>
             <select
               value={sessionTerminalMode}
@@ -368,6 +417,7 @@ const PopupDefaultExample = ({
               <option value="window">New Window</option>
             </select>
           </div>
+          )}
 
           {/* Session Display Mode */}
           <div
@@ -410,6 +460,8 @@ const PopupDefaultExample = ({
               <option value="both">First + Last</option>
             </select>
           </div>
+
+          </>)}
 
           {/* App Info and Quit Section */}
           <div

@@ -290,15 +290,76 @@ In the Settings popup:
 
 ## Terminal Support Matrix
 
-| Terminal | Detect | Switch | Launch |
-|----------|--------|--------|--------|
-| iTerm2 ✅ | `ps` + `lsof` + tty | AppleScript tty focus | AppleScript: new tab/window + execute |
-| Terminal.app | `ps` + tty | AppleScript focus | AppleScript: new tab + execute |
-| Ghostty | `ps` + parent check | AppleScript activate | Activate + paste command / clipboard |
-| cmux | `ps` + `cmux list-panes` | `cmux select-workspace` | Activate + paste command / clipboard |
-| Custom | — | — | User command template / clipboard |
+| Terminal | Detect | Switch | Launch | External Access |
+|----------|--------|--------|--------|----------------|
+| iTerm2 ✅ | `ps` + `lsof` + tty | AppleScript tty focus | AppleScript: new tab/window + execute | No restriction |
+| cmux ⚠️ | `ps` + `lsof` | `sidebar-state` cwd → `tree` title fallback | `cmux new-workspace --cwd --command` | Limited: requires socket `automation`/`allowAll` mode; same-cwd workspaces may mismatch (no per-surface PID/tty in API) |
+| Ghostty ✅ | `ps` + parent tree | AppleScript `working directory` match + `focus` | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
+| Terminal.app | `ps` + tty | AppleScript focus | AppleScript: new tab + execute | No restriction |
+| Custom | — | — | User command template / clipboard | — |
 
-**MVP: iTerm2 only.** Others planned for Phase 2+.
+### Auto-Detection of Terminal App
+
+For active sessions, CodeV walks the parent process tree (`ps -o comm=` → `ps -o ppid=`, up to 20 levels) to detect which terminal the claude process is running in. This means:
+- Clicking an iTerm2 session uses iTerm2 switch logic (even if settings say cmux)
+- Clicking a cmux session uses cmux switch logic (even if settings say iTerm2)
+- Settings terminal only affects **launching** non-active sessions
+- Active sessions show a small uppercase badge (ITERM2, CMUX, GHOSTTY) in the UI
+
+### cmux Integration Details
+
+**CLI commands available:**
+- `cmux new-workspace --cwd <path> --command "claude --resume <id>"` — create new workspace with command
+- `cmux select-workspace --workspace <id>` — switch to workspace
+- `cmux focus-panel --panel surface:N` — switch to specific tab within workspace
+- `cmux send "text"` / `cmux send-key enter` — send text/keys to focused terminal
+- `cmux list-workspaces [--json]` / `cmux list-pane-surfaces --pane pane:N` — inspect topology
+
+**Socket access restriction:**
+cmux CLI communicates via Unix socket (`/tmp/cmux.sock`). By default, only processes started inside cmux can connect (`cmuxOnly` mode). External apps like CodeV need the user to change the socket mode:
+
+| Mode | Access | How to enable |
+|------|--------|---------------|
+| `cmuxOnly` (default) | cmux child processes only | Default |
+| `automation` | Automation-friendly access | cmux Settings UI |
+| `allowAll` | Any local process | `CMUX_SOCKET_MODE=allowAll` or Settings UI |
+| `password` | Password-authenticated | Settings UI |
+| `off` | Disabled | Settings UI |
+
+**Recommended:** Ask user to set `automation` or `allowAll` mode in cmux Settings. Security impact is minimal — only local processes on the same machine can connect.
+
+**Switch strategy for cmux:**
+1. `ps aux` to find claude process PID
+2. Try connecting to `/tmp/cmux.sock` — if access denied, fallback to clipboard
+3. If connected: `cmux list-workspaces --json` to find which workspace has the session
+4. `cmux select-workspace` + `cmux focus-panel` to switch to correct tab
+
+**Launch strategy for cmux:**
+1. Try `cmux new-workspace --cwd <project> --command "claude --resume <id>"`
+2. If socket access denied: activate cmux + copy command to clipboard
+
+### Ghostty Integration Details
+
+Ghostty has full AppleScript support via `Ghostty.sdef`:
+
+**AppleScript capabilities:**
+- `terminal.working directory` — per-terminal cwd (for switch matching)
+- `focus` — focus a specific terminal, bringing its window to front
+- `select tab` — select a tab in its window
+- `new tab` / `new window` — create with optional `surface configuration`
+- `surface configuration` — record type with `command`, `initial working directory`, `initial input`, `wait after command`, `environment variables`
+- `input text` — send text to a terminal as if pasted
+- `send key` — send keyboard events
+
+**Switch:** Iterate all windows → tabs → terminals, match `working directory` to project path, call `focus`.
+
+**Launch:** `new tab`/`new window` with `surface configuration from {initial working directory, initial input:"claude --resume <id>\n"}`. Uses `initial input` (not `command`) because `command` is passed directly to `exec` without shell interpretation.
+
+**Note:** Ghostty CLI `+new-window` is not supported on macOS, but AppleScript `new window` works. The `.sdef` is similar to cmux's, but Ghostty's AppleScript actually works (cmux's `count windows` returns 0).
+
+### Branch Name: Why Not `git branch --show-current`
+
+`git branch --show-current` returns the repo's **current** branch, but a session may have been created on a different branch that has since been switched away. The JSONL `gitBranch` field preserves the branch at the time of each session entry, which is the correct value to display.
 
 ## Phase Plan
 

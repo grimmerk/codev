@@ -19,6 +19,7 @@ export interface ClaudeSession {
   messageCount: number;
   isActive: boolean;       // whether a claude process is running for this session
   activePid?: number;
+  terminalApp?: string;    // detected terminal: 'iterm2', 'cmux', 'ghostty', etc.
 }
 
 interface HistoryLine {
@@ -167,6 +168,35 @@ export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[]
  *    to find which project directory it's working in, then look up the latest
  *    session for that project from history.jsonl
  */
+/**
+ * Detect which terminal app a process is running in by walking parent process tree.
+ * Returns 'iterm2', 'cmux', 'ghostty', 'terminal', or 'unknown'.
+ */
+export const detectTerminalApp = async (pid: number): Promise<string> => {
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 2000 }, (_e: any, out: string) => resolve(out || ''));
+    });
+
+  let currentPid = pid;
+  for (let i = 0; i < 20; i++) {
+    const comm = (await execPromise(`ps -o comm= -p ${currentPid} 2>/dev/null`)).trim();
+    if (!comm) break;
+
+    const commLower = comm.toLowerCase();
+    if (commLower.includes('iterm') || commLower.includes('iterm2')) return 'iterm2';
+    if (commLower.includes('cmux')) return 'cmux';
+    if (commLower.includes('ghostty')) return 'ghostty';
+    if (commLower.includes('terminal.app') || (commLower === 'terminal')) return 'terminal';
+
+    const ppid = parseInt((await execPromise(`ps -o ppid= -p ${currentPid} 2>/dev/null`)).trim(), 10);
+    if (!ppid || ppid <= 1) break;
+    currentPid = ppid;
+  }
+  return 'unknown';
+};
+
 export const detectActiveSessions = async (): Promise<Map<string, number>> => {
   const now = Date.now();
   if (cachedActiveMap && (now - activeCacheTimestamp) < ACTIVE_CACHE_TTL_MS) {
@@ -226,6 +256,42 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
   cachedActiveMap = activeMap;
   activeCacheTimestamp = now;
   return activeMap;
+};
+
+/**
+ * Open a Claude Code session in the configured terminal.
+ */
+export const openSession = async (
+  sessionId: string,
+  projectPath: string,
+  isActive: boolean,
+  activePid?: number,
+  terminalApp: string = 'iterm2',
+  terminalMode: string = 'tab',
+): Promise<void> => {
+  let effectiveTerminal = terminalApp;
+
+  // For active sessions, auto-detect which terminal they're running in
+  if (isActive && activePid) {
+    const detected = await detectTerminalApp(activePid);
+    if (detected !== 'unknown') {
+      effectiveTerminal = detected;
+      console.log(`[openSession] auto-detected terminal: ${detected} for pid ${activePid}`);
+    }
+  }
+
+  switch (effectiveTerminal) {
+    case 'cmux':
+      openSessionInCmux(sessionId, projectPath, isActive, activePid);
+      break;
+    case 'ghostty':
+      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode);
+      break;
+    case 'iterm2':
+    default:
+      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode);
+      break;
+  }
 };
 
 /**
@@ -423,6 +489,176 @@ export const loadLastAssistantResponses = async (
 
   await Promise.all(promises);
   return responses;
+};
+
+/**
+ * Open a Claude Code session in Ghostty.
+ * Full AppleScript support: working directory matching, focus, new tab with command.
+ */
+export const openSessionInGhostty = (
+  sessionId: string,
+  projectPath: string,
+  isActive: boolean,
+  terminalMode: string = 'tab',
+): void => {
+  const { exec } = require('child_process');
+
+  if (isActive) {
+    // Switch to existing terminal by matching working directory
+    const tmpScript = '/tmp/codev-ghostty-switch.scpt';
+    const switchScript = `tell application "Ghostty"
+  activate
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with term in terminals of t
+        if working directory of term is "${projectPath}" then
+          focus term
+          return "found"
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return "not found"
+end tell`;
+    fs.writeFileSync(tmpScript, switchScript);
+    exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
+      const result = (stdout || '').trim();
+      console.log('[ghostty] switch result:', result);
+      if (result !== 'found') {
+        // Fallback: clipboard + activate
+        copyResumeCommand(sessionId, projectPath);
+      }
+      try { fs.unlinkSync(tmpScript); } catch {}
+    });
+  } else {
+    // Launch new tab with command via surface configuration
+    // Use initial working directory for cd, and initialInput to type the resume command
+    const tmpScript = '/tmp/codev-ghostty-launch.scpt';
+    const resumeCmd = `claude --resume ${sessionId}`;
+    const launchScript = terminalMode === 'window'
+      ? `tell application "Ghostty"
+  activate
+  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${resumeCmd}\\n"}
+  new window with configuration cfg
+end tell`
+      : `tell application "Ghostty"
+  activate
+  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${resumeCmd}\\n"}
+  if (count windows) > 0 then
+    new tab in front window with configuration cfg
+  else
+    new window with configuration cfg
+  end if
+end tell`;
+    fs.writeFileSync(tmpScript, launchScript);
+    exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
+      if (error) {
+        console.error('[ghostty] launch error:', error.message);
+        // Fallback: clipboard
+        copyResumeCommand(sessionId, projectPath);
+      }
+      try { fs.unlinkSync(tmpScript); } catch {}
+    });
+  }
+};
+
+/**
+ * Open a Claude Code session in cmux.
+ * Requires cmux socket mode set to 'automation' or 'allowAll'.
+ * Falls back to clipboard if socket access denied.
+ */
+const CMUX_CLI = '/Applications/cmux.app/Contents/Resources/bin/cmux';
+
+export const openSessionInCmux = (
+  sessionId: string,
+  projectPath: string,
+  isActive: boolean,
+  activePid?: number,
+): void => {
+  const { exec } = require('child_process');
+  const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
+
+  console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid });
+  if (isActive) {
+    // NOTE: cmux has AppleScript dictionary with terminal.workingDirectory and focus,
+    // but testing shows count windows returns 0 — AppleScript interface may be buggy.
+    // Using CLI (sidebar-state + tree) approach instead.
+    const execPromise = (cmd: string): Promise<string> =>
+      new Promise((resolve) => {
+        exec(cmd, { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 1024 }, (_e: any, out: string) => resolve(out || ''));
+      });
+
+    (async () => {
+      const wsListOutput = await execPromise(`${CMUX_CLI} list-workspaces 2>/dev/null`);
+      if (!wsListOutput) {
+        copyResumeCommand(sessionId, projectPath);
+        exec('osascript -e \'tell application "cmux" to activate\'');
+        return;
+      }
+
+      const wsIds = wsListOutput.match(/workspace:\d+/g) || [];
+
+      // Pass 1: parallel sidebar-state cwd match
+      const cwdResults = await Promise.all(wsIds.map(async (wsId: string) => {
+        const state = await execPromise(`${CMUX_CLI} sidebar-state --workspace ${wsId} 2>/dev/null`);
+        const cwdMatch = state.match(/^cwd=(.+)$/m);
+        const focusedCwdMatch = state.match(/^focused_cwd=(.+)$/m);
+        return { wsId, cwd: cwdMatch?.[1], focusedCwd: focusedCwdMatch?.[1] };
+      }));
+
+      const cwdHit = cwdResults.find((r: any) => r.cwd === projectPath || r.focusedCwd === projectPath);
+      if (cwdHit) {
+        console.log('[cmux] matched workspace by cwd:', cwdHit.wsId);
+        exec(`${CMUX_CLI} select-workspace --workspace ${cwdHit.wsId}`);
+        exec('osascript -e \'tell application "cmux" to activate\'');
+        return;
+      }
+
+      // Pass 2: tree surface title match
+      const projectName = path.basename(projectPath);
+      if (projectName && projectName !== path.basename(os.homedir())) {
+        const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
+        const treeLines = treeOutput.split('\n');
+        let currentWorkspace: string | null = null;
+        for (const line of treeLines) {
+          const wsMatch = line.match(/workspace (workspace:\d+)/);
+          if (wsMatch) currentWorkspace = wsMatch[1];
+          const surfaceMatch = line.match(/surface (surface:\d+)/);
+          if (surfaceMatch && currentWorkspace && line.toLowerCase().includes(projectName.toLowerCase())) {
+            console.log('[cmux] matched by tree surface title:', currentWorkspace);
+            exec(`${CMUX_CLI} select-workspace --workspace ${currentWorkspace}`);
+            exec('osascript -e \'tell application "cmux" to activate\'');
+            return;
+          }
+        }
+      }
+
+      console.log('[cmux] no match found, activating cmux');
+      exec('osascript -e \'tell application "cmux" to activate\'');
+    })();
+  } else {
+    // Launch new workspace with command
+    const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "claude --resume ${sessionId}"`;
+    console.log('[cmux] launch cmd:', cmuxCmd);
+    exec(cmuxCmd,
+      { encoding: 'utf-8', timeout: 5000 },
+      (error: any, stdout: string, stderr: string) => {
+        console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
+        if (error) {
+          console.error('cmux new-workspace failed, falling back to clipboard:', error.message);
+          copyResumeCommand(sessionId, projectPath);
+          exec('osascript -e \'tell application "cmux" to activate\'');
+        } else {
+          // Select the newly created workspace and activate cmux
+          const wsMatch = stdout.match(/workspace:\d+/);
+          if (wsMatch) {
+            exec(`${CMUX_CLI} select-workspace --workspace ${wsMatch[0]}`);
+          }
+          exec('osascript -e \'tell application "cmux" to activate\'');
+        }
+      }
+    );
+  }
 };
 
 /**
