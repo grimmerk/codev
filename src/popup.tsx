@@ -351,7 +351,7 @@ const PopupDefaultExample = ({
                 color: THEME.text.primary,
               }}
             >
-              Session Terminal
+              Launch Terminal
             </div>
             <select
               value={sessionTerminalApp}
