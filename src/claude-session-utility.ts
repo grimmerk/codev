@@ -535,7 +535,7 @@ end tell`;
     const tmpScript = '/tmp/codev-ghostty-launch.scpt';
     const launchScript = `tell application "Ghostty"
   activate
-  set cfg to new surface configuration with configuration {command:"${command.replace(/"/g, '\\"')}", initial working directory:"${projectPath}"}
+  set cfg to new surface configuration from {command:"${command.replace(/"/g, '\\"')}", initial working directory:"${projectPath}"}
   if (count windows) > 0 then
     new tab in front window with configuration cfg
   else
