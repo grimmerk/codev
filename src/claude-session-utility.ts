@@ -531,11 +531,12 @@ end tell`;
     });
   } else {
     // Launch new tab with command via surface configuration
-    const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
+    // Use initial working directory for cd, and initialInput to type the resume command
     const tmpScript = '/tmp/codev-ghostty-launch.scpt';
+    const resumeCmd = `claude --resume ${sessionId}`;
     const launchScript = `tell application "Ghostty"
   activate
-  set cfg to new surface configuration from {command:"${command.replace(/"/g, '\\"')}", initial working directory:"${projectPath}"}
+  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${resumeCmd}\\n"}
   if (count windows) > 0 then
     new tab in front window with configuration cfg
   else
