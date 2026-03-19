@@ -393,7 +393,7 @@ const PopupDefaultExample = ({
                 color: THEME.text.primary,
               }}
             >
-              Open Mode
+              Launch Mode
             </div>
             <select
               value={sessionTerminalMode}
