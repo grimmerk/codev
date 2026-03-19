@@ -285,7 +285,7 @@ export const openSession = async (
       openSessionInCmux(sessionId, projectPath, isActive, activePid);
       break;
     case 'ghostty':
-      openSessionInGhostty(sessionId, projectPath);
+      openSessionInGhostty(sessionId, projectPath, isActive);
       break;
     case 'iterm2':
     default:
@@ -493,16 +493,65 @@ export const loadLastAssistantResponses = async (
 
 /**
  * Open a Claude Code session in Ghostty.
- * Limited on macOS — no tab-level switching, no new-tab command.
- * Copies resume command to clipboard and activates Ghostty.
+ * Full AppleScript support: working directory matching, focus, new tab with command.
  */
 export const openSessionInGhostty = (
   sessionId: string,
   projectPath: string,
+  isActive: boolean,
 ): void => {
   const { exec } = require('child_process');
-  copyResumeCommand(sessionId, projectPath);
-  exec('osascript -e \'tell application "Ghostty" to activate\'');
+
+  if (isActive) {
+    // Switch to existing terminal by matching working directory
+    const tmpScript = '/tmp/codev-ghostty-switch.scpt';
+    const switchScript = `tell application "Ghostty"
+  activate
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with term in terminals of t
+        if working directory of term is "${projectPath}" then
+          focus term
+          return "found"
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return "not found"
+end tell`;
+    fs.writeFileSync(tmpScript, switchScript);
+    exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
+      const result = (stdout || '').trim();
+      console.log('[ghostty] switch result:', result);
+      if (result !== 'found') {
+        // Fallback: clipboard + activate
+        copyResumeCommand(sessionId, projectPath);
+      }
+      try { fs.unlinkSync(tmpScript); } catch {}
+    });
+  } else {
+    // Launch new tab with command via surface configuration
+    const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
+    const tmpScript = '/tmp/codev-ghostty-launch.scpt';
+    const launchScript = `tell application "Ghostty"
+  activate
+  set cfg to new surface configuration with configuration {command:"${command.replace(/"/g, '\\"')}", initial working directory:"${projectPath}"}
+  if (count windows) > 0 then
+    new tab in front window with configuration cfg
+  else
+    new window with configuration cfg
+  end if
+end tell`;
+    fs.writeFileSync(tmpScript, launchScript);
+    exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
+      if (error) {
+        console.error('[ghostty] launch error:', error.message);
+        // Fallback: clipboard
+        copyResumeCommand(sessionId, projectPath);
+      }
+      try { fs.unlinkSync(tmpScript); } catch {}
+    });
+  }
 };
 
 /**
