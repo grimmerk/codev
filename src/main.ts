@@ -16,6 +16,7 @@ import {
   readClaudeSessions,
   searchClaudeSessions,
   detectActiveSessions,
+  detectTerminalApp,
   openSession,
   copyResumeCommand,
   invalidateSessionCache,
@@ -1460,6 +1461,14 @@ ipcMain.handle('search-claude-sessions', (_event, query: string) => {
 ipcMain.handle('detect-active-sessions', async () => {
   const activeMap = await detectActiveSessions();
   return Object.fromEntries(activeMap);
+});
+
+ipcMain.handle('detect-terminal-apps', async (_event, pidMap: Record<string, number>) => {
+  const results: Record<string, string> = {};
+  await Promise.all(Object.entries(pidMap).map(async ([sessionId, pid]) => {
+    results[sessionId] = await detectTerminalApp(pid);
+  }));
+  return results;
 });
 
 ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number) => {

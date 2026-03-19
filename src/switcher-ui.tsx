@@ -325,6 +325,7 @@ function SwitcherApp() {
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<Record<string, string>>({});
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
+  const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
   const activeStateRef = useRef<Record<string, number>>({});
 
@@ -384,6 +385,15 @@ function SwitcherApp() {
           (window as any).electronAPI.loadLastAssistantResponses(activeSessions).then((responses: Record<string, string>) => {
             if (responses && Object.keys(responses).length > 0) {
               setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+            }
+          });
+        }
+
+        // Step 2c: Detect terminal apps for active sessions
+        if (Object.keys(activeMap).length > 0) {
+          (window as any).electronAPI.detectTerminalApps(activeMap).then((apps: Record<string, string>) => {
+            if (apps && Object.keys(apps).length > 0) {
+              setTerminalApps((prev: Record<string, string>) => ({ ...prev, ...apps }));
             }
           });
         }
@@ -850,6 +860,18 @@ function SwitcherApp() {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
+                        {session.isActive && terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' && (
+                          <span style={{
+                            fontSize: '9px',
+                            color: '#aaa',
+                            border: '1px solid #555',
+                            borderRadius: '3px',
+                            padding: '1px 4px',
+                            textTransform: 'uppercase',
+                          }}>
+                            {terminalApps[session.sessionId]}
+                          </span>
+                        )}
                         <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
                           {session.messageCount} msgs
                         </span>

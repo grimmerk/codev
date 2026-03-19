@@ -19,6 +19,7 @@ export interface ClaudeSession {
   messageCount: number;
   isActive: boolean;       // whether a claude process is running for this session
   activePid?: number;
+  terminalApp?: string;    // detected terminal: 'iterm2', 'cmux', 'ghostty', etc.
 }
 
 interface HistoryLine {
@@ -167,6 +168,35 @@ export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[]
  *    to find which project directory it's working in, then look up the latest
  *    session for that project from history.jsonl
  */
+/**
+ * Detect which terminal app a process is running in by walking parent process tree.
+ * Returns 'iterm2', 'cmux', 'ghostty', 'terminal', or 'unknown'.
+ */
+export const detectTerminalApp = async (pid: number): Promise<string> => {
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 2000 }, (_e: any, out: string) => resolve(out || ''));
+    });
+
+  let currentPid = pid;
+  for (let i = 0; i < 20; i++) {
+    const comm = (await execPromise(`ps -o comm= -p ${currentPid} 2>/dev/null`)).trim();
+    if (!comm) break;
+
+    const commLower = comm.toLowerCase();
+    if (commLower.includes('iterm') || commLower.includes('iterm2')) return 'iterm2';
+    if (commLower.includes('cmux')) return 'cmux';
+    if (commLower.includes('ghostty')) return 'ghostty';
+    if (commLower.includes('terminal.app') || (commLower === 'terminal')) return 'terminal';
+
+    const ppid = parseInt((await execPromise(`ps -o ppid= -p ${currentPid} 2>/dev/null`)).trim(), 10);
+    if (!ppid || ppid <= 1) break;
+    currentPid = ppid;
+  }
+  return 'unknown';
+};
+
 export const detectActiveSessions = async (): Promise<Map<string, number>> => {
   const now = Date.now();
   if (cachedActiveMap && (now - activeCacheTimestamp) < ACTIVE_CACHE_TTL_MS) {
@@ -231,15 +261,26 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
 /**
  * Open a Claude Code session in the configured terminal.
  */
-export const openSession = (
+export const openSession = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
   activePid?: number,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
-): void => {
-  switch (terminalApp) {
+): Promise<void> => {
+  let effectiveTerminal = terminalApp;
+
+  // For active sessions, auto-detect which terminal they're running in
+  if (isActive && activePid) {
+    const detected = await detectTerminalApp(activePid);
+    if (detected !== 'unknown') {
+      effectiveTerminal = detected;
+      console.log(`[openSession] auto-detected terminal: ${detected} for pid ${activePid}`);
+    }
+  }
+
+  switch (effectiveTerminal) {
     case 'cmux':
       openSessionInCmux(sessionId, projectPath, isActive, activePid);
       break;
