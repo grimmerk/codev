@@ -293,10 +293,18 @@ In the Settings popup:
 | Terminal | Detect | Switch | Launch | External Access |
 |----------|--------|--------|--------|----------------|
 | iTerm2 ✅ | `ps` + `lsof` + tty | AppleScript tty focus | AppleScript: new tab/window + execute | No restriction |
-| cmux ✅ | `ps` + `lsof` | `cmux select-workspace` + `cmux focus-panel` | `cmux new-workspace --cwd --command` | Requires socket mode change (see below) |
+| cmux ⚠️ | `ps` + `lsof` | `sidebar-state` cwd → `tree` title fallback | `cmux new-workspace --cwd --command` | Limited: requires socket `automation`/`allowAll` mode; same-cwd workspaces may mismatch (no per-surface PID/tty in API) |
+| Ghostty ✅ | `ps` + parent tree | AppleScript `working directory` match + `focus` | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
 | Terminal.app | `ps` + tty | AppleScript focus | AppleScript: new tab + execute | No restriction |
-| Ghostty | `ps` + parent check | AppleScript activate (app level only, no tab precision) | `open -na Ghostty.app --args -e <cmd>` (opens new instance) or clipboard | macOS `+new-window` not supported |
 | Custom | — | — | User command template / clipboard | — |
+
+### Auto-Detection of Terminal App
+
+For active sessions, CodeV walks the parent process tree (`ps -o comm=` → `ps -o ppid=`, up to 20 levels) to detect which terminal the claude process is running in. This means:
+- Clicking an iTerm2 session uses iTerm2 switch logic (even if settings say cmux)
+- Clicking a cmux session uses cmux switch logic (even if settings say iTerm2)
+- Settings terminal only affects **launching** non-active sessions
+- Active sessions show a small uppercase badge (ITERM2, CMUX, GHOSTTY) in the UI
 
 ### cmux Integration Details
 
@@ -332,14 +340,22 @@ cmux CLI communicates via Unix socket (`/tmp/cmux.sock`). By default, only proce
 
 ### Ghostty Integration Details
 
-**macOS limitations:**
-- `ghostty +new-window` is **not supported on macOS** ("not supported on this platform")
-- On macOS, Ghostty recommends `open -na Ghostty.app --args -e <command>` but this opens a **new Ghostty instance**, not a new tab in existing window
-- No AppleScript dictionary (no .sdef file) — only basic `activate` works
-- No CLI for sending text/keys to existing sessions
-- No tab-level window switching
+Ghostty has full AppleScript support via `Ghostty.sdef`:
 
-**Fallback approach:** Activate Ghostty app + copy `cd <path> && claude --resume <id>` to clipboard. User pastes with ⌘V + Enter.
+**AppleScript capabilities:**
+- `terminal.working directory` — per-terminal cwd (for switch matching)
+- `focus` — focus a specific terminal, bringing its window to front
+- `select tab` — select a tab in its window
+- `new tab` / `new window` — create with optional `surface configuration`
+- `surface configuration` — record type with `command`, `initial working directory`, `initial input`, `wait after command`, `environment variables`
+- `input text` — send text to a terminal as if pasted
+- `send key` — send keyboard events
+
+**Switch:** Iterate all windows → tabs → terminals, match `working directory` to project path, call `focus`.
+
+**Launch:** `new tab`/`new window` with `surface configuration from {initial working directory, initial input:"claude --resume <id>\n"}`. Uses `initial input` (not `command`) because `command` is passed directly to `exec` without shell interpretation.
+
+**Note:** Ghostty CLI `+new-window` is not supported on macOS, but AppleScript `new window` works. The `.sdef` is similar to cmux's, but Ghostty's AppleScript actually works (cmux's `count windows` returns 0).
 
 ### Branch Name: Why Not `git branch --show-current`
 
