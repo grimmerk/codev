@@ -16,7 +16,7 @@ import {
   readClaudeSessions,
   searchClaudeSessions,
   detectActiveSessions,
-  openSessionInITerm2,
+  openSession,
   copyResumeCommand,
   invalidateSessionCache,
   loadSessionEnrichment,
@@ -1416,6 +1416,14 @@ ipcMain.on('set-login-item-settings', (_event, openAtLogin: boolean) => {
   app.setLoginItemSettings({ openAtLogin });
 });
 
+ipcMain.handle('get-session-terminal-app', async () => {
+  return (await settings.get('session-terminal-app')) || 'iterm2';
+});
+
+ipcMain.on('set-session-terminal-app', async (_event, app: string) => {
+  await settings.set('session-terminal-app', app);
+});
+
 ipcMain.handle('get-session-terminal-mode', async () => {
   return (await settings.get('session-terminal-mode')) || 'tab';
 });
@@ -1455,8 +1463,9 @@ ipcMain.handle('detect-active-sessions', async () => {
 });
 
 ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number) => {
+  const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
   const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
-  openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode);
+  openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode);
 });
 
 ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {

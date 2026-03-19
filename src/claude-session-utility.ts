@@ -229,6 +229,31 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
 };
 
 /**
+ * Open a Claude Code session in the configured terminal.
+ */
+export const openSession = (
+  sessionId: string,
+  projectPath: string,
+  isActive: boolean,
+  activePid?: number,
+  terminalApp: string = 'iterm2',
+  terminalMode: string = 'tab',
+): void => {
+  switch (terminalApp) {
+    case 'cmux':
+      openSessionInCmux(sessionId, projectPath, isActive, activePid);
+      break;
+    case 'ghostty':
+      openSessionInGhostty(sessionId, projectPath);
+      break;
+    case 'iterm2':
+    default:
+      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode);
+      break;
+  }
+};
+
+/**
  * Open a Claude Code session in iTerm2
  * If the session is already active, switch to its tab
  * Otherwise, open a new tab and run claude --resume
@@ -423,6 +448,89 @@ export const loadLastAssistantResponses = async (
 
   await Promise.all(promises);
   return responses;
+};
+
+/**
+ * Open a Claude Code session in Ghostty.
+ * Limited on macOS — no tab-level switching, no new-tab command.
+ * Copies resume command to clipboard and activates Ghostty.
+ */
+export const openSessionInGhostty = (
+  sessionId: string,
+  projectPath: string,
+): void => {
+  const { exec } = require('child_process');
+  copyResumeCommand(sessionId, projectPath);
+  exec('osascript -e \'tell application "Ghostty" to activate\'');
+};
+
+/**
+ * Open a Claude Code session in cmux.
+ * Requires cmux socket mode set to 'automation' or 'allowAll'.
+ * Falls back to clipboard if socket access denied.
+ */
+const CMUX_CLI = '/Applications/cmux.app/Contents/Resources/bin/cmux';
+
+export const openSessionInCmux = (
+  sessionId: string,
+  projectPath: string,
+  isActive: boolean,
+  activePid?: number,
+): void => {
+  const { exec } = require('child_process');
+  const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
+
+  if (isActive) {
+    // Try to switch to the workspace running this session
+    // First, find which workspace has the matching tty
+    exec(`${CMUX_CLI} list-workspaces --json 2>/dev/null`, { encoding: 'utf-8', timeout: 3000 },
+      (error: any, stdout: string) => {
+        if (error || !stdout) {
+          // Socket access denied or cmux not running — activate + clipboard
+          copyResumeCommand(sessionId, projectPath);
+          exec('osascript -e \'tell application "cmux" to activate\'');
+          return;
+        }
+        // Parse workspace list and try to find matching one by cwd
+        // cmux list-workspaces output has workspace IDs and paths
+        const lines = stdout.split('\n');
+        const projectName = path.basename(projectPath);
+        let targetWorkspace: string | null = null;
+
+        for (const line of lines) {
+          const wsMatch = line.match(/^[*\s]*(workspace:\d+)/);
+          if (wsMatch && line.toLowerCase().includes(projectName.toLowerCase())) {
+            targetWorkspace = wsMatch[1];
+            break;
+          }
+        }
+
+        if (targetWorkspace) {
+          exec(`${CMUX_CLI} select-workspace --workspace ${targetWorkspace}`, (err: any) => {
+            if (err) {
+              console.error('Error switching cmux workspace:', err);
+            }
+          });
+        } else {
+          // Can't find workspace, just activate cmux
+          exec('osascript -e \'tell application "cmux" to activate\'');
+        }
+      }
+    );
+  } else {
+    // Launch new workspace with command
+    exec(`${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "claude --resume ${sessionId}" 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 5000 },
+      (error: any) => {
+        if (error) {
+          // Socket access denied — fallback to clipboard + activate
+          console.error('cmux new-workspace failed, falling back to clipboard:', error.message);
+          copyResumeCommand(sessionId, projectPath);
+          exec('osascript -e \'tell application "cmux" to activate\'');
+        }
+      }
+    );
+  }
 };
 
 /**
