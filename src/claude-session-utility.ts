@@ -212,6 +212,8 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
     });
 
   const activeMap = new Map<string, number>();
+  // Track which session IDs are already claimed to avoid duplicate assignment
+  const claimedSessionIds = new Set<string>();
 
   try {
     const output = await execPromise(
@@ -223,6 +225,8 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
       return activeMap;
     }
 
+    // First pass: handle processes with explicit --resume <id>
+    const cwdProcesses: { pid: number; line: string }[] = [];
     for (const line of output.split('\n')) {
       if (!line.trim()) continue;
 
@@ -233,19 +237,28 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
       const resumeMatch = line.match(/--resume\s+([a-f0-9-]{36})/);
       if (resumeMatch) {
         activeMap.set(resumeMatch[1], pid);
+        claimedSessionIds.add(resumeMatch[1]);
         continue;
       }
 
       if (line.includes('claude')) {
-        const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
-        const cwdMatch = cwdOutput.match(/^n(.+)$/m);
-        if (cwdMatch) {
-          const cwd = cwdMatch[1];
-          const allSessions = readClaudeSessions(500);
-          const match = allSessions.find((s) => s.project === cwd);
-          if (match) {
-            activeMap.set(match.sessionId, pid);
-          }
+        cwdProcesses.push({ pid, line });
+      }
+    }
+
+    // Second pass: handle claude -r processes (no explicit session ID)
+    // Use lsof to find cwd, then match to unclaimed sessions
+    const allSessions = readClaudeSessions(500);
+    for (const { pid } of cwdProcesses) {
+      const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
+      const cwdMatch = cwdOutput.match(/^n(.+)$/m);
+      if (cwdMatch) {
+        const cwd = cwdMatch[1];
+        // Find the first unclaimed session with this cwd
+        const match = allSessions.find((s) => s.project === cwd && !claimedSessionIds.has(s.sessionId));
+        if (match) {
+          activeMap.set(match.sessionId, pid);
+          claimedSessionIds.add(match.sessionId);
         }
       }
     }
