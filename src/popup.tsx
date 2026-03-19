@@ -78,10 +78,12 @@ const PopupDefaultExample = ({
   workingFolderPath,
   saveCallback,
   openCallback,
+  switcherMode,
 }: {
   workingFolderPath?: string;
   saveCallback?: (key: string, value: string) => void;
   openCallback?: any;
+  switcherMode?: string;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
@@ -293,6 +295,7 @@ const PopupDefaultExample = ({
             </label>
           </div>
 
+          {switcherMode === 'sessions' && (<>
           {/* Default Tab */}
           <div
             style={{
@@ -457,6 +460,8 @@ const PopupDefaultExample = ({
               <option value="both">First + Last</option>
             </select>
           </div>
+
+          </>)}
 
           {/* App Info and Quit Section */}
           <div

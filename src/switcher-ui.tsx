@@ -698,6 +698,7 @@ function SwitcherApp() {
           </div>
           <PopupDefaultExample
             workingFolderPath={workingFolderPath}
+            switcherMode={mode}
             saveCallback={(key: string, value: string) => {
               if (key === 'sessionDisplayMode') {
                 setSessionDisplayMode(value);
