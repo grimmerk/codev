@@ -482,39 +482,62 @@ export const openSessionInCmux = (
 
   console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid });
   if (isActive) {
-    // Get all workspace IDs, then check each one's cwd via sidebar-state
-    exec(`${CMUX_CLI} list-workspaces 2>/dev/null`, { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 1024 },
-      async (error: any, stdout: string) => {
-        if (error || !stdout) {
-          copyResumeCommand(sessionId, projectPath);
+    const execPromise = (cmd: string): Promise<string> =>
+      new Promise((resolve) => {
+        exec(cmd, { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 1024 }, (_e: any, out: string) => resolve(out || ''));
+      });
+
+    (async () => {
+      // Step 1: Get all workspace IDs and check cwd via sidebar-state
+      const wsListOutput = await execPromise(`${CMUX_CLI} list-workspaces 2>/dev/null`);
+      if (!wsListOutput) {
+        copyResumeCommand(sessionId, projectPath);
+        exec('osascript -e \'tell application "cmux" to activate\'');
+        return;
+      }
+
+      const wsIds = wsListOutput.match(/workspace:\d+/g) || [];
+      console.log('[cmux] found workspaces:', wsIds.length);
+
+      // Pass 1: match by sidebar-state cwd (covers 1st tab / single tab case)
+      for (const wsId of wsIds) {
+        const state = await execPromise(`${CMUX_CLI} sidebar-state --workspace ${wsId} 2>/dev/null`);
+        const cwdMatch = state.match(/^cwd=(.+)$/m);
+        const focusedCwdMatch = state.match(/^focused_cwd=(.+)$/m);
+        if ((cwdMatch && cwdMatch[1] === projectPath) ||
+            (focusedCwdMatch && focusedCwdMatch[1] === projectPath)) {
+          console.log('[cmux] matched workspace by cwd:', wsId);
+          exec(`${CMUX_CLI} select-workspace --workspace ${wsId}`);
           exec('osascript -e \'tell application "cmux" to activate\'');
           return;
         }
+      }
 
-        const wsIds = stdout.match(/workspace:\d+/g) || [];
-        console.log('[cmux] found workspaces:', wsIds.length);
-
-        // Check each workspace's cwd via sidebar-state
-        const execPromise = (cmd: string): Promise<string> =>
-          new Promise((resolve) => {
-            exec(cmd, { encoding: 'utf-8', timeout: 2000 }, (_e: any, out: string) => resolve(out || ''));
-          });
-
-        for (const wsId of wsIds) {
-          const state = await execPromise(`${CMUX_CLI} sidebar-state --workspace ${wsId} 2>/dev/null`);
-          const cwdMatch = state.match(/^cwd=(.+)$/m);
-          if (cwdMatch && cwdMatch[1] === projectPath) {
-            console.log('[cmux] matched workspace by cwd:', wsId, cwdMatch[1]);
-            exec(`${CMUX_CLI} select-workspace --workspace ${wsId}`);
+      // Pass 2: use tree to find surface title matching project name
+      const projectName = path.basename(projectPath);
+      if (projectName && projectName !== path.basename(os.homedir())) {
+        const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
+        // Parse tree to find workspace containing a surface with matching project name
+        const treeLines = treeOutput.split('\n');
+        let currentWorkspace: string | null = null;
+        for (const line of treeLines) {
+          const wsMatch = line.match(/workspace (workspace:\d+)/);
+          if (wsMatch) {
+            currentWorkspace = wsMatch[1];
+          }
+          const surfaceMatch = line.match(/surface (surface:\d+)/);
+          if (surfaceMatch && currentWorkspace && line.toLowerCase().includes(projectName.toLowerCase())) {
+            console.log('[cmux] matched by tree surface title:', currentWorkspace, 'surface:', surfaceMatch[1]);
+            exec(`${CMUX_CLI} select-workspace --workspace ${currentWorkspace}`);
             exec('osascript -e \'tell application "cmux" to activate\'');
             return;
           }
         }
-
-        console.log('[cmux] no workspace cwd match, activating cmux');
-        exec('osascript -e \'tell application "cmux" to activate\'');
       }
-    );
+
+      console.log('[cmux] no match found, activating cmux');
+      exec('osascript -e \'tell application "cmux" to activate\'');
+    })();
   } else {
     // Launch new workspace with command
     const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "claude --resume ${sessionId}"`;
