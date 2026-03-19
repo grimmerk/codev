@@ -372,8 +372,8 @@ const PopupDefaultExample = ({
               }}
             >
               <option value="iterm2">iTerm2</option>
-              <option value="cmux">cmux</option>
               <option value="ghostty">Ghostty</option>
+              <option value="cmux">cmux</option>
             </select>
           </div>
 
