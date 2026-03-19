@@ -480,27 +480,27 @@ export const openSessionInCmux = (
   const { exec } = require('child_process');
   const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
 
+  console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid });
   if (isActive) {
     // Try to switch to the workspace running this session
-    // First, find which workspace has the matching tty
-    exec(`${CMUX_CLI} list-workspaces --json 2>/dev/null`, { encoding: 'utf-8', timeout: 3000 },
+    exec(`${CMUX_CLI} list-workspaces 2>/dev/null`, { encoding: 'utf-8', timeout: 3000 },
       (error: any, stdout: string) => {
+        console.log('[cmux] list-workspaces result:', { error: error?.message, stdout: stdout?.substring(0, 500) });
         if (error || !stdout) {
-          // Socket access denied or cmux not running — activate + clipboard
           copyResumeCommand(sessionId, projectPath);
           exec('osascript -e \'tell application "cmux" to activate\'');
           return;
         }
-        // Parse workspace list and try to find matching one by cwd
-        // cmux list-workspaces output has workspace IDs and paths
         const lines = stdout.split('\n');
         const projectName = path.basename(projectPath);
         let targetWorkspace: string | null = null;
 
+        console.log('[cmux] looking for project:', projectName);
         for (const line of lines) {
           const wsMatch = line.match(/^[*\s]*(workspace:\d+)/);
           if (wsMatch && line.toLowerCase().includes(projectName.toLowerCase())) {
             targetWorkspace = wsMatch[1];
+            console.log('[cmux] matched workspace:', targetWorkspace, 'from line:', line.trim());
             break;
           }
         }
@@ -512,20 +512,29 @@ export const openSessionInCmux = (
             }
           });
         } else {
-          // Can't find workspace, just activate cmux
+          console.log('[cmux] no workspace match found, activating cmux');
           exec('osascript -e \'tell application "cmux" to activate\'');
         }
       }
     );
   } else {
     // Launch new workspace with command
-    exec(`${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "claude --resume ${sessionId}" 2>/dev/null`,
+    const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "claude --resume ${sessionId}"`;
+    console.log('[cmux] launch cmd:', cmuxCmd);
+    exec(cmuxCmd,
       { encoding: 'utf-8', timeout: 5000 },
-      (error: any) => {
+      (error: any, stdout: string, stderr: string) => {
+        console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
         if (error) {
-          // Socket access denied — fallback to clipboard + activate
           console.error('cmux new-workspace failed, falling back to clipboard:', error.message);
           copyResumeCommand(sessionId, projectPath);
+          exec('osascript -e \'tell application "cmux" to activate\'');
+        } else {
+          // Select the newly created workspace and activate cmux
+          const wsMatch = stdout.match(/workspace:\d+/);
+          if (wsMatch) {
+            exec(`${CMUX_CLI} select-workspace --workspace ${wsMatch[0]}`);
+          }
           exec('osascript -e \'tell application "cmux" to activate\'');
         }
       }
