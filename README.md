@@ -5,7 +5,27 @@ Use this to quickly open and switch VS Code/Cursor projects, and use AI assistan
 ## Features
 
 - use shortcut/tray (`Ctrl+Cmd+R`) menu to quickly launch a UI listing recent projects (folders, workspaces, and files), then select one to open it in VS Code or Cursor.
+- Claude Code session list: press `Tab` to switch between Projects and Sessions. Search, view custom titles, git branches, and resume sessions in iTerm2, Ghostty, or cmux.
 - AI Assistant features. CodeV now includes a Code AI Assistant feature powered by Anthropic's Claude AI. This feature allows you to get detailed explanations of code snippets with a simple keyboard shortcut.
+
+**Download:** [Latest release (notarized DMG)](https://github.com/grimmerk/codev/releases/latest) · [Mac App Store](https://apps.apple.com/us/app/switchv/id1663612397) (v1.0.33, does not include Claude Code session features)
+
+### Claude Code Session Switching
+
+CodeV can list, search, and resume Claude Code sessions. Press `⌘⌃R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
+
+**For best session switching accuracy** when you have multiple sessions in the same project directory:
+
+1. **Use `/rename`** in Claude Code to set a session title — this is the most reliable way for CodeV to identify and switch to the correct terminal tab. You can also use `claude -n "name"` when starting a new session.
+2. **When resuming a closed session**, CodeV itself is recommended (it always uses `--resume <uuid>`). You can also use `claude --resume <uuid>` or `claude --resume "session title"` in terminal (the session title must be set via `/rename` — auto-generated titles won't work).
+
+**Terminal support:**
+
+| Terminal | Switch (active) | Launch (new) | Limitation |
+|----------|----------------|--------------|------------|
+| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | None (with `/rename`) |
+| Ghostty | Title match → cwd fallback | AppleScript new tab/window | Same-cwd without `/rename` may switch to wrong tab (no PID/TTY in AppleScript yet — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
+| cmux | CLI sidebar-state cwd → tree fallback | CLI new-workspace | Requires socket mode `automation`/`allowAll`; same-cwd sessions may mismatch. Title match via `tree` surface titles is feasible but not implemented — ROI is low given socket mode requirement and inability to unify with AppleScript approach (AppleScript fix pending — see [cmux#1826](https://github.com/manaflow-ai/cmux/pull/1826)) |
 
 ### AI Assistant feature
 
@@ -32,19 +52,29 @@ When you customize the prompt as empty, you can still copy your code first, and 
 
 Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude or ChatGPT desktop
 
-### Additional Features
+#### Additional Features
 
 - Syntax highlighting for various programming languages
 - Streaming explanation that updates in real-time
 - Automatic language detection
 - Error handling
 
-### How AI Assistant Works
+#### How AI Assistant Works
 
 - The Code AI Assistant uses Claude API to generate explanations/insight.
 - The API request is made from the main Electron process (not the renderer) for security.
 - Explanations/Insights are streamed in real-time for a better user experience.
 - The UI is a semi-transparent floating window that can be closed when not needed.
+
+#### Setup
+
+1. Make sure you have an Anthropic API key. You can get one from [Anthropic's website](https://console.anthropic.com/).
+
+2. Set up your API key on the menu bar (-> Setting -> API key setting), or add your API key to the `.env` file in the root directory:
+
+   ```
+   ANTHROPIC_API_KEY=your_api_key_here
+   ```
 
 ## Development
 
@@ -74,16 +104,6 @@ Database models and their current usage:
 | Conversation | AI chat conversation history | Active |
 | Message | AI chat messages | Active |
 | VSWindow | Legacy — was used by the old VS Code extension to send window records via HTTP. No longer written to since migrating to reading VS Code/Cursor's `state.vscdb` directly. | Deprecated |
-
-### Setup of AI Assistant feature
-
-1. Make sure you have an Anthropic API key. You can get one from [Anthropic's website](https://console.anthropic.com/).
-
-2. Set up your API key on the menu bar (-> Setting -> API key setting), or add your API key to the `.env` file in the root directory:
-
-   ```
-   ANTHROPIC_API_KEY=your_api_key_here
-   ```
 
 ### Use VS Code Debugger
 

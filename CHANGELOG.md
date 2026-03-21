@@ -1,0 +1,80 @@
+# Changelog
+
+## 1.0.37
+
+- iTerm2: three-layer switch matching (title → TTY → fallback)
+- Ghostty: two-layer switch matching (title → cwd fallback)
+- Fix: custom title loading for paths with underscores (e.g. test_codev)
+- Fix: grep false positive for custom-title in long sessions
+- Fix: project path encoding to match Claude Code's directory naming
+- CHANGELOG.md with CI auto-read for release notes
+- README: session switching guide with terminal support matrix
+
+## 1.0.36
+
+- Detect multiple active sessions with same working directory
+- Fix: don't override CI secrets with empty .env values
+
+## 1.0.35
+
+- Add cmux and Ghostty terminal support with auto-detection
+- Auto-detect which terminal active sessions are running in (iTerm2/Ghostty/cmux)
+- Terminal badge (ITERM2, CMUX, GHOSTTY) shown on active sessions
+- Settings: Launch Terminal selector, Launch Mode (New Tab/Window)
+- Session settings only visible in Sessions tab
+- Fix: don't override CI secrets with empty .env values
+
+## 1.0.34
+
+- Add Claude Code session list with Tab switching
+- Session list sorted by last activity from history.jsonl
+- Multi-word AND search on project name, prompts, custom titles, branches
+- Active session detection with purple dot
+- Last assistant response for active sessions (blue text)
+- Custom title display from session JSONL files
+- Git branch name display
+- Open/resume sessions in iTerm2 (new tab or window)
+- Session Preview mode (First/Last/Both user prompts)
+- Default Tab setting (Projects or Sessions)
+- Non-blocking SWR-like loading with 5s TTL cache
+- 1.5-3 line layout with color-coded elements
+
+## 1.0.33 (App Store submission)
+
+- Launch at Login toggle (App Store guideline 2.4.5 fix)
+- Dynamic app version in Settings popup
+- Non-App Store notarized DMG distribution
+- GitHub Actions CI for notarized builds
+
+## 1.0.31
+
+- Fix: apply IDE preference immediately on save
+- Fix: cast preferredIDE string to IDEMode type
+
+## 1.0.30
+
+- Cursor IDE support alongside VS Code
+- IDE Preference Settings to switch between VS Code and Cursor
+- Documentation: mention Cursor support and MAS sandbox note
+
+## 1.0.29
+
+- Security-scoped bookmark for IDE SQLite access in MAS sandbox
+- Fix: sign better_sqlite3.node for MAS builds
+- Fix: exclude electron binary from asset-relocator-loader
+- Fix: use --platform=mas for MAS builds
+- Recently opened file items support
+
+## 1.0.28
+
+- Initial TestFlight build
+- Disable migration/server, read VS Code/Cursor SQLite directly
+- Prepare embedded.provisionprofile for TestFlight
+
+## 1.0.26
+
+- Original App Store release (VS Code extension based)
+
+## 1.0.0
+
+- Initial version

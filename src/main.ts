@@ -1471,10 +1471,10 @@ ipcMain.handle('detect-terminal-apps', async (_event, pidMap: Record<string, num
   return results;
 });
 
-ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number) => {
+ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => {
   const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
   const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
-  openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode);
+  openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode, customTitle);
 });
 
 ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {

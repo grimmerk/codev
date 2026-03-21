@@ -281,6 +281,7 @@ export const openSession = async (
   activePid?: number,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
+  customTitle?: string,
 ): Promise<void> => {
   let effectiveTerminal = terminalApp;
 
@@ -298,11 +299,11 @@ export const openSession = async (
       openSessionInCmux(sessionId, projectPath, isActive, activePid);
       break;
     case 'ghostty':
-      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode);
+      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode, customTitle);
       break;
     case 'iterm2':
     default:
-      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode);
+      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode, customTitle);
       break;
   }
 };
@@ -318,16 +319,40 @@ export const openSessionInITerm2 = (
   isActive: boolean,
   activePid?: number,
   terminalMode: string = 'tab',
+  customTitle?: string,
 ): void => {
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
-    // Try to switch to existing iTerm2 tab via tty matching
+    // Three-layer matching for iTerm2 switch:
+    // 1. tty matching (most precise — works when PID-session mapping is correct)
+    // 2. title matching (works when session has /rename title)
+    // 3. fallback: just activate iTerm2
+    const titleMatch = customTitle
+      ? `
+        -- Layer 2: title matching (fallback for same-cwd sessions)
+        repeat with w in windows
+          repeat with t in tabs of w
+            repeat with s in sessions of t
+              if name of s contains "${customTitle.replace(/"/g, '\\"')}" then
+                select s
+                select t
+                set index of w to 1
+                return "found-by-title"
+              end if
+            end repeat
+          end repeat
+        end repeat`
+      : '';
+
     const tmpScript = '/tmp/codev-iterm-switch.scpt';
-    const switchScript = `set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
-if targetTty is not "" then
-  tell application "iTerm2"
-    activate
+    const switchScript = `tell application "iTerm2"
+  activate
+  ${titleMatch ? `-- Layer 1: title matching (most precise for same-cwd sessions)
+  ${titleMatch.trim()}` : ''}
+  -- Layer 2: tty matching (fallback)
+  set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
+  if targetTty is not "" then
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
@@ -335,21 +360,18 @@ if targetTty is not "" then
             select s
             select t
             set index of w to 1
-            return "found"
+            return "found-by-tty"
           end if
         end repeat
       end repeat
     end repeat
-    return "not found"
-  end tell
-else
-  tell application "iTerm2" to activate
-end if`;
+  end if
+  return "not found"
+end tell`;
+    console.log(`[iTerm2] switch: pid=${activePid}, customTitle=${customTitle || 'none'}`);
     fs.writeFileSync(tmpScript, switchScript);
-    exec(`osascript ${tmpScript}`, (error: any) => {
-      if (error) {
-        console.error('Error switching to iTerm2 session:', error);
-      }
+    exec(`osascript ${tmpScript}`, { encoding: 'utf-8' }, (error: any, stdout: string) => {
+      console.log(`[iTerm2] switch result: ${(stdout || '').trim()}`, error?.message || '');
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
@@ -415,14 +437,14 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const promises = sessions.map(async (session) => {
-    const encodedProject = session.project.replace(/\//g, '-');
+    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
 
     if (!fs.existsSync(jsonlPath)) return;
 
     // Run title grep and branch tail in parallel for each file
     const [titleOutput, branchOutput] = await Promise.all([
-      execPromise(`grep "custom-title" "${jsonlPath}" 2>/dev/null | tail -1`),
+      execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
       execPromise(`tail -n 5 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
     ]);
 
@@ -472,7 +494,7 @@ export const loadLastAssistantResponses = async (
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const promises = sessions.map(async (session) => {
-    const encodedProject = session.project.replace(/\//g, '-');
+    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
 
     if (!fs.existsSync(jsonlPath)) return;
@@ -513,32 +535,50 @@ export const openSessionInGhostty = (
   projectPath: string,
   isActive: boolean,
   terminalMode: string = 'tab',
+  customTitle?: string,
 ): void => {
   const { exec } = require('child_process');
 
   if (isActive) {
-    // Switch to existing terminal by matching working directory
+    // Two-layer matching: title first (precise), then cwd fallback
+    const titleMatch = customTitle
+      ? `
+  -- Layer 1: title matching
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with term in terminals of t
+        if name of term contains "${customTitle.replace(/"/g, '\\"')}" then
+          focus term
+          return "found-by-title"
+        end if
+      end repeat
+    end repeat
+  end repeat`
+      : '';
+
     const tmpScript = '/tmp/codev-ghostty-switch.scpt';
     const switchScript = `tell application "Ghostty"
   activate
+  ${titleMatch}
+  -- Layer 2: cwd matching (fallback)
   repeat with w in windows
     repeat with t in tabs of w
       repeat with term in terminals of t
         if working directory of term is "${projectPath}" then
           focus term
-          return "found"
+          return "found-by-cwd"
         end if
       end repeat
     end repeat
   end repeat
   return "not found"
 end tell`;
+    console.log(`[ghostty] switch: customTitle=${customTitle || 'none'}`);
     fs.writeFileSync(tmpScript, switchScript);
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
       const result = (stdout || '').trim();
       console.log('[ghostty] switch result:', result);
-      if (result !== 'found') {
-        // Fallback: clipboard + activate
+      if (result === 'not found') {
         copyResumeCommand(sessionId, projectPath);
       }
       try { fs.unlinkSync(tmpScript); } catch {}

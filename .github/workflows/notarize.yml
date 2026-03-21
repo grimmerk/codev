@@ -1,4 +1,4 @@
-name: Build, Sign & Notarize (non-MAS)
+name: Build, Sign, Notarize & Publish (non-MAS)
 
 on:
   workflow_dispatch:
@@ -12,9 +12,9 @@ on:
         type: string
         default: ''
       release_notes:
-        description: 'Release notes (e.g. "Add session list feature")'
+        description: 'Release notes. Leave empty to auto-read from CHANGELOG.md'
         type: string
-        default: 'Non-App Store notarized build'
+        default: ''
 
 jobs:
   build-and-notarize:
@@ -73,6 +73,20 @@ jobs:
         id: version
         run: echo "version=$(node -p 'require("./package.json").version')" >> $GITHUB_OUTPUT
 
+      - name: Extract release notes from CHANGELOG.md
+        id: changelog
+        if: ${{ inputs.create_release && inputs.release_notes == '' }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract section for this version from CHANGELOG.md
+          NOTES=$(awk "/^## ${VERSION}$/,/^## [0-9]/" CHANGELOG.md | sed '1d;$d' | sed '/^$/d')
+          if [ -z "$NOTES" ]; then
+            NOTES="Non-App Store notarized build v${VERSION}"
+          fi
+          # Write to file to avoid escaping issues
+          echo "$NOTES" > /tmp/release-notes.txt
+          echo "notes_file=/tmp/release-notes.txt" >> $GITHUB_OUTPUT
+
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
@@ -88,9 +102,16 @@ jobs:
           if [ -z "$TAG" ]; then
             TAG="v${{ steps.version.outputs.version }}"
           fi
-          gh release create "$TAG" ./out/CodeV.dmg \
-            --title "$TAG" \
-            --notes "${{ inputs.release_notes }}"
+          NOTES="${{ inputs.release_notes }}"
+          if [ -z "$NOTES" ] && [ -f /tmp/release-notes.txt ]; then
+            gh release create "$TAG" ./out/CodeV.dmg \
+              --title "$TAG" \
+              --notes-file /tmp/release-notes.txt
+          else
+            gh release create "$TAG" ./out/CodeV.dmg \
+              --title "$TAG" \
+              --notes "${NOTES:-Non-App Store notarized build}"
+          fi
 
       - name: Cleanup keychain
         if: always()
