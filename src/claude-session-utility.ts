@@ -647,12 +647,12 @@ export const openSessionInCmux = (
         exec(cmd, { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 1024 }, (_e: any, out: string) => resolve(out || ''));
       });
 
-    const selectAndActivate = (wsId: string, surfaceId?: string) => {
+    const selectAndActivate = async (wsId: string, surfaceId?: string) => {
       if (surfaceId) {
-        // focus-panel switches the active tab within a pane, then select-workspace makes it visible
-        exec(`${CMUX_CLI} focus-panel --panel ${surfaceId} --workspace ${wsId}`);
+        // focus-panel must complete before select-workspace, otherwise the tab switch is lost
+        await execPromise(`${CMUX_CLI} focus-panel --panel ${surfaceId} --workspace ${wsId}`);
       }
-      exec(`${CMUX_CLI} select-workspace --workspace ${wsId}`);
+      await execPromise(`${CMUX_CLI} select-workspace --workspace ${wsId}`);
       exec('osascript -e \'tell application "cmux" to activate\'');
     };
 
@@ -694,7 +694,7 @@ export const openSessionInCmux = (
           for (const surface of ws.surfaces) {
             if (surface.title.toLowerCase().includes(titleLower)) {
               console.log('[cmux] matched surface by title:', surface.surfaceId, 'in', ws.wsId);
-              selectAndActivate(ws.wsId, surface.surfaceId);
+              await selectAndActivate(ws.wsId, surface.surfaceId);
               return;
             }
           }
@@ -714,7 +714,7 @@ export const openSessionInCmux = (
         const cwdHit = cwdResults.find((r: any) => r.cwd === projectPath || r.focusedCwd === projectPath);
         if (cwdHit) {
           console.log('[cmux] matched workspace by cwd:', cwdHit.wsId);
-          selectAndActivate(cwdHit.wsId);
+          await selectAndActivate(cwdHit.wsId);
           return;
         }
       }
@@ -727,7 +727,7 @@ export const openSessionInCmux = (
           for (const surface of ws.surfaces) {
             if (surface.title.toLowerCase().includes(projectNameLower)) {
               console.log('[cmux] matched by surface title (project name):', surface.surfaceId, 'in', ws.wsId);
-              selectAndActivate(ws.wsId, surface.surfaceId);
+              await selectAndActivate(ws.wsId, surface.surfaceId);
               return;
             }
           }
