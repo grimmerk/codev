@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('copy-claude-session-command', sessionId, projectPath),
   loadSessionEnrichment: (sessions: any[]) => ipcRenderer.invoke('load-session-enrichment', sessions),
   loadLastAssistantResponses: (sessions: any[]) => ipcRenderer.invoke('load-last-assistant-responses', sessions),
+  loadProjectBranches: (paths: string[]) => ipcRenderer.invoke('load-project-branches', paths),
 
   /** for reading VS Code built-in sqlite */
   fetchVSCodeBasedIDESqlite: () => ipcRenderer.send('fetch-vscode-based-sqlite'),

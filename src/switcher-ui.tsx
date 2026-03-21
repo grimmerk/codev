@@ -249,17 +249,18 @@ const OptionUI: FC<OptionProps<SelectInputOptionInterface>> = (
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        padding: '2px 8px',
-        margin: '2px 0',
+        padding: '6px 10px',
+        margin: '1px 0',
         borderRadius: '3px',
-        backgroundColor: isSelected
-          ? THEME.background.selected
-          : isFocused
-            ? THEME.background.hover
-            : 'transparent',
-        transition: 'background-color 0.2s ease',
+        borderLeft: isFocused
+          ? `3px solid ${THEME.primary}`
+          : '3px solid transparent',
+        backgroundColor: isFocused
+          ? 'rgba(0, 188, 212, 0.08)'
+          : 'transparent',
+        transition: 'background-color 0.15s',
         cursor: 'pointer',
-        height: '34px', // Increased height to match item height
+        height: '34px', // Match item height
       }}
     >
       <components.Option {...props} />
@@ -318,6 +319,7 @@ function SwitcherApp() {
   const [workingPathInfoArray, setWorkingPathInfoArray] = useState<string[]>(
     [],
   );
+  const [projectBranches, setProjectBranches] = useState<Record<string, string>>({});
   const [allSessions, setAllSessions] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(-1);
@@ -496,6 +498,15 @@ function SwitcherApp() {
     (window as any).electronAPI.onVSCodeBasedSqliteRead(
       async (_event: any, recentProject: VSWindowModel[]) => {
         setPathInfoArray(recentProject);
+        // Load git branches in background (SWR pattern - don't block rendering)
+        const paths = recentProject.map((p) => p.path);
+        if (paths.length > 0) {
+          (window as any).electronAPI.loadProjectBranches(paths).then((branches: Record<string, string>) => {
+            if (branches && Object.keys(branches).length > 0) {
+              setProjectBranches(branches);
+            }
+          });
+        }
       },
     );
     (window as any).electronAPI.onVSCodeBasedSqliteRecordDeleted(
@@ -592,7 +603,8 @@ function SwitcherApp() {
 
     let target: string;
     try {
-      target = candidate?.value?.toLowerCase();
+      const branch = projectBranches[candidate?.value] || '';
+      target = (candidate?.value + ' ' + branch).toLowerCase();
     } catch (err) {
       console.log('target:', candidate);
     }
@@ -953,6 +965,12 @@ function SwitcherApp() {
           </div>
         </div>
       ) : (
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '6px 15px 0' }}>
+        <span style={{ color: THEME.text.secondary, fontSize: '12px', whiteSpace: 'nowrap' }}>
+          {pathArray.length} projects
+        </span>
+      </div>
       <Select
         filterOption={filterOptions}
         ref={ref}
@@ -1009,7 +1027,85 @@ function SwitcherApp() {
           DropdownIndicator: null,
           Option: (props) => OptionUI(props, onDeleteClick),
         }}
-        formatOptionLabel={formatOptionLabel}
+        formatOptionLabel={(
+          { value, label, everOpened }: { value: string; label: string; everOpened: boolean },
+          { inputValue: searchInput }: { inputValue: string },
+        ) => {
+          const searchWords = (searchInput ?? '')
+            .split(' ')
+            .filter((sub: string) => sub);
+          const pathPart = label?.slice(0, label.lastIndexOf('/'));
+          let name = label?.slice(label.lastIndexOf('/') + 1);
+          name = name?.replace(/\.code-workspace/, ' (Workspace)');
+          const branch = projectBranches[value];
+
+          const nameStyle: any = {
+            fontWeight: '500',
+            fontSize: '15px',
+            paddingRight: '6px',
+            flexShrink: 0,
+            color: everOpened ? THEME.text.primary : THEME.text.newItem,
+          };
+
+          return (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '2px 0',
+                width: '100%',
+                height: '30px',
+              }}
+            >
+              <div style={nameStyle}>
+                <Highlighter
+                  searchWords={searchWords}
+                  textToHighlight={name}
+                  highlightStyle={{
+                    backgroundColor: 'rgba(0, 188, 212, 0.2)',
+                    color: '#fff',
+                    padding: '0 2px',
+                    borderRadius: '2px',
+                  }}
+                />
+              </div>
+              {branch && (
+                <span style={{ color: '#888', fontSize: '11px', fontStyle: 'italic', flexShrink: 0, paddingRight: '10px' }}>
+                  [<Highlighter
+                    searchWords={searchWords}
+                    textToHighlight={branch}
+                    highlightStyle={{
+                      backgroundColor: 'rgba(200, 200, 200, 0.15)',
+                      color: '#bbb',
+                      padding: '0 2px',
+                      borderRadius: '2px',
+                    }}
+                  />]
+                </span>
+              )}
+              <div style={{
+                fontSize: '13px',
+                color: THEME.text.secondary,
+                flex: 1,
+                textOverflow: 'ellipsis',
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+                textAlign: 'right',
+              }}>
+                <Highlighter
+                  searchWords={searchWords}
+                  textToHighlight={pathPart}
+                  highlightStyle={{
+                    backgroundColor: 'rgba(0, 188, 212, 0.1)',
+                    color: '#ccc',
+                    padding: '0 2px',
+                    borderRadius: '2px',
+                  }}
+                />
+              </div>
+            </div>
+          );
+        }}
         options={pathArray}
         styles={{
           control: (base) => ({
@@ -1058,6 +1154,7 @@ function SwitcherApp() {
           }),
         }}
       />
+      </div>
       )}
     </div>
   );

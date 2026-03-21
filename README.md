@@ -4,15 +4,22 @@ Use this to quickly open and switch VS Code/Cursor projects, and use AI assistan
 
 ## Features
 
-- use shortcut/tray (`Ctrl+Cmd+R`) menu to quickly launch a UI listing recent projects (folders, workspaces, and files), then select one to open it in VS Code or Cursor.
-- Claude Code session list: press `Tab` to switch between Projects and Sessions. Search, view custom titles, git branches, and resume sessions in iTerm2, Ghostty, or cmux.
-- AI Assistant features. CodeV now includes a Code AI Assistant feature powered by Anthropic's Claude AI. This feature allows you to get detailed explanations of code snippets with a simple keyboard shortcut.
+### Quick Switcher for VS Code / Cursor Projects
+
+Spotlight-like quick open: press `⌃+⌘+R` or click the menu bar icon to launch the Quick Switcher. Search and select a project to open or switch to it in VS Code or Cursor — even if the IDE is not running yet.
+
+- **Recent projects** (white items): your latest VS Code/Cursor folders, workspaces, and recently opened files — read directly from IDE data, no extension required
+- **Working folder items** (green items): first-level subfolders found by scanning a folder you choose (Settings → Working Directory)
+- **Git branch display**: shows the current branch for each recently opened project
+- Multi-word search across project names, paths, and branch names
+- Supports VS Code and Cursor — switch between them in Settings → IDE Preference
+- Remove items from the recent list by hovering and clicking "x"
 
 **Download:** [Latest release (notarized DMG)](https://github.com/grimmerk/codev/releases/latest) · [Mac App Store](https://apps.apple.com/us/app/switchv/id1663612397) (v1.0.33, does not include Claude Code session features)
 
 ### Claude Code Session Switching
 
-CodeV can list, search, and resume Claude Code sessions. Press `⌘⌃R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
+CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
 
 **For best session switching accuracy** when you have multiple sessions in the same project directory:
 
@@ -32,25 +39,25 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌘⌃R` to open
 #### Insight Chat mode
 
 1. Select the code or text you want to get analyzed insight in any editor or even on web page.
-2. Press `Cmd+C` to copy the selected code to your clipboard.
-3. Press `Ctrl+Cmd+E` to open the Code AI Assistant window, which will:
+2. Press `⌘+C` to copy the selected code to your clipboard.
+3. Press `⌃+⌘+E` to open the Code AI Assistant window, which will:
    - Create a floating window with the code from your clipboard
    - Generate an insight using Anthropic Claude
 4. The window will display your code and start generating an insight.
 5. You can use the input text field to continue the discussion.
 6. You can custom your prompt on the menu bar.
 
-> Note: For a smooth demonstration workflow, make sure to copy your code to the clipboard before triggering the Code AI Assistant with Ctrl+Cmd+E.
+> Note: For a smooth demonstration workflow, make sure to copy your code to the clipboard before triggering the Code AI Assistant with ⌃+⌘+E.
 
 **You can click the toggle on the top bar and switch to `Insight Split view mode`**.
 
 #### Chat from Selection mode
 
-When you customize the prompt as empty, you can still copy your code first, and trigger `Ctrl+Cmd+E`, it would still navigate to the AI Assistant view without triggering insight generation, then you can input your follow-up message to discuss with AI.
+When you customize the prompt as empty, you can still copy your code first, and trigger `⌃+⌘+E`, it would still navigate to the AI Assistant view without triggering insight generation, then you can input your follow-up message to discuss with AI.
 
 #### Smart chat mode
 
-Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude or ChatGPT desktop
+Trigger `⌃+⌘+C` shortcut to launch pure AI chat mode, just like the Claude or ChatGPT desktop
 
 #### Additional Features
 

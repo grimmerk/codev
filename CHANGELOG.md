@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.39
+
+- Projects: show git branch name (async loaded, searchable)
+- Projects: unified selection style with Sessions (left border + subtle highlight)
+- Projects: show item count
+
 ## 1.0.38
 
 - cmux: two-layer switch matching (title → cwd fallback), same as Ghostty

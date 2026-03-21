@@ -1494,4 +1494,25 @@ ipcMain.handle('load-last-assistant-responses', async (_event, sessions: any[]) 
   return Object.fromEntries(responseMap);
 });
 
+ipcMain.handle('load-project-branches', async (_event, paths: string[]) => {
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 2000 }, (_e: any, out: string) => resolve(out || ''));
+    });
+
+  const results: Record<string, string> = {};
+  await Promise.all(
+    paths.map(async (p: string) => {
+      try {
+        const branch = (await execPromise(`git -C "${p}" branch --show-current 2>/dev/null`)).trim();
+        if (branch && branch !== 'HEAD') {
+          results[p] = branch;
+        }
+      } catch {}
+    }),
+  );
+  return results;
+});
+
 app.dock.hide();
