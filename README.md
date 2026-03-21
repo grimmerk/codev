@@ -21,18 +21,21 @@ Spotlight-like quick open: press `⌃+⌘+R` or click the menu bar icon to launc
 
 CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
 
-**For best session switching accuracy** when you have multiple sessions in the same project directory:
+**For best accuracy** when you have multiple sessions in the same project directory:
 
-1. **Use `/rename`** in Claude Code to set a session title — this is the most reliable way for CodeV to identify and switch to the correct terminal tab. You can also use `claude -n "name"` when starting a new session.
-2. **When resuming a closed session**, CodeV itself is recommended (it always uses `--resume <uuid>`). You can also use `claude --resume <uuid>` or `claude --resume "session title"` in terminal (the session title must be set via `/rename` — auto-generated titles won't work).
+1. **Start sessions with a name**: use `claude -n "name"` (or `claude --name "name"`) to create a named session from the start. This is the most reliable way — CodeV can correctly detect and switch to the session on all terminals.
+2. **Or `/rename` in-session, then exit and resume**: if you already started a session without a name, use `/rename` inside the session, then exit and resume it (via CodeV or `claude --resume`). A session that was started with bare `claude` (no `-n`) and never exited+resumed after `/rename` may have incorrect detection (wrong purple dot), which can cause switch issues.
+3. **When resuming from terminal**: use `claude --resume <uuid>` or `claude -r <uuid>` for most reliable detection. Resuming by title (`claude -r "title"`) also works. CodeV itself always uses `--resume <uuid>`.
+
+**Why this matters**: CodeV identifies active sessions by reading process arguments. Sessions started with `claude -n "name"` or resumed with `--resume <uuid>` have identifiable args. Sessions started with bare `claude` have no UUID or title in their args, so CodeV may assign the purple active dot to the wrong session — and clicking it may switch to the wrong terminal tab.
 
 **Terminal support:**
 
-| Terminal | Switch (active) | Launch (new) | Limitation |
-|----------|----------------|--------------|------------|
-| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | None (with `/rename`) |
-| Ghostty | Title match → cwd fallback | AppleScript new tab/window | Same-cwd without `/rename` may switch to wrong tab (no PID/TTY in AppleScript yet — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
-| cmux | Title match → cwd fallback | CLI new-workspace | Requires enabling socket access in cmux Settings (set to `automation` or `allowAll`); same-cwd without `/rename` may switch to wrong workspace |
+| Terminal | Switch (active) | Launch (new) | Same-cwd limitation |
+|----------|----------------|--------------|---------------------|
+| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | TTY fallback covers `-r <uuid>` without `/rename`; only bare `claude` without `/rename` is unreliable |
+| Ghostty | Title match → cwd fallback | AppleScript new tab/window | Without `/rename`, same-cwd may switch to wrong tab (no per-tab TTY — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
+| cmux | Title match → cwd fallback | CLI new-workspace | Same as Ghostty; also requires enabling socket access in cmux Settings (`automation` or `allowAll`) |
 
 ### AI Assistant feature
 
