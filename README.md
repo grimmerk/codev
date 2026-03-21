@@ -27,17 +27,7 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to op
 2. **Or `/rename` in-session, then exit and resume**: bare `claude` sessions need `/rename` + exit + resume to be identifiable. Without this, CodeV may show the purple active dot on the wrong session.
 3. **When resuming from terminal**: `claude --resume <uuid>`, `claude -r <uuid>`, or `claude -r "title"` all work. CodeV itself always uses `--resume <uuid>`.
 
-**Same-cwd accuracy by launch method** (only matters when multiple sessions share the same project directory):
-
-| How session was started | Detection (purple dot) | Switch: iTerm2 | Switch: Ghostty/cmux |
-|------------------------|----------------------|----------------|---------------------|
-| `claude -n "name"` | ✓ All terminals | ✓ Title match | ✓ Title match |
-| `/rename`'d + resumed (`-r <uuid>` or `-r "title"`) | ✓ All terminals | ✓ Title match | ✓ Title match |
-| `claude -r` picker → select `/rename`'d session | ✓ All terminals | ✓ Title match | ✓ Title match |
-| `-r <uuid>` without `/rename` | ✓ All terminals | ✓ **TTY match** | ✗ cwd fallback |
-| bare `claude`, no `/rename` | ✗ All terminals | ✗ | ✗ |
-
-**Key**: iTerm2 has TTY matching as an extra fallback — it can switch correctly even without a custom title, as long as detection has the correct PID. Ghostty/cmux lack per-tab TTY ([ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)), so they require a custom title for same-cwd accuracy.
+For the full same-cwd accuracy matrix (detection + switch by launch method and terminal), see the [design doc](docs/claude-session-integration-design.md#same-cwd-session-matching).
 
 **Terminal support:**
 

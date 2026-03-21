@@ -338,6 +338,7 @@ When multiple sessions share the same project path, there are two separate conce
 | `claude -r <uuid>` | UUID from process args (`-r` regex) | No | All |
 | `claude -n "name"` | Match name against session custom titles | No | All |
 | `claude --resume "title"` / `-r "title"` | Match title against session custom titles | No | All |
+| `claude -r` picker → `/rename`'d session | UUID from updated process args (`-r <uuid>`) | No | All |
 | `claude` (no args), later `/rename`'d | Cross-reference: TTY → tab name → custom title → session ID | Yes (per-tab TTY) | iTerm2 only |
 | `claude` (no args), never `/rename`'d | **Unsolvable** — cwd only, cross-reference can't help (tab names identical) | — | None |
 
@@ -350,6 +351,7 @@ Cross-reference approach: get each terminal tab's TTY (iTerm2: `tty of session` 
 | Any with `/rename` | Yes | Title match ✓ | Title match ✓ |
 | `claude -n "name"` | Yes (`-n` sets title) | Title match ✓ | Title match ✓ |
 | `claude -r "title"` | Yes (resume by title) | Title match ✓ | Title match ✓ |
+| `claude -r` picker → `/rename`'d session | Yes | Title match ✓ | Title match ✓ |
 | `-r <uuid>` without `/rename` | No | **TTY match ✓** (detection correct → correct PID) | cwd fallback ✗ |
 | `claude` (no args), later `/rename`'d | Yes | Title match ✓ | Title match ✓ |
 | `claude` (no args), never `/rename`'d | No | **Unsolvable** — detection wrong → wrong PID → wrong TTY | cwd fallback ✗ |
