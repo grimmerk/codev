@@ -966,11 +966,6 @@ function SwitcherApp() {
         </div>
       ) : (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '6px 15px 0' }}>
-        <span style={{ color: THEME.text.secondary, fontSize: '12px', whiteSpace: 'nowrap' }}>
-          {pathArray.length} projects
-        </span>
-      </div>
       <Select
         filterOption={filterOptions}
         ref={ref}
@@ -1070,7 +1065,7 @@ function SwitcherApp() {
                 />
               </div>
               {branch && (
-                <span style={{ color: '#888', fontSize: '11px', fontStyle: 'italic', flexShrink: 0, paddingRight: '10px' }}>
+                <span style={{ color: '#888', fontSize: '13px', fontStyle: 'italic', flexShrink: 0, paddingRight: '10px' }}>
                   [<Highlighter
                     searchWords={searchWords}
                     textToHighlight={branch}
