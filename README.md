@@ -52,19 +52,29 @@ When you customize the prompt as empty, you can still copy your code first, and 
 
 Trigger `Ctrl+Cmd+C` shortcut to launch pure AI chat mode, just like the Claude or ChatGPT desktop
 
-### Additional Features
+#### Additional Features
 
 - Syntax highlighting for various programming languages
 - Streaming explanation that updates in real-time
 - Automatic language detection
 - Error handling
 
-### How AI Assistant Works
+#### How AI Assistant Works
 
 - The Code AI Assistant uses Claude API to generate explanations/insight.
 - The API request is made from the main Electron process (not the renderer) for security.
 - Explanations/Insights are streamed in real-time for a better user experience.
 - The UI is a semi-transparent floating window that can be closed when not needed.
+
+#### Setup
+
+1. Make sure you have an Anthropic API key. You can get one from [Anthropic's website](https://console.anthropic.com/).
+
+2. Set up your API key on the menu bar (-> Setting -> API key setting), or add your API key to the `.env` file in the root directory:
+
+   ```
+   ANTHROPIC_API_KEY=your_api_key_here
+   ```
 
 ## Development
 
@@ -94,16 +104,6 @@ Database models and their current usage:
 | Conversation | AI chat conversation history | Active |
 | Message | AI chat messages | Active |
 | VSWindow | Legacy — was used by the old VS Code extension to send window records via HTTP. No longer written to since migrating to reading VS Code/Cursor's `state.vscdb` directly. | Deprecated |
-
-### Setup of AI Assistant feature
-
-1. Make sure you have an Anthropic API key. You can get one from [Anthropic's website](https://console.anthropic.com/).
-
-2. Set up your API key on the menu bar (-> Setting -> API key setting), or add your API key to the `.env` file in the root directory:
-
-   ```
-   ANTHROPIC_API_KEY=your_api_key_here
-   ```
 
 ### Use VS Code Debugger
 
