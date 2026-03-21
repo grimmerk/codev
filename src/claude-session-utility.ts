@@ -450,7 +450,7 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
 
     // Run title grep and branch tail in parallel for each file
     const [titleOutput, branchOutput] = await Promise.all([
-      execPromise(`grep "custom-title" "${jsonlPath}" 2>/dev/null | tail -1`),
+      execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
       execPromise(`tail -n 5 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
     ]);
 
