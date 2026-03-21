@@ -1,15 +1,19 @@
 # Changelog
 
-## 1.0.36
+## 1.0.37
 
 - iTerm2: three-layer switch matching (title → TTY → fallback)
 - Ghostty: two-layer switch matching (title → cwd fallback)
 - Fix: custom title loading for paths with underscores (e.g. test_codev)
 - Fix: grep false positive for custom-title in long sessions
 - Fix: project path encoding to match Claude Code's directory naming
-- Detect multiple active sessions with same working directory
 - CHANGELOG.md with CI auto-read for release notes
 - README: session switching guide with terminal support matrix
+
+## 1.0.36
+
+- Detect multiple active sessions with same working directory
+- Fix: don't override CI secrets with empty .env values
 
 ## 1.0.35
 
