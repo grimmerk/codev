@@ -32,7 +32,7 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to op
 |----------|----------------|--------------|------------|
 | iTerm2 | Title match → TTY fallback | AppleScript new tab/window | None (with `/rename`) |
 | Ghostty | Title match → cwd fallback | AppleScript new tab/window | Same-cwd without `/rename` may switch to wrong tab (no PID/TTY in AppleScript yet — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
-| cmux | Title match → cwd fallback | CLI new-workspace | Requires socket mode `automation`/`allowAll`; same-cwd without `/rename` may switch to wrong workspace |
+| cmux | Title match → cwd fallback | CLI new-workspace | Requires enabling socket access in cmux Settings (set to `automation` or `allowAll`); same-cwd without `/rename` may switch to wrong workspace |
 
 ### AI Assistant feature
 
