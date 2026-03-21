@@ -2,10 +2,14 @@
 
 ## 1.0.36
 
-- Fix: three-layer iTerm2 switch matching (title → TTY → fallback)
+- iTerm2: three-layer switch matching (title → TTY → fallback)
+- Ghostty: two-layer switch matching (title → cwd fallback)
 - Fix: custom title loading for paths with underscores (e.g. test_codev)
 - Fix: grep false positive for custom-title in long sessions
+- Fix: project path encoding to match Claude Code's directory naming
 - Detect multiple active sessions with same working directory
+- CHANGELOG.md with CI auto-read for release notes
+- README: session switching guide with terminal support matrix
 
 ## 1.0.35
 
