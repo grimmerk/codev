@@ -328,9 +328,24 @@ Session-related settings are only visible when in Sessions mode (fixes popup int
 
 ### Same-CWD Session Matching
 
-When multiple sessions share the same project path, `/rename` custom titles are critical for accurate switching:
-- **With `/rename`**: Title matching finds the correct terminal tab (works for iTerm2, Ghostty, and cmux)
-- **Without `/rename`**: Falls back to TTY (iTerm2), cwd (Ghostty/cmux), or project name matching, which may switch to the wrong tab
+When multiple sessions share the same project path, there are two separate concerns:
+
+**Switch layer** (clicking an active session → jumping to the correct terminal tab):
+- **With `/rename`**: Title matching finds the correct tab (all terminals)
+- **Without `/rename`**: Falls back to TTY (iTerm2), cwd (Ghostty/cmux) — may switch to wrong tab
+
+**Detection layer** (purple dot — which session item is marked as active):
+
+| Launch command | Detection method | Needs terminal API? | Terminals |
+|----------------|-----------------|---------------------|-----------|
+| `claude --resume <uuid>` | UUID from process args | No | All |
+| `claude -r <uuid>` | UUID from process args (`-r` regex) | No | All |
+| `claude -n "name"` | Match name against session custom titles | No | All |
+| `claude --resume "title"` / `-r "title"` | Match title against session custom titles | No | All |
+| `claude` (no args) | Only cwd matching (may be wrong) | Yes (cross-reference via per-tab TTY) | iTerm2 only |
+
+Cross-reference approach for the `claude` (no args) case: get each terminal tab's TTY via AppleScript (`tty of session`), cross-reference with claude process TTYs (`ps -o tty=`), then use tab name to look up session ID via custom titles. Requires the terminal to expose per-tab TTY — currently only iTerm2 supports this. Ghostty has a pending request ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
+
 - **Recommendation**: Always use `/rename` in Claude Code, or `claude -n "name"` when starting new sessions
 
 ### Auto-Detection of Terminal App
