@@ -16,10 +16,8 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌘⌃R` to open
 
 **For best session switching accuracy** when you have multiple sessions in the same project directory:
 
-1. **Use `/rename` (or `/title`)** in Claude Code to set a session title — this is the most reliable way for CodeV to identify and switch to the correct terminal tab
-2. **When resuming a closed session**, either:
-   - Use CodeV itself to resume — it always uses `--resume <uuid>`
-   - Or use `claude --resume <uuid>` or `claude --resume "session title"` instead of `claude -r` in terminal — the explicit session ID/title enables precise process-to-session mapping
+1. **Use `/rename`** in Claude Code to set a session title — this is the most reliable way for CodeV to identify and switch to the correct terminal tab. You can also use `claude -n "name"` when starting a new session.
+2. **When resuming a closed session**, CodeV itself is recommended (it always uses `--resume <uuid>`). You can also use `claude --resume <uuid>` or `claude --resume "session title"` in terminal.
 
 **Terminal support:**
 
