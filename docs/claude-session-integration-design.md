@@ -363,13 +363,12 @@ cmux CLI communicates via Unix socket (`/tmp/cmux.sock`). By default, only proce
 
 **Recommended:** Ask user to set `automation` or `allowAll` mode in cmux Settings. Security impact is minimal — only local processes on the same machine can connect.
 
-**Switch strategy for cmux (three-layer, surface-level):**
+**Switch strategy for cmux (two-layer, surface-level):**
 1. Single `cmux tree --all` call → parse workspace→surface structure
 2. **Layer 1 — Title match**: match `/rename` custom title against surface titles in tree output
-3. **Layer 2 — CWD match**: parallel `sidebar-state` queries for cwd/focused_cwd
-4. **Layer 3 — Project name fallback**: surface title contains project folder name
-5. Switch: `select-workspace` first (must be active), then `focus-panel --panel surface:N` to switch tab
-6. If socket access denied: fallback to clipboard
+3. **Layer 2 — CWD fallback**: parallel `sidebar-state` queries for cwd/focused_cwd, then project name match in surface titles
+4. Switch: `select-workspace` first (must be active), then `focus-panel --panel surface:N` to switch tab
+5. If socket access denied: fallback to clipboard
 
 **Key discovery:** `focus-panel` silently no-ops on non-active workspaces — must `select-workspace` first to make the workspace active, then `focus-panel` to switch the tab within it.
 
@@ -420,7 +419,7 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 - Open/resume in iTerm2, Ghostty, or cmux
 - iTerm2: three-layer switch (title → TTY → fallback)
 - Ghostty: two-layer switch (title → cwd fallback)
-- cmux: three-layer switch (title → cwd → project name, surface-level)
+- cmux: two-layer switch (title → cwd fallback, surface-level)
 - Default Tab, Launch Terminal, Launch Mode, Session Preview settings
 - 1.5-3 line layout with color-coded elements
 - Non-blocking SWR loading with stable active state via `useRef`

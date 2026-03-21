@@ -638,10 +638,9 @@ export const openSessionInCmux = (
     // but testing shows count windows returns 0 — AppleScript interface may be buggy.
     // Using CLI (sidebar-state + tree) approach instead.
     //
-    // Three-layer matching (same concept as iTerm2/Ghostty):
-    // 1. Title matching — match /rename custom title against workspace titles in tree output
-    // 2. CWD matching — sidebar-state cwd/focused_cwd match
-    // 3. Project name fallback — tree surface title contains project folder name
+    // Two-layer matching (same concept as Ghostty):
+    // Layer 1: Title matching — match /rename custom title against surface titles in tree output
+    // Layer 2: CWD fallback — sidebar-state cwd/focused_cwd, then project name in surface title
     const execPromise = (cmd: string): Promise<string> =>
       new Promise((resolve) => {
         exec(cmd, { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 1024 }, (_e: any, out: string) => resolve(out || ''));
@@ -687,7 +686,7 @@ export const openSessionInCmux = (
         }
       }
 
-      // Layer 1: Title matching at surface level (most precise for same-cwd + multi-tab)
+      // Layer 1: Title matching (most precise for same-cwd + multi-tab)
       if (customTitle) {
         const titleLower = customTitle.toLowerCase();
         for (const ws of parsedTree) {
@@ -701,7 +700,7 @@ export const openSessionInCmux = (
         }
       }
 
-      // Layer 2: CWD matching via sidebar-state (parallel)
+      // Layer 2a: CWD matching via sidebar-state (parallel)
       const wsIds = parsedTree.map(w => w.wsId);
       if (wsIds.length > 0) {
         const cwdResults = await Promise.all(wsIds.map(async (wsId: string) => {
@@ -719,7 +718,7 @@ export const openSessionInCmux = (
         }
       }
 
-      // Layer 3: Project name fallback from parsed tree (surface title contains folder name)
+      // Layer 2b: Project name fallback from parsed tree (surface title contains folder name)
       const projectName = path.basename(projectPath);
       if (projectName && projectName !== path.basename(os.homedir())) {
         const projectNameLower = projectName.toLowerCase();

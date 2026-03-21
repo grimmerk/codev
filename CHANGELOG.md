@@ -2,7 +2,7 @@
 
 ## 1.0.38
 
-- cmux: three-layer switch matching (title → cwd → project name fallback)
+- cmux: two-layer switch matching (title → cwd fallback), same as Ghostty
 - cmux: surface-level tab switching via `focus-panel` (multi-tab workspaces)
 - Optimized cmux switching: single `tree --all` call replaces `list-workspaces` + `tree`
 
