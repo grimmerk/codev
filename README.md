@@ -23,8 +23,8 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌘⌃R` to open
 
 | Terminal | Switch (active) | Launch (new) | Limitation |
 |----------|----------------|--------------|------------|
-| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | None (with `/rename` or `--resume <uuid>`) |
-| Ghostty | Working directory match | AppleScript new tab/window | Same-cwd sessions may switch to wrong tab (no PID/TTY in AppleScript yet — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
+| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | None (with `/rename`) |
+| Ghostty | Title match → cwd fallback | AppleScript new tab/window | Same-cwd without `/rename` may switch to wrong tab (no PID/TTY in AppleScript yet — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
 | cmux | CLI sidebar-state cwd → tree fallback | CLI new-workspace | Requires socket mode `automation`/`allowAll`; same-cwd sessions may mismatch (AppleScript fix pending — see [cmux#1826](https://github.com/manaflow-ai/cmux/pull/1826)) |
 
 ### AI Assistant feature
