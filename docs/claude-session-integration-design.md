@@ -360,6 +360,8 @@ Cross-reference approach: get each terminal tab's TTY (iTerm2: `tty of session` 
 
 **Unsolvable case**: `claude` (no args) + never `/rename`'d + same cwd = no terminal can correctly detect or switch. There is no UUID, no title in process args, and no custom title in the tab name for cross-reference.
 
+**Cross-reference cascade effect** (iTerm2 only, not yet implemented): when cross-reference correctly claims a `/rename`'d session, the remaining same-cwd candidates shrink. If only one un-`/rename`'d session remains, cwd matching has a single candidate and becomes correct by elimination. This means cross-reference can indirectly fix detection for sessions that would otherwise be unsolvable — but only when at most one un-`/rename`'d session is alive per cwd. With two or more un-`/rename`'d alive sessions sharing the same cwd, those remain ambiguous.
+
 - **Recommendation**: Always use `/rename` in Claude Code, or `claude -n "name"` when starting new sessions
 
 ### Auto-Detection of Terminal App
