@@ -299,7 +299,7 @@ export const openSession = async (
       openSessionInCmux(sessionId, projectPath, isActive, activePid);
       break;
     case 'ghostty':
-      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode);
+      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode, customTitle);
       break;
     case 'iterm2':
     default:
@@ -535,32 +535,50 @@ export const openSessionInGhostty = (
   projectPath: string,
   isActive: boolean,
   terminalMode: string = 'tab',
+  customTitle?: string,
 ): void => {
   const { exec } = require('child_process');
 
   if (isActive) {
-    // Switch to existing terminal by matching working directory
+    // Two-layer matching: title first (precise), then cwd fallback
+    const titleMatch = customTitle
+      ? `
+  -- Layer 1: title matching
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with term in terminals of t
+        if name of term contains "${customTitle.replace(/"/g, '\\"')}" then
+          focus term
+          return "found-by-title"
+        end if
+      end repeat
+    end repeat
+  end repeat`
+      : '';
+
     const tmpScript = '/tmp/codev-ghostty-switch.scpt';
     const switchScript = `tell application "Ghostty"
   activate
+  ${titleMatch}
+  -- Layer 2: cwd matching (fallback)
   repeat with w in windows
     repeat with t in tabs of w
       repeat with term in terminals of t
         if working directory of term is "${projectPath}" then
           focus term
-          return "found"
+          return "found-by-cwd"
         end if
       end repeat
     end repeat
   end repeat
   return "not found"
 end tell`;
+    console.log(`[ghostty] switch: customTitle=${customTitle || 'none'}`);
     fs.writeFileSync(tmpScript, switchScript);
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
       const result = (stdout || '').trim();
       console.log('[ghostty] switch result:', result);
-      if (result !== 'found') {
-        // Fallback: clipboard + activate
+      if (result === 'not found') {
         copyResumeCommand(sessionId, projectPath);
       }
       try { fs.unlinkSync(tmpScript); } catch {}
