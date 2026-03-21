@@ -648,11 +648,11 @@ export const openSessionInCmux = (
       });
 
     const selectAndActivate = async (wsId: string, surfaceId?: string) => {
+      // select-workspace must come first — focus-panel only works on the active workspace
+      await execPromise(`${CMUX_CLI} select-workspace --workspace ${wsId}`);
       if (surfaceId) {
-        // focus-panel must complete before select-workspace, otherwise the tab switch is lost
         await execPromise(`${CMUX_CLI} focus-panel --panel ${surfaceId} --workspace ${wsId}`);
       }
-      await execPromise(`${CMUX_CLI} select-workspace --workspace ${wsId}`);
       exec('osascript -e \'tell application "cmux" to activate\'');
     };
 
