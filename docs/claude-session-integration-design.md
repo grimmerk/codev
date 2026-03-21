@@ -12,7 +12,7 @@ Add Claude Code session history to the CodeV Quick Switcher, allowing developers
 ├── cache/
 │   └── session-metadata.db                # SQLite cache DB (~1.5MB, NOT real-time)
 ├── projects/
-│   ├── -Users-you-git-my-project/         # Encoded project path (/ → -)
+│   ├── -Users-you-git-my-project/         # Encoded project path (all non-alphanumeric except - → -)
 │   │   ├── sessions-index.json            # Per-project session index (may not exist)
 │   │   ├── abc123.jsonl                   # Full conversation log for session abc123
 │   │   ├── abc123/                        # Session subdirectory
@@ -83,7 +83,8 @@ Key facts about custom titles:
 - 170 JSONL files, total ~771MB
 - Some files are very large (80–108MB for long sessions)
 - Grepping 100 files for custom-title takes ~2s (I/O bound)
-- Currently uses `grep "custom-title" <file> | tail -1` per file, async parallel via `Promise.all`
+- Uses `grep '"type":"custom-title"' <file> | tail -1` per file (precise pattern to avoid false positives from assistant messages discussing custom-title)
+- Async parallel via `Promise.all`
 - Results cached with 5s TTL
 
 ### 3. `~/.claude/cache/session-metadata.db` — Not used in MVP
@@ -124,7 +125,7 @@ Stats: 852 sessions, 1.5MB, queries ~5ms. Could be used in Phase 2 for enrichmen
 
 ### 4. `~/.claude/projects/{path}/sessions-index.json` — Not used in MVP
 
-Per-project session index. Directory name encoding: path with `/` replaced by `-`.
+Per-project session index. Directory name encoding: all non-alphanumeric characters (except `-`) replaced by `-` (e.g., `/` → `-`, `_` → `-`, `.` → `-`). This encoding is lossy.
 
 ```json
 {
@@ -182,8 +183,10 @@ The "30 days" in Claude Code's data-usage docs refers to **server-side** retenti
 │  ┌─────────────────────────────────────────────────────┐│
 │  │ fetchClaudeSessions()                               ││
 │  │  1. getClaudeSessions() → show list immediately     ││
-│  │  2. detectActiveSessions() → update green dots      ││
-│  │  3. loadCustomTitles() → update title display       ││
+│  │  2. detectActiveSessions() → update purple dots      ││
+│  │  2b. loadLastAssistantResponses() → blue text       ││
+│  │  2c. detectTerminalApps() → terminal badges         ││
+│  │  3. loadSessionEnrichment() → titles + branches     ││
 │  └─────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────┘
                     ↕ IPC
@@ -191,8 +194,10 @@ The "30 days" in Claude Code's data-usage docs refers to **server-side** retenti
 │ Main Process (claude-session-utility.ts)                 │
 │  - readClaudeSessions(): parse history.jsonl (cached)   │
 │  - detectActiveSessions(): async ps + lsof (cached)    │
-│  - loadCustomTitles(): async parallel grep (cached)    │
-│  - openSessionInITerm2(): AppleScript via temp .scpt   │
+│  - detectTerminalApp(): walk parent process tree       │
+│  - loadSessionEnrichment(): titles + branches (cached) │
+│  - loadLastAssistantResponses(): tail JSONL (active)   │
+│  - openSession(): route to iTerm2/Ghostty/cmux         │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -200,30 +205,42 @@ The "30 days" in Claude Code's data-usage docs refers to **server-side** retenti
 
 1. **Immediate**: Session list from `history.jsonl` (cached, ~0ms warm / ~40ms cold)
 2. **Background (~0.5s)**: Active session detection via async `ps aux` + `lsof`
-3. **Background (~2s)**: Custom titles via async parallel `grep` on 100 JSONL files
+3. **Background (~0.5s after 2)**: Last assistant responses for active sessions via `tail -n 200` (~19ms/file)
+4. **Background (~0.5s after 2)**: Terminal app detection via parent process tree walk
+5. **Background (~2s)**: Custom titles + branch names via async parallel grep/tail on 100 JSONL files
 
 All background operations use async `exec` (not `execSync`) to avoid blocking Electron's main thread. Results cached with 5s TTL. Cache is NOT invalidated on window focus (TTL expiry is sufficient).
 
 ### Active session detection
 
-- For `claude --resume <id>` processes: session ID extracted directly from command args
-- For `claude -r` processes (no explicit ID): `lsof -p <pid> -Fn | grep "^n/" | head -1` finds working directory, then matched against most recent session for that project in `history.jsonl`
+- For `claude --resume <id>` or `claude --resume "title"` processes: session ID/title extracted directly from command args (precise)
+- For `claude -r` processes: after user selects a session, process args update to `--resume <uuid>` or `--resume "title"` — so detection is usually precise
+- Fallback for processes without explicit ID: `lsof -p <pid> -Fn | grep "^n/" | head -1` finds cwd, matched against unclaimed sessions in `history.jsonl`
+- Multiple same-cwd processes: tracked via `claimedSessionIds` to avoid assigning the same session to multiple processes
 - **Known limitation:** Only detects sessions in terminals, not VS Code integrated terminal
+- **One-time timing bug observed:** PID-session mapping was briefly incorrect (possibly during `claude -r` picker UI before selection completed). Could not be reproduced. If recurring, a more precise approach is possible: use iTerm2 AppleScript to get all terminal TTYs + names, cross-reference with claude process TTYs to find correct session ID.
 
 ### Custom title extraction
 
-`grep "custom-title" <file> | tail -1` on each session's JSONL. Must read entire file since title position is unpredictable (user can `/title` at any point, multiple times). The last occurrence is the current title.
+`grep '"type":"custom-title"' <file> | tail -1` on each session's JSONL. Must read entire file since title position is unpredictable (user can `/rename` at any point, multiple times). The last occurrence is the current title.
 
-**Workaround for grep matching false positives:** Use `"type":"custom-title"` pattern to avoid matching tool call outputs that mention "custom-title" as a string.
+**Important:** Must use precise pattern `'"type":"custom-title"'` instead of just `"custom-title"` — the latter matches assistant messages that discuss custom-title (e.g., tool calls containing the string as text), causing false positives in long sessions.
+
+**Project path encoding:** Claude Code encodes project paths by replacing all non-alphanumeric characters (except `-`) with `-`. E.g., `/Users/you/git/test_codev` → `-Users-you-git-test-codev`. CodeV uses `replace(/[^a-zA-Z0-9-]/g, '-')` to match this encoding.
 
 ### iTerm2 integration
 
 | Action | Method |
 |--------|--------|
-| **Detect** | `ps aux` → `ps -o tty= -p <pid>` → get tty |
-| **Switch** | AppleScript: iterate windows/tabs/sessions, match tty `ends with` |
+| **Detect** | `ps aux` → extract `--resume <id>` from args, or `lsof` for cwd |
+| **Switch** | Three-layer AppleScript matching: (1) title match → (2) TTY fallback → (3) not found |
 | **Launch (tab)** | AppleScript: `create tab with default profile` + `write text` |
 | **Launch (window)** | AppleScript: `create window with default profile` + `write text` |
+
+**Switch matching order (title first for same-cwd accuracy):**
+1. **Title match** — if session has `/rename` custom title, match against iTerm2 tab `name of s contains "title"`. Most precise for same-cwd sessions.
+2. **TTY match** — match process TTY against iTerm2 session TTYs. Precise when PID-session mapping is correct.
+3. **Not found** — activates iTerm2 without switching.
 
 **Workarounds discovered:**
 - `ps -o tty=` output has trailing whitespace → pipe through `tr -d '[:space:]'`
@@ -240,20 +257,26 @@ Header with toggle buttons + `Tab` key:
 
 `Tab` is intercepted in react-select's `onKeyDown` (Projects mode) to prevent default behavior and switch to Sessions mode.
 
-### Session item layout
+### Session item layout (1.5–3 lines)
 
 ```
-● project-name · "custom title" · first prompt text  →  last prompt    N msgs  Xm ago
+● project-name · "custom title" [branch-name]     ITERM2  N msgs  Xm ago
+  first prompt text  →  last user prompt
+  ◀ last assistant response (active sessions only)
 ```
 
-- Green dot: active session (flexShrink 0, doesn't affect alignment)
+- Purple dot (`#CE93D8`): active session (14px fixed-width container for alignment)
 - Project name: bold white
-- Custom title: green, in quotes, truncated to 30 chars
-- First prompt: grey (`#b0b0b0`)
-- Last prompt: amber (`#e8a946`)
+- Custom title: green (`#7ec87e`), in quotes
+- Branch name: grey italic (`#888`), in brackets, `[HEAD]` filtered out
+- Terminal badge: small uppercase bordered text (ITERM2, CMUX, GHOSTTY)
+- First prompt: grey (`#999`)
+- Last user prompt: amber (`#c89030`)
+- Last assistant response: blue (`#64B5F6`), only for active sessions
 - Right side: message count + relative time
+- Selection: left cyan border (no background overlay), initial state unselected (-1)
 
-Entire row: `overflow: hidden`, `whiteSpace: nowrap`, `textOverflow: ellipsis`
+Line 2 only shown if prompts exist. Line 3 only shown for active sessions with assistant response.
 
 ### Session display modes (Settings)
 
@@ -267,7 +290,7 @@ Entire row: `overflow: hidden`, `whiteSpace: nowrap`, `textOverflow: ellipsis`
 
 ### Search
 
-Multi-word AND: all words must match against `projectName + project path + firstUserMessage`. Same behavior as Projects mode. Search highlight via `react-highlight-words`.
+Multi-word AND search runs **locally in renderer** (not IPC) to include all displayed fields: `projectName + project path + firstUserMessage + lastUserMessage + customTitle + branch + assistantResponse`. Search highlight via `react-highlight-words` with color-coded styles matching each field type.
 
 ## Keyboard Shortcuts
 
@@ -276,6 +299,7 @@ Multi-word AND: all words must match against `projectName + project path + first
 | `⌘⌃R` | Open Quick Switcher |
 | `Tab` | Toggle Projects / Sessions |
 | `↑` / `↓` | Navigate session list |
+| `Page Up` / `Page Down` | Jump 5 items |
 | `Enter` | Open/resume selected session |
 | `Esc` | Clear search, or hide window |
 
@@ -285,18 +309,29 @@ In the Settings popup:
 
 | Setting | Options | Default | Storage |
 |---------|---------|---------|---------|
-| Session Terminal | New Tab / New Window | New Tab | `electron-settings` |
-| Session Preview | First Prompt / Last Prompt / First + Last | First Prompt | `electron-settings` |
+| Default Tab | Projects / Sessions | Projects | `electron-settings` |
+| Launch Terminal | iTerm2 / Ghostty / cmux | iTerm2 | `electron-settings` |
+| Launch Mode | New Tab / New Window | New Tab | `electron-settings` |
+| Session Preview | First User Prompt / Last User Prompt / First + Last | First User Prompt | `electron-settings` |
+
+Session-related settings are only visible when in Sessions mode (fixes popup interaction issue #54).
 
 ## Terminal Support Matrix
 
 | Terminal | Detect | Switch | Launch | External Access |
 |----------|--------|--------|--------|----------------|
-| iTerm2 ✅ | `ps` + `lsof` + tty | AppleScript tty focus | AppleScript: new tab/window + execute | No restriction |
-| cmux ⚠️ | `ps` + `lsof` | `sidebar-state` cwd → `tree` title fallback | `cmux new-workspace --cwd --command` | Limited: requires socket `automation`/`allowAll` mode; same-cwd workspaces may mismatch (no per-surface PID/tty in API) |
-| Ghostty ✅ | `ps` + parent tree | AppleScript `working directory` match + `focus` | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
+| iTerm2 ✅ | `ps` + `lsof` + tty | Title match → TTY fallback | AppleScript: new tab/window + execute | No restriction |
+| Ghostty ✅ | `ps` + parent tree | Title match → cwd fallback | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
+| cmux ⚠️ | `ps` + `lsof` | `sidebar-state` cwd → `tree` title fallback | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll`; title match via `tree` feasible but not implemented (ROI low given socket requirement + can't unify with AppleScript approach) |
 | Terminal.app | `ps` + tty | AppleScript focus | AppleScript: new tab + execute | No restriction |
 | Custom | — | — | User command template / clipboard | — |
+
+### Same-CWD Session Matching
+
+When multiple sessions share the same project path, `/rename` custom titles are critical for accurate switching:
+- **With `/rename`**: Title matching finds the correct terminal tab (works for iTerm2 and Ghostty)
+- **Without `/rename`**: Falls back to TTY (iTerm2) or cwd (Ghostty) matching, which may switch to the wrong tab
+- **Recommendation**: Always use `/rename` in Claude Code, or `claude -n "name"` when starting new sessions
 
 ### Auto-Detection of Terminal App
 
@@ -351,11 +386,15 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 - `input text` — send text to a terminal as if pasted
 - `send key` — send keyboard events
 
-**Switch:** Iterate all windows → tabs → terminals, match `working directory` to project path, call `focus`.
+**Switch (two-layer):**
+1. **Title match** — if session has `/rename` title, match against `name of terminal contains "title"` (most precise)
+2. **cwd fallback** — match `working directory of terminal is projectPath`
 
 **Launch:** `new tab`/`new window` with `surface configuration from {initial working directory, initial input:"claude --resume <id>\n"}`. Uses `initial input` (not `command`) because `command` is passed directly to `exec` without shell interpretation.
 
-**Note:** Ghostty CLI `+new-window` is not supported on macOS, but AppleScript `new window` works. The `.sdef` is similar to cmux's, but Ghostty's AppleScript actually works (cmux's `count windows` returns 0).
+**Note:** Ghostty CLI `+new-window` is not supported on macOS, but AppleScript `new window` works. The `.sdef` is similar to cmux's, but Ghostty's AppleScript actually works (cmux's `count windows` returns 0 — fix submitted as cmux PR #1826).
+
+**Same-cwd limitation:** Without `/rename`, same-cwd sessions may switch to wrong tab. Ghostty does not expose per-terminal PID or TTY in AppleScript — upstream issues [#11592](https://github.com/ghostty-org/ghostty/issues/11592), [#10756](https://github.com/ghostty-org/ghostty/issues/10756), and PR [#11354](https://github.com/ghostty-org/ghostty/pull/11354) track adding this.
 
 ### Branch Name: Why Not `git branch --show-current`
 
@@ -366,32 +405,40 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 ### Phase 1 (MVP) — ✅ Implemented
 
 - Session list from `history.jsonl` sorted by last activity
-- Multi-word AND search on project name + first prompt
-- `Tab` key to toggle Projects / Sessions
-- Active session detection (green dot) via async process scanning
-- Custom title display via async grep
-- Open/resume in iTerm2 (new tab or window)
-- Session Terminal + Preview mode settings
-- Color-coded message types (first=grey, last=amber, title=green)
-- Non-blocking SWR loading with 5s TTL cache
+- Multi-word AND search (local, includes all displayed fields)
+- `Tab` key to toggle Projects / Sessions, `PageUp`/`PageDown` jump 5
+- Active session detection (purple dot) with `claimedSessionIds` dedup
+- Auto-detect terminal app (iTerm2/Ghostty/cmux) via parent process tree walk
+- Terminal badge (ITERM2, CMUX, GHOSTTY) on active sessions
+- Custom title display via async grep with precise pattern
+- Git branch name via `tail -n 5`
+- Last assistant response for active sessions via `tail -n 200`
+- Open/resume in iTerm2, Ghostty, or cmux
+- iTerm2: three-layer switch (title → TTY → fallback)
+- Ghostty: two-layer switch (title → cwd fallback)
+- cmux: CLI sidebar-state cwd → tree fallback
+- Default Tab, Launch Terminal, Launch Mode, Session Preview settings
+- 1.5-3 line layout with color-coded elements
+- Non-blocking SWR loading with stable active state via `useRef`
+- CHANGELOG.md with CI auto-read for release notes
 
 ### Phase 2 (Planned)
 
-- Terminal.app / Ghostty / cmux support
-- Last assistant response (requires JSONL parsing — Rust native module candidate)
-- Branch name from `sessions-index.json`
-- Full-text search across conversation content
+- Full-text search across conversation content (may need Rust native module)
 - Bookmark functionality
-- Duplicate session prevention (detect + switch instead of launch)
-- Custom title as searchable field
-- UI: two-line layout for better alignment and information density
+- Copy resume command (right-click or long-press)
+- Session status (Working/Idle) detection from JSONL
+- Notifications on Working → Idle transition
+- PR info display from `sessions-index.json`
+- Terminal.app support
+- Collapse/expand for full session details
 
 ### Phase 3 (Future)
 
 - Session preview panel (conversation summary)
 - Cost/token statistics from `session-metadata.db`
 - Custom terminal command template
-- PR info display from `sessions-index.json`
+- Per-terminal PID/TTY matching (pending upstream: Ghostty #11592, cmux #1826)
 
 ## Technical Decisions
 
@@ -407,7 +454,7 @@ TypeScript is sufficient for MVP. `history.jsonl` reading (~40ms) and session li
 
 ### grep vs full JSONL parsing for custom titles
 
-`grep "custom-title" <file> | tail -1` avoids parsing multi-MB JSON files. Async parallel `exec` keeps it non-blocking. ~2s for 100 files (I/O bound on 771MB total).
+`grep '"type":"custom-title"' <file> | tail -1` avoids parsing multi-MB JSON files. Must use precise pattern (not just `"custom-title"`) to avoid false positives from assistant messages. Async parallel `exec` keeps it non-blocking. ~2s for 100 files (I/O bound on 771MB total).
 
 **Future optimization options:**
 - Rust native module for parallel scanning
@@ -420,3 +467,13 @@ TypeScript is sufficient for MVP. `history.jsonl` reading (~40ms) and session li
 - [claude-history](https://github.com/raine/claude-history) — Rust TUI for session browsing, full-text search, resume/fork
 - [Session Data Sources wiki](https://github.com/grimmerk/c9watch/wiki/Session-Data-Sources-and-Architecture) — Comprehensive research on Claude Code's data files
 - [cpark design](cpark-design.md) — Session bookmark/parking concept (not yet implemented)
+
+### Upstream PRs/Issues
+
+| Repo | Item | Title | Status | Impact on CodeV |
+|------|------|-------|--------|----------------|
+| manaflow-ai/cmux | PR #1826 | Fix AppleScript `count windows` + `working directory` | Our PR, Open | Enables AppleScript for cmux (unified approach) |
+| manaflow-ai/cmux | PR #1287 | Add per-surface cwd to API | Open | Alternative to AppleScript for 2nd-tab matching |
+| ghostty-org/ghostty | Issue #11592 | Add pid/tty to AppleScript terminal class | Open | Would fix same-cwd switching |
+| ghostty-org/ghostty | PR #11354 | Expose PID/TTY on TerminalEntity | Open | Implementation in progress |
+| ghostty-org/ghostty | Issue #10756 | Expose TTY/PID in App Shortcuts | Open | Related request |
