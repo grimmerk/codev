@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.38
+
+- cmux: three-layer switch matching (title → cwd → project name fallback)
+- cmux: surface-level tab switching via `focus-panel` (multi-tab workspaces)
+- Optimized cmux switching: single `tree --all` call replaces `list-workspaces` + `tree`
+
 ## 1.0.37
 
 - iTerm2: three-layer switch matching (title → TTY → fallback)
