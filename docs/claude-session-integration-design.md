@@ -322,15 +322,15 @@ Session-related settings are only visible when in Sessions mode (fixes popup int
 |----------|--------|--------|--------|----------------|
 | iTerm2 ✅ | `ps` + `lsof` + tty | Title match → TTY fallback | AppleScript: new tab/window + execute | No restriction |
 | Ghostty ✅ | `ps` + parent tree | Title match → cwd fallback | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
-| cmux ⚠️ | `ps` + `lsof` | `sidebar-state` cwd → `tree` title fallback | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll`; title match via `tree` feasible but not implemented (ROI low given socket requirement + can't unify with AppleScript approach) |
+| cmux ✅ | `ps` + `lsof` | Title match → cwd fallback → project name fallback (surface-level) | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll` |
 | Terminal.app | `ps` + tty | AppleScript focus | AppleScript: new tab + execute | No restriction |
 | Custom | — | — | User command template / clipboard | — |
 
 ### Same-CWD Session Matching
 
 When multiple sessions share the same project path, `/rename` custom titles are critical for accurate switching:
-- **With `/rename`**: Title matching finds the correct terminal tab (works for iTerm2 and Ghostty)
-- **Without `/rename`**: Falls back to TTY (iTerm2) or cwd (Ghostty) matching, which may switch to the wrong tab
+- **With `/rename`**: Title matching finds the correct terminal tab (works for iTerm2, Ghostty, and cmux)
+- **Without `/rename`**: Falls back to TTY (iTerm2), cwd (Ghostty/cmux), or project name matching, which may switch to the wrong tab
 - **Recommendation**: Always use `/rename` in Claude Code, or `claude -n "name"` when starting new sessions
 
 ### Auto-Detection of Terminal App
@@ -363,11 +363,14 @@ cmux CLI communicates via Unix socket (`/tmp/cmux.sock`). By default, only proce
 
 **Recommended:** Ask user to set `automation` or `allowAll` mode in cmux Settings. Security impact is minimal — only local processes on the same machine can connect.
 
-**Switch strategy for cmux:**
-1. `ps aux` to find claude process PID
-2. Try connecting to `/tmp/cmux.sock` — if access denied, fallback to clipboard
-3. If connected: `cmux list-workspaces --json` to find which workspace has the session
-4. `cmux select-workspace` + `cmux focus-panel` to switch to correct tab
+**Switch strategy for cmux (two-layer, surface-level):**
+1. Single `cmux tree --all` call → parse workspace→surface structure
+2. **Layer 1 — Title match**: match `/rename` custom title against surface titles in tree output
+3. **Layer 2 — CWD fallback**: parallel `sidebar-state` queries for cwd/focused_cwd, then project name match in surface titles
+4. Switch: `select-workspace` first (must be active), then `focus-panel --panel surface:N` to switch tab
+5. If socket access denied: fallback to clipboard
+
+**Key discovery:** `focus-panel` silently no-ops on non-active workspaces — must `select-workspace` first to make the workspace active, then `focus-panel` to switch the tab within it.
 
 **Launch strategy for cmux:**
 1. Try `cmux new-workspace --cwd <project> --command "claude --resume <id>"`
@@ -416,7 +419,7 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 - Open/resume in iTerm2, Ghostty, or cmux
 - iTerm2: three-layer switch (title → TTY → fallback)
 - Ghostty: two-layer switch (title → cwd fallback)
-- cmux: CLI sidebar-state cwd → tree fallback
+- cmux: two-layer switch (title → cwd fallback, surface-level)
 - Default Tab, Launch Terminal, Launch Mode, Session Preview settings
 - 1.5-3 line layout with color-coded elements
 - Non-blocking SWR loading with stable active state via `useRef`

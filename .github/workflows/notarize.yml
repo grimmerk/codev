@@ -79,7 +79,10 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           # Extract section for this version from CHANGELOG.md
-          NOTES=$(awk "/^## ${VERSION}$/,/^## [0-9]/" CHANGELOG.md | sed '1d;$d' | sed '/^$/d')
+          # Note: can't use awk range pattern /start/,/end/ because the start line
+          # "## 1.0.38" also matches the end pattern /^## [0-9]/ (version starts with digit),
+          # causing awk to treat the range as a single line.
+          NOTES=$(awk -v ver="## ${VERSION}" '$0 == ver {found=1; next} found && /^## / {exit} found' CHANGELOG.md | sed '/^$/d')
           if [ -z "$NOTES" ]; then
             NOTES="Non-App Store notarized build v${VERSION}"
           fi
