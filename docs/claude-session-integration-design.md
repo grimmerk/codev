@@ -338,9 +338,10 @@ When multiple sessions share the same project path, there are two separate conce
 | `claude -r <uuid>` | UUID from process args (`-r` regex) | No | All |
 | `claude -n "name"` | Match name against session custom titles | No | All |
 | `claude --resume "title"` / `-r "title"` | Match title against session custom titles | No | All |
-| `claude` (no args) | Only cwd matching (may be wrong) | Yes (cross-reference via per-tab TTY) | iTerm2 only |
+| `claude` (no args), later `/rename`'d | Cross-reference: TTY → tab name → custom title → session ID | Yes (per-tab TTY) | iTerm2 only |
+| `claude` (no args), never `/rename`'d | **Unsolvable** — cwd only, cross-reference can't help (tab names identical) | — | None |
 
-Cross-reference approach for the `claude` (no args) case: get each terminal tab's TTY via AppleScript (`tty of session`), cross-reference with claude process TTYs (`ps -o tty=`), then use tab name to look up session ID via custom titles. Requires the terminal to expose per-tab TTY — currently only iTerm2 supports this. Ghostty has a pending request ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
+Cross-reference approach: get each terminal tab's TTY (iTerm2: `tty of session` via AppleScript), cross-reference with claude process TTYs (`ps -o tty=`), then use tab name to look up session ID via custom titles. **Still requires `/rename`** — without a custom title, same-cwd tabs have identical names and cross-reference can't determine which session ID maps to which tab. Requires the terminal to expose per-tab TTY or PID — currently only iTerm2 supports this. Ghostty has a pending request ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
 
 #### Switch layer (click → jump to correct tab)
 
@@ -349,10 +350,13 @@ Cross-reference approach for the `claude` (no args) case: get each terminal tab'
 | Any with `/rename` | Yes | Title match ✓ | Title match ✓ |
 | `claude -n "name"` | Yes (`-n` sets title) | Title match ✓ | Title match ✓ |
 | `claude -r "title"` | Yes (resume by title) | Title match ✓ | Title match ✓ |
-| `-r <uuid>` without `/rename` | No | **TTY match ✓** | cwd fallback ✗ |
-| `claude` (no args), no `/rename` | No | TTY match (but PID may be wrong) ✗ | cwd fallback ✗ |
+| `-r <uuid>` without `/rename` | No | **TTY match ✓** (detection correct → correct PID) | cwd fallback ✗ |
+| `claude` (no args), later `/rename`'d | Yes | Title match ✓ | Title match ✓ |
+| `claude` (no args), never `/rename`'d | No | **Unsolvable** — detection wrong → wrong PID → wrong TTY | cwd fallback ✗ |
 
-**Key difference**: iTerm2 has TTY matching as fallback — even without a custom title, it can switch to the correct tab (as long as detection mapped the correct PID). Ghostty/cmux lack per-tab TTY, so without a custom title + same cwd, they always fall back to cwd matching which may switch to the wrong tab.
+**Key difference**: iTerm2 has TTY matching as fallback — when detection has the correct PID, it can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty/cmux lack per-tab TTY, so without a custom title + same cwd, they fall back to cwd matching which may switch to the wrong tab.
+
+**Unsolvable case**: `claude` (no args) + never `/rename`'d + same cwd = no terminal can correctly detect or switch. There is no UUID, no title in process args, and no custom title in the tab name for cross-reference.
 
 - **Recommendation**: Always use `/rename` in Claude Code, or `claude -n "name"` when starting new sessions
 
