@@ -234,7 +234,7 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
       const pid = parseInt(parts[1], 10);
       if (!pid) continue;
 
-      const resumeMatch = line.match(/--resume\s+([a-f0-9-]{36})/);
+      const resumeMatch = line.match(/(?:--resume|-r)\s+([a-f0-9-]{36})/);
       if (resumeMatch) {
         activeMap.set(resumeMatch[1], pid);
         claimedSessionIds.add(resumeMatch[1]);
