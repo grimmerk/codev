@@ -443,7 +443,7 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const promises = sessions.map(async (session) => {
-    const encodedProject = session.project.replace(/\//g, '-');
+    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
 
     if (!fs.existsSync(jsonlPath)) return;
@@ -500,7 +500,7 @@ export const loadLastAssistantResponses = async (
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const promises = sessions.map(async (session) => {
-    const encodedProject = session.project.replace(/\//g, '-');
+    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
 
     if (!fs.existsSync(jsonlPath)) return;
