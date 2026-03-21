@@ -5,7 +5,26 @@ Use this to quickly open and switch VS Code/Cursor projects, and use AI assistan
 ## Features
 
 - use shortcut/tray (`Ctrl+Cmd+R`) menu to quickly launch a UI listing recent projects (folders, workspaces, and files), then select one to open it in VS Code or Cursor.
+- Claude Code session list: press `Tab` to switch between Projects and Sessions. Search, view custom titles, git branches, and resume sessions in iTerm2, Ghostty, or cmux.
 - AI Assistant features. CodeV now includes a Code AI Assistant feature powered by Anthropic's Claude AI. This feature allows you to get detailed explanations of code snippets with a simple keyboard shortcut.
+
+### Claude Code Session Switching
+
+CodeV can list, search, and resume Claude Code sessions. Press `⌘⌃R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
+
+**For best session switching accuracy** when you have multiple sessions in the same project directory:
+
+1. **Use `/rename` (or `/title`)** in Claude Code to set a session title — this is the most reliable way for CodeV to identify and switch to the correct terminal tab
+2. **Use `claude --resume <uuid>`** instead of `claude -r` when resuming — the explicit session ID enables precise process-to-session mapping
+3. Or use CodeV itself to resume sessions — it always uses `--resume <uuid>`
+
+**Terminal support:**
+
+| Terminal | Switch (active) | Launch (new) | Limitation |
+|----------|----------------|--------------|------------|
+| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | None (with `/rename` or `--resume <uuid>`) |
+| Ghostty | Working directory match | AppleScript new tab/window | Same-cwd sessions may switch to wrong tab (no PID/TTY in AppleScript yet — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
+| cmux | CLI sidebar-state cwd → tree fallback | CLI new-workspace | Requires socket mode `automation`/`allowAll`; same-cwd sessions may mismatch (AppleScript fix pending — see [cmux#1826](https://github.com/manaflow-ai/cmux/pull/1826)) |
 
 ### AI Assistant feature
 
