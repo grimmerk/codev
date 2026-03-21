@@ -346,11 +346,13 @@ export const openSessionInITerm2 = (
       : '';
 
     const tmpScript = '/tmp/codev-iterm-switch.scpt';
-    const switchScript = `set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
-if targetTty is not "" then
-  tell application "iTerm2"
-    activate
-    -- Layer 1: tty matching (most precise)
+    const switchScript = `tell application "iTerm2"
+  activate
+  ${titleMatch ? `-- Layer 1: title matching (most precise for same-cwd sessions)
+  ${titleMatch.trim()}` : ''}
+  -- Layer 2: tty matching (fallback)
+  set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
+  if targetTty is not "" then
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
@@ -363,21 +365,13 @@ if targetTty is not "" then
         end repeat
       end repeat
     end repeat
-    ${titleMatch}
-    return "not found"
-  end tell
-else
-  tell application "iTerm2"
-    activate
-    ${titleMatch}
-    return "no-tty"
-  end tell
-end if`;
+  end if
+  return "not found"
+end tell`;
+    console.log(`[iTerm2] switch: pid=${activePid}, customTitle=${customTitle || 'none'}`);
     fs.writeFileSync(tmpScript, switchScript);
-    exec(`osascript ${tmpScript}`, (error: any) => {
-      if (error) {
-        console.error('Error switching to iTerm2 session:', error);
-      }
+    exec(`osascript ${tmpScript}`, { encoding: 'utf-8' }, (error: any, stdout: string) => {
+      console.log(`[iTerm2] switch result: ${(stdout || '').trim()}`, error?.message || '');
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
