@@ -38,8 +38,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchClaudeSessions: (query: string) => ipcRenderer.invoke('search-claude-sessions', query),
   detectActiveSessions: () => ipcRenderer.invoke('detect-active-sessions'),
   detectTerminalApps: (pidMap: Record<string, number>) => ipcRenderer.invoke('detect-terminal-apps', pidMap),
-  openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number) =>
-    ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid),
+  openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) =>
+    ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid, customTitle),
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>
     ipcRenderer.send('copy-claude-session-command', sessionId, projectPath),
   loadSessionEnrichment: (sessions: any[]) => ipcRenderer.invoke('load-session-enrichment', sessions),

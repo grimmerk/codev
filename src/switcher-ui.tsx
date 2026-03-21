@@ -762,7 +762,7 @@ function SwitcherApp() {
                 const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
                 const s = sessions[idx];
                 if (s) {
-                  (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid);
+                  (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
                 }
               }
             }}
@@ -794,7 +794,7 @@ function SwitcherApp() {
                   key={session.sessionId}
                   data-session-index={index}
                   onClick={() => {
-                    (window as any).electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid);
+                    (window as any).electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId]);
                   }}
                   style={{
                     display: 'flex',

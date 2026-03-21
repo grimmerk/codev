@@ -281,6 +281,7 @@ export const openSession = async (
   activePid?: number,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
+  customTitle?: string,
 ): Promise<void> => {
   let effectiveTerminal = terminalApp;
 
@@ -302,7 +303,7 @@ export const openSession = async (
       break;
     case 'iterm2':
     default:
-      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode);
+      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode, customTitle);
       break;
   }
 };
@@ -318,16 +319,38 @@ export const openSessionInITerm2 = (
   isActive: boolean,
   activePid?: number,
   terminalMode: string = 'tab',
+  customTitle?: string,
 ): void => {
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
-    // Try to switch to existing iTerm2 tab via tty matching
+    // Three-layer matching for iTerm2 switch:
+    // 1. tty matching (most precise — works when PID-session mapping is correct)
+    // 2. title matching (works when session has /rename title)
+    // 3. fallback: just activate iTerm2
+    const titleMatch = customTitle
+      ? `
+        -- Layer 2: title matching (fallback for same-cwd sessions)
+        repeat with w in windows
+          repeat with t in tabs of w
+            repeat with s in sessions of t
+              if name of s contains "${customTitle.replace(/"/g, '\\"')}" then
+                select s
+                select t
+                set index of w to 1
+                return "found-by-title"
+              end if
+            end repeat
+          end repeat
+        end repeat`
+      : '';
+
     const tmpScript = '/tmp/codev-iterm-switch.scpt';
     const switchScript = `set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
 if targetTty is not "" then
   tell application "iTerm2"
     activate
+    -- Layer 1: tty matching (most precise)
     repeat with w in windows
       repeat with t in tabs of w
         repeat with s in sessions of t
@@ -335,15 +358,20 @@ if targetTty is not "" then
             select s
             select t
             set index of w to 1
-            return "found"
+            return "found-by-tty"
           end if
         end repeat
       end repeat
     end repeat
+    ${titleMatch}
     return "not found"
   end tell
 else
-  tell application "iTerm2" to activate
+  tell application "iTerm2"
+    activate
+    ${titleMatch}
+    return "no-tty"
+  end tell
 end if`;
     fs.writeFileSync(tmpScript, switchScript);
     exec(`osascript ${tmpScript}`, (error: any) => {
