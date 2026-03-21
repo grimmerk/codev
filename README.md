@@ -8,6 +8,8 @@ Use this to quickly open and switch VS Code/Cursor projects, and use AI assistan
 - Claude Code session list: press `Tab` to switch between Projects and Sessions. Search, view custom titles, git branches, and resume sessions in iTerm2, Ghostty, or cmux.
 - AI Assistant features. CodeV now includes a Code AI Assistant feature powered by Anthropic's Claude AI. This feature allows you to get detailed explanations of code snippets with a simple keyboard shortcut.
 
+**Download:** [Latest release (notarized DMG)](https://github.com/grimmerk/codev/releases/latest)
+
 ### Claude Code Session Switching
 
 CodeV can list, search, and resume Claude Code sessions. Press `⌘⌃R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
