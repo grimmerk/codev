@@ -23,19 +23,29 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to op
 
 **For best accuracy** when you have multiple sessions in the same project directory:
 
-1. **Start sessions with a name**: use `claude -n "name"` (or `claude --name "name"`) to create a named session from the start. This is the most reliable way — CodeV can correctly detect and switch to the session on all terminals.
-2. **Or `/rename` in-session, then exit and resume**: if you already started a session without a name, use `/rename` inside the session, then exit and resume it (via CodeV or `claude --resume`). A session that was started with bare `claude` (no `-n`) and never exited+resumed after `/rename` may have incorrect detection (wrong purple dot), which can cause switch issues.
-3. **When resuming from terminal**: use `claude --resume <uuid>` or `claude -r <uuid>` for most reliable detection. Resuming by title (`claude -r "title"`) also works. CodeV itself always uses `--resume <uuid>`.
+1. **Start sessions with a name**: `claude -n "name"` (or `claude --name "name"`). Most reliable — works on all terminals.
+2. **Or `/rename` in-session, then exit and resume**: bare `claude` sessions need `/rename` + exit + resume to be identifiable. Without this, CodeV may show the purple active dot on the wrong session.
+3. **When resuming from terminal**: `claude --resume <uuid>`, `claude -r <uuid>`, or `claude -r "title"` all work. CodeV itself always uses `--resume <uuid>`.
 
-**Why this matters**: CodeV identifies active sessions by reading process arguments. Sessions started with `claude -n "name"` or resumed with `--resume <uuid>` have identifiable args. Sessions started with bare `claude` have no UUID or title in their args, so CodeV may assign the purple active dot to the wrong session — and clicking it may switch to the wrong terminal tab.
+**Same-cwd accuracy by launch method** (only matters when multiple sessions share the same project directory):
+
+| How session was started | Detection (purple dot) | Switch: iTerm2 | Switch: Ghostty/cmux |
+|------------------------|----------------------|----------------|---------------------|
+| `claude -n "name"` | ✓ All terminals | ✓ Title match | ✓ Title match |
+| `/rename`'d + resumed (`-r <uuid>` or `-r "title"`) | ✓ All terminals | ✓ Title match | ✓ Title match |
+| `claude -r` picker → select `/rename`'d session | ✓ All terminals | ✓ Title match | ✓ Title match |
+| `-r <uuid>` without `/rename` | ✓ All terminals | ✓ **TTY match** | ✗ cwd fallback |
+| bare `claude`, no `/rename` | ✗ All terminals | ✗ | ✗ |
+
+**Key**: iTerm2 has TTY matching as an extra fallback — it can switch correctly even without a custom title, as long as detection has the correct PID. Ghostty/cmux lack per-tab TTY ([ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)), so they require a custom title for same-cwd accuracy.
 
 **Terminal support:**
 
-| Terminal | Switch (active) | Launch (new) | Same-cwd limitation |
-|----------|----------------|--------------|---------------------|
-| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | TTY fallback covers `-r <uuid>` without `/rename`; only bare `claude` without `/rename` is unreliable |
-| Ghostty | Title match → cwd fallback | AppleScript new tab/window | Without `/rename`, same-cwd may switch to wrong tab (no per-tab TTY — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
-| cmux | Title match → cwd fallback | CLI new-workspace | Same as Ghostty; also requires enabling socket access in cmux Settings (`automation` or `allowAll`) |
+| Terminal | Switch method | Launch method | Notes |
+|----------|--------------|---------------|-------|
+| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | Most reliable for same-cwd |
+| Ghostty | Title match → cwd fallback | AppleScript new tab/window | Needs `/rename` for same-cwd |
+| cmux | Title match → cwd fallback | CLI new-workspace | Needs `/rename` for same-cwd; requires socket access in cmux Settings (`automation` or `allowAll`) |
 
 ### AI Assistant feature
 
