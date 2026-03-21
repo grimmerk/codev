@@ -35,7 +35,7 @@
 - Non-blocking SWR-like loading with 5s TTL cache
 - 1.5-3 line layout with color-coded elements
 
-## 1.0.33
+## 1.0.33 (App Store submission)
 
 - Launch at Login toggle (App Store guideline 2.4.5 fix)
 - Dynamic app version in Settings popup
@@ -44,8 +44,33 @@
 
 ## 1.0.31
 
+- Fix: apply IDE preference immediately on save
+- Fix: cast preferredIDE string to IDEMode type
+
+## 1.0.30
+
 - Cursor IDE support alongside VS Code
 - IDE Preference Settings to switch between VS Code and Cursor
-- Read recent projects directly from VS Code/Cursor SQLite
-- Recently opened files support
-- Mac App Store sandbox compatible with folder access grant
+- Documentation: mention Cursor support and MAS sandbox note
+
+## 1.0.29
+
+- Security-scoped bookmark for IDE SQLite access in MAS sandbox
+- Fix: sign better_sqlite3.node for MAS builds
+- Fix: exclude electron binary from asset-relocator-loader
+- Fix: use --platform=mas for MAS builds
+- Recently opened file items support
+
+## 1.0.28
+
+- Initial TestFlight build
+- Disable migration/server, read VS Code/Cursor SQLite directly
+- Prepare embedded.provisionprofile for TestFlight
+
+## 1.0.26
+
+- Original App Store release (VS Code extension based)
+
+## 1.0.0
+
+- Initial version
