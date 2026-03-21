@@ -1,10 +1,14 @@
 # Changelog
 
+## 1.0.40
+
+- Projects: remove item count (react-select layout constraint)
+- Projects: larger branch name font for better readability
+
 ## 1.0.39
 
 - Projects: show git branch name (async loaded, searchable)
 - Projects: unified selection style with Sessions (left border + subtle highlight)
-- Projects: show item count
 
 ## 1.0.38
 
