@@ -15,7 +15,7 @@ Spotlight-like quick open: press `⌃+⌘+R` or click the menu bar icon to launc
 - Supports VS Code and Cursor — switch between them in Settings → IDE Preference
 - Remove items from the recent list by hovering and clicking "x"
 
-**Download:** [Latest release (notarized DMG)](https://github.com/grimmerk/codev/releases/latest) · [Mac App Store](https://apps.apple.com/us/app/switchv/id1663612397) (v1.0.33, does not include Claude Code session features)
+**Download:** [Latest release (notarized DMG)](https://github.com/grimmerk/codev/releases/latest) · [Mac App Store](https://apps.apple.com/us/app/switchv/id1663612397) (v1.0.33, does not include Claude Code sessions or git branch features)
 
 ### Claude Code Session Switching
 
