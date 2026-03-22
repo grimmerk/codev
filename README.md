@@ -34,7 +34,7 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 
 | Terminal | Switch method | Launch method | Notes |
 |----------|--------------|---------------|-------|
-| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | Most reliable for same-cwd |
+| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | Most reliable; cross-reference fixes detection for bare `claude` + `/rename`'d sessions |
 | Ghostty | Title match → cwd fallback | AppleScript new tab/window | Needs `/rename` for same-cwd |
 | cmux | Title match → cwd fallback | CLI new-workspace | Needs `/rename` for same-cwd; requires socket access in cmux Settings (`automation` or `allowAll`) |
 
