@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.42
+
+- iTerm2: cross-reference detection via per-tab TTY + tab name matching
+- Fixes purple dot for bare `claude` / `claude -r` sessions with in-session `/rename`
+
 ## 1.0.41
 
 - Fix: detection regex matches `-r` in addition to `--resume` for correct purple dot
