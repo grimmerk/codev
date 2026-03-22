@@ -24,8 +24,8 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to op
 **For best accuracy** when you have multiple sessions in the same project directory:
 
 1. **Start sessions with a name**: `claude -n "name"` (or `claude --name "name"`). Most reliable — works on all terminals.
-2. **Or `/rename` in-session, then exit and resume**: bare `claude` sessions need `/rename` + exit + resume to be identifiable. Without this, CodeV may show the purple active dot on the wrong session.
-3. **When resuming from terminal**: `claude --resume <uuid>`, `claude -r <uuid>`, or `claude -r "title"` all work. CodeV itself always uses `--resume <uuid>`.
+2. **Or `/rename` in-session, then exit and resume**: bare `claude` or `claude -r` (interactive picker) sessions need `/rename` + exit + resume to be identifiable. Without this, CodeV may show the purple active dot on the wrong session.
+3. **When resuming from terminal**: `claude --resume <uuid>` or `claude -r <uuid>` are most reliable. Note: `claude -r` (interactive picker without UUID) does **not** update process args after selection — it behaves like bare `claude` for detection purposes. CodeV itself always uses `--resume <uuid>`.
 
 For the full same-cwd accuracy matrix (detection + switch by launch method and terminal), see the [design doc](docs/claude-session-integration-design.md#same-cwd-session-matching).
 
