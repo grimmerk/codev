@@ -21,11 +21,12 @@ Spotlight-like quick open: press `⌃+⌘+R` or click the menu bar icon to launc
 
 CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
 
-**For best accuracy** when you have multiple sessions in the same project directory:
+**Simple rule**: when running multiple sessions in the same project directory at the same time, give each running session a name. Closed sessions don't need names — they won't cause issues.
 
-1. **Start sessions with a name**: `claude -n "name"` (or `claude --name "name"`). Most reliable — works on all terminals.
-2. **Or `/rename` in-session, then exit and resume**: bare `claude` or `claude -r` (interactive picker) sessions need `/rename` + exit + resume to be identifiable. Without this, CodeV may show the purple active dot on the wrong session.
-3. **When resuming from terminal**: `claude --resume <uuid>` or `claude -r <uuid>` are most reliable. Note: `claude -r` (interactive picker without UUID) does **not** update process args after selection — it behaves like bare `claude` for detection purposes. CodeV itself always uses `--resume <uuid>`.
+- **Best**: start with a name — `claude -n "my task"` (or `claude --name "my task"`)
+- **Or**: `/rename` in-session, then exit and resume (bare `claude` or `claude -r` picker sessions need this to be identifiable)
+- **Temporary sessions**: no need to rename — just close them when done. Only sessions that are actively running alongside other same-directory sessions need names.
+- **When resuming from terminal**: `claude --resume <uuid>` or `claude -r <uuid>` are most reliable. Note: `claude -r` (interactive picker) does **not** update process args after selection — it behaves like bare `claude` for detection. CodeV itself always uses `--resume <uuid>`.
 
 For the full same-cwd accuracy matrix (detection + switch by launch method and terminal), see the [design doc](docs/claude-session-integration-design.md#same-cwd-session-matching).
 
@@ -33,7 +34,7 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 
 | Terminal | Switch method | Launch method | Notes |
 |----------|--------------|---------------|-------|
-| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | Most reliable for same-cwd |
+| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | Most reliable; cross-reference fixes detection for bare `claude` + `/rename`'d sessions |
 | Ghostty | Title match → cwd fallback | AppleScript new tab/window | Needs `/rename` for same-cwd |
 | cmux | Title match → cwd fallback | CLI new-workspace | Needs `/rename` for same-cwd; requires socket access in cmux Settings (`automation` or `allowAll`) |
 
