@@ -197,6 +197,118 @@ export const detectTerminalApp = async (pid: number): Promise<string> => {
   return 'unknown';
 };
 
+/**
+ * iTerm2 cross-reference: refine PID-session mapping using terminal TTY + tab name.
+ * For processes that were mapped via cwd fallback (no UUID/title in args),
+ * check if iTerm2 tab name contains a custom title that can identify the session.
+ * Only runs when iTerm2 is detected and there are ambiguous same-cwd mappings.
+ */
+const refineDetectionWithITerm2 = async (
+  activeMap: Map<string, number>,
+  claimedSessionIds: Set<string>,
+  cwdProcesses: { pid: number; line: string }[],
+  allSessions: ClaudeSession[],
+  execPromise: (cmd: string) => Promise<string>,
+): Promise<void> => {
+  // Only worth running if there are cwd-fallback processes
+  if (cwdProcesses.length === 0) return;
+
+  // Quick check: is iTerm2 running at all?
+  const itermCheck = await execPromise('pgrep -x iTerm2 2>/dev/null');
+  if (!itermCheck.trim()) return;
+
+  // All cwd processes are potential iTerm2 candidates (we'll verify via TTY matching)
+  const iterm2Pids = cwdProcesses.map(p => p.pid);
+
+  // Get all iTerm2 sessions' TTY + tab name via AppleScript
+  const tmpScript = '/tmp/codev-iterm-detect.scpt';
+  fs.writeFileSync(tmpScript, `tell application "iTerm2"
+  set results to ""
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        set results to results & (tty of s) & "|||" & (name of s) & "\\n"
+      end repeat
+    end repeat
+  end repeat
+  return results
+end tell`);
+  const itermOutput = await execPromise(`osascript ${tmpScript} 2>/dev/null`);
+  try { fs.unlinkSync(tmpScript); } catch {}
+  if (!itermOutput.trim()) return;
+
+  // Parse iTerm2 sessions: [{tty, name}, ...]
+  const itermSessions: { tty: string; name: string }[] = [];
+  for (const line of itermOutput.split('\n')) {
+    const parts = line.split('|||');
+    if (parts.length === 2 && parts[0].trim()) {
+      itermSessions.push({ tty: parts[0].trim(), name: parts[1].trim() });
+    }
+  }
+  if (itermSessions.length === 0) return;
+
+  // Cross-reference: for each iTerm2 claude PID, find its TTY → match iTerm2 tab → extract title → find session
+  // Load custom titles lazily per-cwd to avoid scanning all sessions
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+  const titleCache = new Map<string, Map<string, string>>(); // cwd → (sessionId → title)
+
+  const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
+    if (titleCache.has(cwd)) return titleCache.get(cwd)!;
+    const titles = new Map<string, string>();
+    const candidates = allSessions.filter(s => s.project === cwd);
+    const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
+    await Promise.all(candidates.map(async (session) => {
+      const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+      if (!fs.existsSync(jsonlPath)) return;
+      const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
+      try {
+        const parsed = JSON.parse(out.trim());
+        const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
+        if (title) titles.set(session.sessionId, title);
+      } catch {}
+    }));
+    titleCache.set(cwd, titles);
+    return titles;
+  };
+
+  for (const pid of iterm2Pids) {
+    const ttyOutput = (await execPromise(`ps -o tty= -p ${pid} 2>/dev/null`)).trim();
+    if (!ttyOutput) continue;
+
+    // Find iTerm2 session with matching TTY
+    const itermSession = itermSessions.find(s => s.tty.endsWith(ttyOutput));
+    if (!itermSession) continue;
+
+    // Get cwd for this PID to load relevant custom titles
+    const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
+    const cwdMatch = cwdOutput.match(/^n(.+)$/m);
+    if (!cwdMatch) continue;
+    const cwd = cwdMatch[1];
+
+    // Load custom titles for same-cwd sessions only
+    const sessionTitles = await getTitlesForCwd(cwd);
+    if (sessionTitles.size === 0) continue;
+
+    // Try to match tab name against custom titles
+    const tabName = itermSession.name;
+    for (const [sessionId, title] of sessionTitles) {
+      if (title && tabName.includes(title) && !claimedSessionIds.has(sessionId)) {
+        // Found a match — check if this PID was previously mapped to a different session
+        const currentSessionId = [...activeMap.entries()].find(([, p]) => p === pid)?.[0];
+        if (currentSessionId && currentSessionId !== sessionId) {
+          // Remove old mapping
+          activeMap.delete(currentSessionId);
+          claimedSessionIds.delete(currentSessionId);
+          console.log(`[cross-ref] corrected PID ${pid}: ${currentSessionId} → ${sessionId} (tab: "${tabName}")`);
+        }
+        activeMap.set(sessionId, pid);
+        claimedSessionIds.add(sessionId);
+        break;
+      }
+    }
+  }
+};
+
 export const detectActiveSessions = async (): Promise<Map<string, number>> => {
   const now = Date.now();
   if (cachedActiveMap && (now - activeCacheTimestamp) < ACTIVE_CACHE_TTL_MS) {
@@ -304,6 +416,12 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
         }
       }
     }
+
+    // Third pass: iTerm2 cross-reference for processes that were matched by cwd fallback.
+    // Uses iTerm2 AppleScript to get TTY + tab name for each session, then cross-references
+    // with claude process TTYs to build a definitive PID → session ID mapping.
+    // Only runs when there are same-cwd processes that used cwd fallback (no UUID/title in args).
+    await refineDetectionWithITerm2(activeMap, claimedSessionIds, cwdProcesses, allSessions, execPromise);
   } catch {
     // ignore
   }
