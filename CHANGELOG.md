@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.41
+
+- Fix: detection regex matches `-r` in addition to `--resume` for correct purple dot
+- Fix: same-cwd session disambiguation via `-n`/`--name` and `-r`/`--resume` title matching
+- Docs: full same-cwd detection + switch accuracy matrix
+
 ## 1.0.40
 
 - Projects: remove item count (react-select layout constraint)

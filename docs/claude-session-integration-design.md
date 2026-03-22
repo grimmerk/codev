@@ -328,9 +328,42 @@ Session-related settings are only visible when in Sessions mode (fixes popup int
 
 ### Same-CWD Session Matching
 
-When multiple sessions share the same project path, `/rename` custom titles are critical for accurate switching:
-- **With `/rename`**: Title matching finds the correct terminal tab (works for iTerm2, Ghostty, and cmux)
-- **Without `/rename`**: Falls back to TTY (iTerm2), cwd (Ghostty/cmux), or project name matching, which may switch to the wrong tab
+When multiple sessions share the same project path, there are two separate concerns: **detection** (purple dot on correct item) and **switch** (jumping to correct tab).
+
+#### Detection layer (purple dot)
+
+| Launch command | Detection method | Needs terminal API? | Terminals |
+|----------------|-----------------|---------------------|-----------|
+| `claude --resume <uuid>` | UUID from process args | No | All |
+| `claude -r <uuid>` | UUID from process args (`-r` regex) | No | All |
+| `claude -n "name"` | Match name against session custom titles | No | All |
+| `claude --resume "title"` / `-r "title"` | Match title against session custom titles | No | All |
+| `claude -r` (interactive picker) | Same as bare `claude` — process args stay as `claude -r` after selection, no UUID | See `claude` rows below | — |
+| `claude` or `claude -r` (picker), later `/rename`'d | Cross-reference: TTY → tab name → custom title → session ID | Yes (per-tab TTY) | iTerm2 only |
+| `claude` or `claude -r` (picker), never `/rename`'d | **Unsolvable** — cwd only, cross-reference can't help (tab names identical) | — | None |
+
+Cross-reference approach: get each terminal tab's TTY (iTerm2: `tty of session` via AppleScript), cross-reference with claude process TTYs (`ps -o tty=`), then use tab name to look up session ID via custom titles. **Still requires `/rename`** — without a custom title, same-cwd tabs have identical names and cross-reference can't determine which session ID maps to which tab. Requires the terminal to expose per-tab TTY or PID — currently only iTerm2 supports this. Ghostty has a pending request ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
+
+#### Switch layer (click → jump to correct tab)
+
+| Launch command | Has custom title? | iTerm2 | Ghostty / cmux |
+|----------------|-------------------|--------|----------------|
+| Any with `/rename` | Yes | Title match ✓ | Title match ✓ |
+| `claude -n "name"` | Yes (`-n` sets title) | Title match ✓ | Title match ✓ |
+| `claude -r "title"` | Yes (resume by title) | Title match ✓ | Title match ✓ |
+| `-r <uuid>` without `/rename` | No | **TTY match ✓** (detection correct → correct PID) | cwd fallback ✗ |
+| `claude` or `claude -r` (picker), later `/rename`'d + exited + resumed | Yes | Title match ✓ | Title match ✓ |
+| `claude` or `claude -r` (picker), `/rename`'d but not yet exited | Yes (but detection wrong) | Detection wrong → may click wrong item | Detection wrong → may click wrong item |
+| `claude` or `claude -r` (picker), never `/rename`'d | No | **Unsolvable** | cwd fallback ✗ |
+
+**Key difference**: iTerm2 has TTY matching as fallback — when detection has the correct PID, it can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty/cmux lack per-tab TTY, so without a custom title + same cwd, they fall back to cwd matching which may switch to the wrong tab.
+
+**Unsolvable case**: `claude` or `claude -r` (interactive picker) + never `/rename`'d + same cwd = no terminal can correctly detect or switch. `claude -r` does **not** update process args after picker selection — args remain `claude -r` with no UUID or title. There is no identifiable information in process args, and no custom title in the tab name for cross-reference.
+
+**Note on `/rename` + not yet exited**: even with in-session `/rename`, if the session was started with bare `claude` or `claude -r` and hasn't been exited + resumed yet, detection is still wrong (process args unchanged). The custom title exists in the tab name but detection can't use it without cross-reference (iTerm2 only).
+
+**Cross-reference cascade effect** (iTerm2 only, not yet implemented): when cross-reference correctly claims a `/rename`'d session, the remaining same-cwd candidates shrink. If only one un-`/rename`'d session remains, cwd matching has a single candidate and becomes correct by elimination. This means cross-reference can indirectly fix detection for sessions that would otherwise be unsolvable — but only when at most one un-`/rename`'d session is alive per cwd. With two or more un-`/rename`'d alive sessions sharing the same cwd, those remain ambiguous.
+
 - **Recommendation**: Always use `/rename` in Claude Code, or `claude -n "name"` when starting new sessions
 
 ### Auto-Detection of Terminal App

@@ -21,18 +21,21 @@ Spotlight-like quick open: press `⌃+⌘+R` or click the menu bar icon to launc
 
 CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
 
-**For best session switching accuracy** when you have multiple sessions in the same project directory:
+**For best accuracy** when you have multiple sessions in the same project directory:
 
-1. **Use `/rename`** in Claude Code to set a session title — this is the most reliable way for CodeV to identify and switch to the correct terminal tab. You can also use `claude -n "name"` when starting a new session.
-2. **When resuming a closed session**, CodeV itself is recommended (it always uses `--resume <uuid>`). You can also use `claude --resume <uuid>` or `claude --resume "session title"` in terminal (the session title must be set via `/rename` — auto-generated titles won't work).
+1. **Start sessions with a name**: `claude -n "name"` (or `claude --name "name"`). Most reliable — works on all terminals.
+2. **Or `/rename` in-session, then exit and resume**: bare `claude` or `claude -r` (interactive picker) sessions need `/rename` + exit + resume to be identifiable. Without this, CodeV may show the purple active dot on the wrong session.
+3. **When resuming from terminal**: `claude --resume <uuid>` or `claude -r <uuid>` are most reliable. Note: `claude -r` (interactive picker without UUID) does **not** update process args after selection — it behaves like bare `claude` for detection purposes. CodeV itself always uses `--resume <uuid>`.
+
+For the full same-cwd accuracy matrix (detection + switch by launch method and terminal), see the [design doc](docs/claude-session-integration-design.md#same-cwd-session-matching).
 
 **Terminal support:**
 
-| Terminal | Switch (active) | Launch (new) | Limitation |
-|----------|----------------|--------------|------------|
-| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | None (with `/rename`) |
-| Ghostty | Title match → cwd fallback | AppleScript new tab/window | Same-cwd without `/rename` may switch to wrong tab (no PID/TTY in AppleScript yet — see [ghostty#11592](https://github.com/ghostty-org/ghostty/issues/11592)) |
-| cmux | Title match → cwd fallback | CLI new-workspace | Requires enabling socket access in cmux Settings (set to `automation` or `allowAll`); same-cwd without `/rename` may switch to wrong workspace |
+| Terminal | Switch method | Launch method | Notes |
+|----------|--------------|---------------|-------|
+| iTerm2 | Title match → TTY fallback | AppleScript new tab/window | Most reliable for same-cwd |
+| Ghostty | Title match → cwd fallback | AppleScript new tab/window | Needs `/rename` for same-cwd |
+| cmux | Title match → cwd fallback | CLI new-workspace | Needs `/rename` for same-cwd; requires socket access in cmux Settings (`automation` or `allowAll`) |
 
 ### AI Assistant feature
 

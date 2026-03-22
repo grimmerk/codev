@@ -234,7 +234,7 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
       const pid = parseInt(parts[1], 10);
       if (!pid) continue;
 
-      const resumeMatch = line.match(/--resume\s+([a-f0-9-]{36})/);
+      const resumeMatch = line.match(/(?:--resume|-r)\s+([a-f0-9-]{36})/);
       if (resumeMatch) {
         activeMap.set(resumeMatch[1], pid);
         claimedSessionIds.add(resumeMatch[1]);
@@ -246,19 +246,61 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
       }
     }
 
-    // Second pass: handle claude -r processes (no explicit session ID)
-    // Use lsof to find cwd, then match to unclaimed sessions
+    // Second pass: handle processes without explicit session UUID
+    // Use lsof to find cwd, then match to unclaimed sessions.
+    // When multiple sessions share the same cwd, try matching -n/--name
+    // or -r/--resume title against custom titles for disambiguation.
     const allSessions = readClaudeSessions(500);
-    for (const { pid } of cwdProcesses) {
+    for (const { pid, line } of cwdProcesses) {
       const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
       const cwdMatch = cwdOutput.match(/^n(.+)$/m);
       if (cwdMatch) {
         const cwd = cwdMatch[1];
-        // Find the first unclaimed session with this cwd
-        const match = allSessions.find((s) => s.project === cwd && !claimedSessionIds.has(s.sessionId));
-        if (match) {
-          activeMap.set(match.sessionId, pid);
-          claimedSessionIds.add(match.sessionId);
+        const candidates = allSessions.filter((s) => s.project === cwd && !claimedSessionIds.has(s.sessionId));
+
+        if (candidates.length === 0) continue;
+
+        if (candidates.length === 1) {
+          activeMap.set(candidates[0].sessionId, pid);
+          claimedSessionIds.add(candidates[0].sessionId);
+          continue;
+        }
+
+        // Multiple same-cwd candidates: try to disambiguate via custom title
+        let matched = false;
+        if (/(?:--name|--resume|-[nr])\s+/.test(line)) {
+          const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+          const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
+          // Load custom titles for candidates only (parallel grep, ~10ms each)
+          const titleResults = await Promise.all(candidates.map(async (s) => {
+            const jsonlPath = path.join(claudeDir, encodedProject, `${s.sessionId}.jsonl`);
+            if (!fs.existsSync(jsonlPath)) return { sessionId: s.sessionId, title: '' };
+            const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
+            try {
+              const parsed = JSON.parse(out.trim());
+              return { sessionId: s.sessionId, title: (parsed.customTitle || '').replace(/^"|"$/g, '').trim() };
+            } catch { return { sessionId: s.sessionId, title: '' }; }
+          }));
+
+          // Extract the command part (after the PID/CPU/MEM columns) for matching
+          // ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND...
+          const cmdParts = line.trim().split(/\s+/);
+          const cmdLine = cmdParts.slice(10).join(' '); // skip ps aux metadata columns
+
+          for (const { sessionId, title } of titleResults) {
+            if (title && cmdLine.includes(title)) {
+              activeMap.set(sessionId, pid);
+              claimedSessionIds.add(sessionId);
+              matched = true;
+              break;
+            }
+          }
+        }
+
+        if (!matched) {
+          // Fallback: first unclaimed session with matching cwd
+          activeMap.set(candidates[0].sessionId, pid);
+          claimedSessionIds.add(candidates[0].sessionId);
         }
       }
     }
