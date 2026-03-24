@@ -309,6 +309,99 @@ end tell`);
   }
 };
 
+/**
+ * cmux cross-reference: refine PID-session mapping using per-surface TTY + title from tree output.
+ * Same concept as iTerm2 cross-reference but uses cmux CLI instead of AppleScript.
+ * Requires cmux build with TTY support in tree output (tty= field in surface lines).
+ */
+const refineDetectionWithCmux = async (
+  activeMap: Map<string, number>,
+  claimedSessionIds: Set<string>,
+  cwdProcesses: { pid: number; line: string }[],
+  allSessions: ClaudeSession[],
+  execPromise: (cmd: string) => Promise<string>,
+): Promise<void> => {
+  if (cwdProcesses.length === 0) return;
+
+  // Quick check: is cmux running?
+  const cmuxCheck = await execPromise('pgrep -x cmux 2>/dev/null');
+  if (!cmuxCheck.trim()) return;
+
+  // Get tree output with TTY info
+  const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
+  if (!treeOutput.trim()) return;
+
+  // Parse surfaces with TTY: look for "tty=ttysNNN" in surface lines
+  const cmuxSurfaces: { tty: string; title: string }[] = [];
+  for (const line of treeOutput.split('\n')) {
+    const surfaceMatch = line.match(/surface (surface:\d+)/);
+    if (!surfaceMatch) continue;
+    const ttyMatch = line.match(/tty=(\S+)/);
+    if (!ttyMatch) continue;
+    const titleMatch = line.match(/\[terminal\]\s+"(.+?)"\s*(\[|◀|tty=|$)/);
+    cmuxSurfaces.push({
+      tty: ttyMatch[1],
+      title: titleMatch ? titleMatch[1] : '',
+    });
+  }
+  if (cmuxSurfaces.length === 0) return;
+
+  // Load custom titles lazily per-cwd
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+  const titleCache = new Map<string, Map<string, string>>();
+
+  const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
+    if (titleCache.has(cwd)) return titleCache.get(cwd)!;
+    const titles = new Map<string, string>();
+    const candidates = allSessions.filter(s => s.project === cwd);
+    const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
+    await Promise.all(candidates.map(async (session) => {
+      const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+      if (!fs.existsSync(jsonlPath)) return;
+      const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
+      try {
+        const parsed = JSON.parse(out.trim());
+        const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
+        if (title) titles.set(session.sessionId, title);
+      } catch {}
+    }));
+    titleCache.set(cwd, titles);
+    return titles;
+  };
+
+  // Cross-reference: for each cwd-fallback PID, match TTY → cmux surface → title → session
+  for (const { pid } of cwdProcesses) {
+    const ttyOutput = (await execPromise(`ps -o tty= -p ${pid} 2>/dev/null`)).trim();
+    if (!ttyOutput) continue;
+
+    const cmuxSurface = cmuxSurfaces.find(s => s.tty.endsWith(ttyOutput));
+    if (!cmuxSurface) continue;
+
+    const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
+    const cwdMatch = cwdOutput.match(/^n(.+)$/m);
+    if (!cwdMatch) continue;
+    const cwd = cwdMatch[1];
+
+    const sessionTitles = await getTitlesForCwd(cwd);
+    if (sessionTitles.size === 0) continue;
+
+    const tabName = cmuxSurface.title;
+    for (const [sessionId, title] of sessionTitles) {
+      if (title && tabName.includes(title) && !claimedSessionIds.has(sessionId)) {
+        const currentSessionId = [...activeMap.entries()].find(([, p]) => p === pid)?.[0];
+        if (currentSessionId && currentSessionId !== sessionId) {
+          activeMap.delete(currentSessionId);
+          claimedSessionIds.delete(currentSessionId);
+          console.log(`[cross-ref-cmux] corrected PID ${pid}: ${currentSessionId} → ${sessionId} (surface: "${tabName}")`);
+        }
+        activeMap.set(sessionId, pid);
+        claimedSessionIds.add(sessionId);
+        break;
+      }
+    }
+  }
+};
+
 export const detectActiveSessions = async (): Promise<Map<string, number>> => {
   const now = Date.now();
   if (cachedActiveMap && (now - activeCacheTimestamp) < ACTIVE_CACHE_TTL_MS) {
@@ -417,11 +510,11 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
       }
     }
 
-    // Third pass: iTerm2 cross-reference for processes that were matched by cwd fallback.
-    // Uses iTerm2 AppleScript to get TTY + tab name for each session, then cross-references
+    // Third pass: cross-reference for processes that were matched by cwd fallback.
+    // Uses terminal-specific APIs to get TTY + tab name, then cross-references
     // with claude process TTYs to build a definitive PID → session ID mapping.
-    // Only runs when there are same-cwd processes that used cwd fallback (no UUID/title in args).
     await refineDetectionWithITerm2(activeMap, claimedSessionIds, cwdProcesses, allSessions, execPromise);
+    await refineDetectionWithCmux(activeMap, claimedSessionIds, cwdProcesses, allSessions, execPromise);
   } catch {
     // ignore
   }
