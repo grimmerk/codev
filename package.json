@@ -1,7 +1,7 @@
 {
   "name": "CodeV",
   "productName": "CodeV",
-  "version": "1.0.42",
+  "version": "1.0.43",
   "description": "Quick switcher for VS Code, Cursor, and Claude Code sessions",
   "main": ".webpack/main",
   "scripts": {
