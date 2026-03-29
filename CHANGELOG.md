@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.43
+
+- cmux: cross-reference detection via tree TTY field (requires cmux v0.63+)
+- Fixes purple dot for bare `claude` / `claude -r` sessions with in-session `/rename` on cmux
+
 ## 1.0.42
 
 - iTerm2: cross-reference detection via per-tab TTY + tab name matching
