@@ -451,6 +451,9 @@ function SwitcherApp() {
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
     document.addEventListener('click', (e) => {
+      // Don't steal focus from Settings panel interactions (dropdowns, buttons, etc.)
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-settings-panel]')) return;
       forceFocusOnInput();
     });
 
