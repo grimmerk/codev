@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.44
+
+- Rewrite detection: use `~/.claude/sessions/` PID files (~5ms vs ~200-450ms)
+- Supports VS Code + Claude Desktop sessions via `entrypoint` field
+- Cross-ref fallback only for rare same-cwd ambiguity (iTerm2/cmux parallel)
+- Legacy fallback for old Claude Code without `sessions/` directory
+
 ## 1.0.43
 
 - cmux: cross-reference detection via tree TTY field (requires cmux v0.63+)
