@@ -303,10 +303,10 @@ function SwitcherApp() {
   const ref = useRef(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
   const forceFocusOnInput = () => {
-    if (mode === 'projects') {
-      ref.current?.focus();
-    } else {
+    if (modeRef.current === 'sessions') {
       sessionSearchRef.current?.focus();
+    } else {
+      ref.current?.focus();
     }
   };
 
