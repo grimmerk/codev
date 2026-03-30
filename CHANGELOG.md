@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.45
+
+- cmux: three-layer switch matching (title → TTY → cwd fallback), same as iTerm2
+- Requires cmux v0.63+ with per-surface `tty=` in tree output
+
 ## 1.0.44
 
 - Rewrite detection: use `~/.claude/sessions/` PID files (~5ms vs ~200-450ms)

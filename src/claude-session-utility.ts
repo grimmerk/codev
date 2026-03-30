@@ -1041,9 +1041,10 @@ export const openSessionInCmux = (
     // but testing shows count windows returns 0 — AppleScript interface may be buggy.
     // Using CLI (sidebar-state + tree) approach instead.
     //
-    // Two-layer matching (same concept as Ghostty):
+    // Three-layer matching (same concept as iTerm2):
     // Layer 1: Title matching — match /rename custom title against surface titles in tree output
-    // Layer 2: CWD fallback — sidebar-state cwd/focused_cwd, then project name in surface title
+    // Layer 2: TTY matching — match process TTY against surface tty= field (requires cmux v0.63+)
+    // Layer 3: CWD fallback — sidebar-state cwd/focused_cwd, then project name in surface title
     const execPromise = (cmd: string): Promise<string> =>
       new Promise((resolve) => {
         exec(cmd, { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 1024 }, (_e: any, out: string) => resolve(out || ''));
@@ -1071,7 +1072,7 @@ export const openSessionInCmux = (
       // Each workspace line is followed by its surface lines.
       const treeLines = treeOutput.split('\n');
       let currentWorkspace: string | null = null;
-      const parsedTree: { wsId: string; surfaces: { surfaceId: string; title: string }[] }[] = [];
+      const parsedTree: { wsId: string; surfaces: { surfaceId: string; title: string; tty: string }[] }[] = [];
       for (const line of treeLines) {
         const wsMatch = line.match(/workspace (workspace:\d+)/);
         if (wsMatch) {
@@ -1080,11 +1081,12 @@ export const openSessionInCmux = (
         }
         const surfaceMatch = line.match(/surface (surface:\d+)/);
         if (surfaceMatch && parsedTree.length > 0) {
-          // Extract title: everything after [terminal] "..." or just the quoted part
-          const titleMatch = line.match(/\[terminal\]\s+"(.+?)"\s*(\[|◀|$)/);
+          const titleMatch = line.match(/\[terminal\]\s+"(.+?)"\s*(\[|◀|tty=|$)/);
+          const ttyMatch = line.match(/tty=(\S+)/);
           parsedTree[parsedTree.length - 1].surfaces.push({
             surfaceId: surfaceMatch[1],
             title: titleMatch ? titleMatch[1] : line,
+            tty: ttyMatch ? ttyMatch[1] : '',
           });
         }
       }
@@ -1103,7 +1105,23 @@ export const openSessionInCmux = (
         }
       }
 
-      // Layer 2a: CWD matching via sidebar-state (parallel)
+      // Layer 2: TTY matching (precise, even without /rename — requires cmux v0.63+ with tty= in tree)
+      if (activePid) {
+        const ttyOutput = (await execPromise(`ps -o tty= -p ${activePid} 2>/dev/null`)).trim();
+        if (ttyOutput) {
+          for (const ws of parsedTree) {
+            for (const surface of ws.surfaces) {
+              if (surface.tty && surface.tty.endsWith(ttyOutput)) {
+                console.log('[cmux] matched surface by TTY:', surface.surfaceId, 'in', ws.wsId, 'tty=', surface.tty);
+                await selectAndActivate(ws.wsId, surface.surfaceId);
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      // Layer 3a: CWD matching via sidebar-state (parallel)
       const wsIds = parsedTree.map(w => w.wsId);
       if (wsIds.length > 0) {
         const cwdResults = await Promise.all(wsIds.map(async (wsId: string) => {
@@ -1121,7 +1139,7 @@ export const openSessionInCmux = (
         }
       }
 
-      // Layer 2b: Project name fallback from parsed tree (surface title contains folder name)
+      // Layer 3b: Project name fallback from parsed tree (surface title contains folder name)
       const projectName = path.basename(projectPath);
       if (projectName && projectName !== path.basename(os.homedir())) {
         const projectNameLower = projectName.toLowerCase();
