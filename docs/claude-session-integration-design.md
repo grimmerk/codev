@@ -193,7 +193,7 @@ The "30 days" in Claude Code's data-usage docs refers to **server-side** retenti
 ┌─────────────────────────────────────────────────────────┐
 │ Main Process (claude-session-utility.ts)                 │
 │  - readClaudeSessions(): parse history.jsonl (cached)   │
-│  - detectActiveSessions(): async ps + lsof (cached)    │
+│  - detectActiveSessions(): read sessions/ PID files     │
 │  - detectTerminalApp(): walk parent process tree       │
 │  - loadSessionEnrichment(): titles + branches (cached) │
 │  - loadLastAssistantResponses(): tail JSONL (active)   │
@@ -204,7 +204,7 @@ The "30 days" in Claude Code's data-usage docs refers to **server-side** retenti
 ### Non-blocking loading pattern (SWR-like)
 
 1. **Immediate**: Session list from `history.jsonl` (cached, ~0ms warm / ~40ms cold)
-2. **Background (~0.5s)**: Active session detection via async `ps aux` + `lsof`
+2. **Background (~5ms)**: Active session detection via `~/.claude/sessions/` PID files
 3. **Background (~0.5s after 2)**: Last assistant responses for active sessions via `tail -n 200` (~19ms/file)
 4. **Background (~0.5s after 2)**: Terminal app detection via parent process tree walk
 5. **Background (~2s)**: Custom titles + branch names via async parallel grep/tail on 100 JSONL files
@@ -213,10 +213,52 @@ All background operations use async `exec` (not `execSync`) to avoid blocking El
 
 ### Active session detection
 
-- For `claude --resume <id>` or `claude --resume "title"` processes: session ID/title extracted directly from command args (precise)
-- For `claude -r` processes: after user selects a session, process args update to `--resume <uuid>` or `--resume "title"` — so detection is usually precise
-- Fallback for processes without explicit ID: `lsof -p <pid> -Fn | grep "^n/" | head -1` finds cwd, matched against unclaimed sessions in `history.jsonl`
-- Multiple same-cwd processes: tracked via `claimedSessionIds` to avoid assigning the same session to multiple processes
+**Primary (v1.0.44+):** Read `~/.claude/sessions/<PID>.json` files:
+
+```
+Detection Flow:
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. Read ~/.claude/sessions/*.json                        (~5ms)    │
+│    → PID, sessionId, cwd, entrypoint, name                        │
+│    → Verify PID alive (process.kill(pid, 0))                      │
+├─────────────────────────────────────────────────────────────────────┤
+│ 2. Match sessionId against history.jsonl                           │
+│    ├─ Match found → done ✓                         (most cases)   │
+│    └─ No match (e.g. after /clear) → cwd fallback                │
+│       ├─ 1 same-cwd session → safe match ✓                       │
+│       └─ Multiple same-cwd → cross-ref disambiguation            │
+├─────────────────────────────────────────────────────────────────────┤
+│ 3. Cross-ref (only for same-cwd ambiguity)                        │
+│    Runs per-terminal in parallel (Promise.all):                   │
+│    ├─ iTerm2: AppleScript TTY+name → match custom titles (~130ms) │
+│    ├─ cmux: tree --all tty= → match custom titles (~70ms)         │
+│    └─ Ghostty/other: cwd fallback (no TTY upstream)               │
+├─────────────────────────────────────────────────────────────────────┤
+│ 4. Fallback: if sessions/ doesn't exist (old Claude Code)         │
+│    → Legacy detection (ps aux + regex + lsof)                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**`sessions/` PID file format:**
+```json
+{"pid":21697,"sessionId":"0a70cf12-...","cwd":"/Users/you/git/project","startedAt":1774773132631,"kind":"interactive","entrypoint":"cli","name":"my-session"}
+```
+
+| Field | Description |
+|---|---|
+| `pid` | Process ID |
+| `sessionId` | Runtime session ID (matches history.jsonl except after `/clear`) |
+| `cwd` | Working directory |
+| `entrypoint` | `cli`, `claude-vscode`, or `claude-desktop` |
+| `name` | Session name from `-n` flag (optional) |
+
+**Known behaviors:**
+- Files created on session start, deleted on exit. Claude Code runs `concurrentSessionCleanup()` for stale files.
+- `/clear` creates a new sessionId in history.jsonl but does NOT update sessions/ file → mismatch until exit+resume.
+- All resume methods (`--resume <uuid>`, `-r <uuid>`, `--resume "title"`, `-r "title"`, `-r` picker, `-c`) preserve the original sessionId.
+- `/rename` updates `name` field but does not change sessionId.
+
+**Legacy fallback (old Claude Code without `sessions/`):** Uses `ps aux` + regex for `--resume <uuid>`, `lsof` for cwd matching, cross-reference for disambiguation.
 - **Known limitation:** Only detects sessions in terminals, not VS Code integrated terminal
 - **One-time timing bug observed:** PID-session mapping was briefly incorrect (possibly during `claude -r` picker UI before selection completed). Could not be reproduced. If recurring, a more precise approach is possible: use iTerm2 AppleScript to get all terminal TTYs + names, cross-reference with claude process TTYs to find correct session ID.
 
@@ -332,17 +374,26 @@ When multiple sessions share the same project path, there are two separate conce
 
 #### Detection layer (purple dot)
 
-| Launch command | Detection method | Needs terminal API? | Terminals |
-|----------------|-----------------|---------------------|-----------|
-| `claude --resume <uuid>` | UUID from process args | No | All |
-| `claude -r <uuid>` | UUID from process args (`-r` regex) | No | All |
-| `claude -n "name"` | Match name against session custom titles | No | All |
-| `claude --resume "title"` / `-r "title"` | Match title against session custom titles | No | All |
-| `claude -r` (interactive picker) | Same as bare `claude` — process args stay as `claude -r` after selection, no UUID | See `claude` rows below | — |
-| `claude` or `claude -r` (picker), later `/rename`'d | Cross-reference: TTY → tab name → custom title → session ID | Yes (per-tab TTY) | iTerm2 only |
-| `claude` or `claude -r` (picker), never `/rename`'d | **Unsolvable** — cwd only, cross-reference can't help (tab names identical) | — | None |
+**With `~/.claude/sessions/` (v1.0.44+):**
 
-Cross-reference approach: get each terminal tab's TTY (iTerm2: `tty of session` via AppleScript), cross-reference with claude process TTYs (`ps -o tty=`), then use tab name to look up session ID via custom titles. **Still requires `/rename`** — without a custom title, same-cwd tabs have identical names and cross-reference can't determine which session ID maps to which tab. Requires the terminal to expose per-tab TTY or PID — currently only iTerm2 supports this. Ghostty has a pending request ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
+| Launch command | Detection | Same-cwd accuracy |
+|---|---|---|
+| Any command | `sessions/` → direct PID→sessionId | ✓ (if sessionId in history.jsonl) |
+| After `/clear` (before exit) | sessionId mismatch → cwd fallback | 1 same-cwd: ✓; multiple: needs cross-ref |
+| Same-cwd + cross-ref (iTerm2) | TTY match via AppleScript | ✓ (with `/rename`) |
+| Same-cwd + cross-ref (cmux) | TTY match via tree --all | ✓ (with `/rename`) |
+| Same-cwd + cross-ref (Ghostty) | No TTY → cwd fallback | May be wrong |
+| VS Code / Claude Desktop | `entrypoint` field | ✓ (new capability) |
+
+**Legacy (without `sessions/`):**
+
+| Launch command | Detection method | Terminals |
+|---|---|---|
+| `--resume <uuid>` / `-r <uuid>` | UUID from process args | All |
+| `-n "name"` / `--resume "title"` | Match against custom titles | All |
+| `claude -r` (picker) / bare `claude` | cwd fallback + cross-ref | iTerm2/cmux (with `/rename`) |
+
+Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of session` AppleScript; cmux: `tree --all` tty= field), then match tab name against custom titles. Requires `/rename`. Ghostty pending upstream TTY ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
 
 #### Switch layer (click → jump to correct tab)
 
@@ -358,11 +409,9 @@ Cross-reference approach: get each terminal tab's TTY (iTerm2: `tty of session` 
 
 **Key difference**: iTerm2 has TTY matching as fallback — when detection has the correct PID, it can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty/cmux lack per-tab TTY, so without a custom title + same cwd, they fall back to cwd matching which may switch to the wrong tab.
 
-**Unsolvable case**: `claude` or `claude -r` (interactive picker) + never `/rename`'d + same cwd = no terminal can correctly detect or switch. `claude -r` does **not** update process args after picker selection — args remain `claude -r` with no UUID or title. There is no identifiable information in process args, and no custom title in the tab name for cross-reference.
+**Detection with `sessions/` (v1.0.44+)**: Most cases are resolved by direct sessionId matching against history.jsonl. Cross-reference only needed after `/clear` (sessionId mismatch) with multiple same-cwd sessions — a rare combination. The "unsolvable" case (no `/rename` + same cwd) is now limited to cross-reference fallback scenarios, not the primary detection path.
 
-**Note on `/rename` + not yet exited**: even with in-session `/rename`, if the session was started with bare `claude` or `claude -r` and hasn't been exited + resumed yet, process args are unchanged. On iTerm2, cross-reference fixes this by matching TTY → tab name → custom title. On Ghostty/cmux, detection remains wrong (no per-tab TTY available).
-
-**Cross-reference cascade effect** (iTerm2 only, implemented in v1.0.42): when cross-reference correctly claims a `/rename`'d session, the remaining same-cwd candidates shrink. If only one un-`/rename`'d session remains, cwd matching has a single candidate and becomes correct by elimination. This means cross-reference can indirectly fix detection for sessions that would otherwise be unsolvable — but only when at most one un-`/rename`'d session is alive per cwd. With two or more un-`/rename`'d alive sessions sharing the same cwd, those remain ambiguous.
+**Cross-reference cascade effect** (iTerm2 + cmux): when cross-reference correctly claims a `/rename`'d session, the remaining same-cwd candidates shrink. If only one un-`/rename`'d session remains, cwd matching has a single candidate and becomes correct by elimination.
 
 - **Recommendation**: Always use `/rename` in Claude Code, or `claude -n "name"` when starting new sessions
 

@@ -402,12 +402,229 @@ const refineDetectionWithCmux = async (
   }
 };
 
+/**
+ * Cross-reference disambiguation for PIDs with same-cwd ambiguity.
+ * Groups by terminal type to avoid redundant pgrep/AppleScript/CLI calls.
+ * Only runs for PIDs where sessionId didn't match history.jsonl AND multiple same-cwd sessions exist.
+ */
+const crossRefDisambiguate = async (
+  needsCrossRef: { pid: number; cwd: string; candidates: ClaudeSession[] }[],
+  activeMap: Map<string, number>,
+  execPromise: (cmd: string) => Promise<string>,
+): Promise<void> => {
+  // Detect terminal for each PID in parallel, then group
+  const byTerminal: Record<string, { pid: number; cwd: string; candidates: ClaudeSession[] }[]> = {};
+  const terminals = await Promise.all(needsCrossRef.map(item => detectTerminalApp(item.pid)));
+  for (let i = 0; i < needsCrossRef.length; i++) {
+    const terminal = terminals[i];
+    if (!byTerminal[terminal]) byTerminal[terminal] = [];
+    byTerminal[terminal].push(needsCrossRef[i]);
+  }
+
+  // Load custom titles lazily per-cwd (shared across terminals)
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+  const titleCache = new Map<string, Map<string, string>>();
+  const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
+    if (titleCache.has(cwd)) return titleCache.get(cwd)!;
+    const titles = new Map<string, string>();
+    const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
+    const projectDir = path.join(claudeDir, encodedProject);
+    if (!fs.existsSync(projectDir)) { titleCache.set(cwd, titles); return titles; }
+    const jsonlFiles = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+    await Promise.all(jsonlFiles.map(async (file) => {
+      const sessionId = file.replace('.jsonl', '');
+      const out = await execPromise(`grep '"type":"custom-title"' "${path.join(projectDir, file)}" 2>/dev/null | tail -1`);
+      try {
+        const parsed = JSON.parse(out.trim());
+        const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
+        if (title) titles.set(sessionId, title);
+      } catch {}
+    }));
+    titleCache.set(cwd, titles);
+    return titles;
+  };
+
+  // Run iTerm2 and cmux cross-reference in parallel (different PID sets, no conflict)
+  const crossRefTasks: Promise<void>[] = [];
+
+  // iTerm2: one AppleScript call, then match each PID's TTY
+  if (byTerminal['iterm2']?.length) {
+    crossRefTasks.push((async () => {
+      const itermCheck = await execPromise('pgrep -x iTerm2 2>/dev/null');
+      if (!itermCheck.trim()) return;
+      const tmpScript = '/tmp/codev-iterm-detect.scpt';
+      fs.writeFileSync(tmpScript, `tell application "iTerm2"
+  set results to ""
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        set results to results & (tty of s) & "|||" & (name of s) & "\\n"
+      end repeat
+    end repeat
+  end repeat
+  return results
+end tell`);
+      const itermOutput = await execPromise(`osascript ${tmpScript} 2>/dev/null`);
+      try { fs.unlinkSync(tmpScript); } catch {}
+      if (!itermOutput.trim()) return;
+
+      const itermSessions: { tty: string; name: string }[] = [];
+      for (const line of itermOutput.split('\n')) {
+        const parts = line.split('|||');
+        if (parts.length === 2 && parts[0].trim()) {
+          itermSessions.push({ tty: parts[0].trim(), name: parts[1].trim() });
+        }
+      }
+
+      for (const item of byTerminal['iterm2']) {
+        const ttyOutput = (await execPromise(`ps -o tty= -p ${item.pid} 2>/dev/null`)).trim();
+        if (!ttyOutput) continue;
+        const itermSession = itermSessions.find(s => s.tty.endsWith(ttyOutput));
+        if (!itermSession) continue;
+
+        const sessionTitles = await getTitlesForCwd(item.cwd);
+        const tabName = itermSession.name;
+        for (const [sessionId, title] of sessionTitles) {
+          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
+            activeMap.set(sessionId, item.pid);
+            break;
+          }
+        }
+      }
+    })());
+  }
+
+  // cmux: one tree --all call, then match each PID's TTY
+  if (byTerminal['cmux']?.length) {
+    crossRefTasks.push((async () => {
+      const cmuxCheck = await execPromise('pgrep -x cmux 2>/dev/null');
+      if (!cmuxCheck.trim()) return;
+      const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
+      if (!treeOutput.trim()) return;
+
+      const cmuxSurfaces: { tty: string; title: string }[] = [];
+      for (const line of treeOutput.split('\n')) {
+        if (!line.match(/surface (surface:\d+)/)) continue;
+        const ttyMatch = line.match(/tty=(\S+)/);
+        if (!ttyMatch) continue;
+        const titleMatch = line.match(/\[terminal\]\s+"(.+?)"\s*(\[|◀|tty=|$)/);
+        cmuxSurfaces.push({ tty: ttyMatch[1], title: titleMatch ? titleMatch[1] : '' });
+      }
+
+      for (const item of byTerminal['cmux']) {
+        const ttyOutput = (await execPromise(`ps -o tty= -p ${item.pid} 2>/dev/null`)).trim();
+        if (!ttyOutput) continue;
+        const cmuxSurface = cmuxSurfaces.find(s => s.tty.endsWith(ttyOutput));
+        if (!cmuxSurface) continue;
+
+        const sessionTitles = await getTitlesForCwd(item.cwd);
+        const tabName = cmuxSurface.title;
+        for (const [sessionId, title] of sessionTitles) {
+          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
+            activeMap.set(sessionId, item.pid);
+            break;
+          }
+        }
+      }
+    })());
+  }
+
+  await Promise.all(crossRefTasks);
+
+  // Ghostty + unknown terminals: cwd fallback (no async work, runs after cross-ref)
+  for (const [terminal, items] of Object.entries(byTerminal)) {
+    if (terminal === 'iterm2' || terminal === 'cmux') continue;
+    for (const item of items) {
+      const fallback = item.candidates.find(s => !activeMap.has(s.sessionId));
+      if (fallback) {
+        activeMap.set(fallback.sessionId, item.pid);
+      }
+    }
+  }
+};
+
 export const detectActiveSessions = async (): Promise<Map<string, number>> => {
   const now = Date.now();
   if (cachedActiveMap && (now - activeCacheTimestamp) < ACTIVE_CACHE_TTL_MS) {
     return cachedActiveMap;
   }
 
+  const activeMap = new Map<string, number>();
+  const needsCrossRef: { pid: number; cwd: string; candidates: ClaudeSession[] }[] = [];
+
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 1024 }, (err: any, stdout: string) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
+  try {
+    // Primary: read ~/.claude/sessions/<PID>.json for direct PID → sessionId mapping.
+    // These files are created on session start and deleted on session exit.
+    // Claude Code also runs concurrentSessionCleanup() to remove stale files.
+    const sessionsDir = path.join(os.homedir(), '.claude', 'sessions');
+    if (fs.existsSync(sessionsDir)) {
+      const files = fs.readdirSync(sessionsDir).filter(f => /^\d+\.json$/.test(f));
+      const allSessions = readClaudeSessions(500);
+
+      for (const file of files) {
+        try {
+          const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
+          const data = JSON.parse(content);
+          const pid = data.pid as number;
+          const sessionId = data.sessionId as string;
+          const cwd = data.cwd as string;
+          if (!pid || !sessionId) continue;
+
+          // Verify process is still alive
+          try { process.kill(pid, 0); } catch { continue; }
+
+          // Try direct sessionId match against history.jsonl
+          const knownSession = allSessions.find(s => s.sessionId === sessionId);
+          if (knownSession) {
+            activeMap.set(sessionId, pid);
+          } else if (cwd) {
+            // sessionId not in history — find session by cwd
+            const cwdCandidates = allSessions.filter(s => s.project === cwd && !activeMap.has(s.sessionId));
+            if (cwdCandidates.length === 1) {
+              activeMap.set(cwdCandidates[0].sessionId, pid);
+            } else if (cwdCandidates.length > 1) {
+              // Multiple same-cwd candidates — queue for cross-reference
+              needsCrossRef.push({ pid, cwd, candidates: cwdCandidates });
+            }
+          }
+        } catch {
+          // skip malformed files
+        }
+      }
+
+      // Cross-reference for PIDs with same-cwd ambiguity.
+      // Group by terminal to avoid redundant pgrep/AppleScript/CLI calls.
+      if (needsCrossRef.length > 0) {
+        await crossRefDisambiguate(needsCrossRef, activeMap, execPromise);
+      }
+    }
+
+    // Fallback: if sessions/ directory doesn't exist (old Claude Code versions)
+    if (!fs.existsSync(sessionsDir)) {
+      await detectActiveSessionsLegacy(activeMap);
+    }
+  } catch {
+    // ignore
+  }
+
+  cachedActiveMap = activeMap;
+  activeCacheTimestamp = now;
+  return activeMap;
+};
+
+/**
+ * Legacy detection for old Claude Code versions without ~/.claude/sessions/.
+ * Uses ps aux + regex for --resume UUID, lsof for cwd matching.
+ */
+const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promise<void> => {
   const { exec } = require('child_process');
   const execPromise = (cmd: string): Promise<string> =>
     new Promise((resolve) => {
@@ -416,112 +633,45 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
       });
     });
 
-  const activeMap = new Map<string, number>();
-  // Track which session IDs are already claimed to avoid duplicate assignment
   const claimedSessionIds = new Set<string>();
 
-  try {
-    const output = await execPromise(
-      'ps aux | grep -E "[c]laude" | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory" | grep -v "node"'
-    );
-    if (!output) {
-      cachedActiveMap = activeMap;
-      activeCacheTimestamp = now;
-      return activeMap;
+  const output = await execPromise(
+    'ps aux | grep -E "[c]laude" | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory" | grep -v "node"'
+  );
+  if (!output) return;
+
+  const cwdProcesses: { pid: number; line: string }[] = [];
+  for (const line of output.split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.trim().split(/\s+/);
+    const pid = parseInt(parts[1], 10);
+    if (!pid) continue;
+
+    const resumeMatch = line.match(/(?:--resume|-r)\s+([a-f0-9-]{36})/);
+    if (resumeMatch) {
+      activeMap.set(resumeMatch[1], pid);
+      claimedSessionIds.add(resumeMatch[1]);
+      continue;
     }
 
-    // First pass: handle processes with explicit --resume <id>
-    const cwdProcesses: { pid: number; line: string }[] = [];
-    for (const line of output.split('\n')) {
-      if (!line.trim()) continue;
-
-      const parts = line.trim().split(/\s+/);
-      const pid = parseInt(parts[1], 10);
-      if (!pid) continue;
-
-      const resumeMatch = line.match(/(?:--resume|-r)\s+([a-f0-9-]{36})/);
-      if (resumeMatch) {
-        activeMap.set(resumeMatch[1], pid);
-        claimedSessionIds.add(resumeMatch[1]);
-        continue;
-      }
-
-      if (line.includes('claude')) {
-        cwdProcesses.push({ pid, line });
-      }
+    if (line.includes('claude')) {
+      cwdProcesses.push({ pid, line });
     }
-
-    // Second pass: handle processes without explicit session UUID
-    // Use lsof to find cwd, then match to unclaimed sessions.
-    // When multiple sessions share the same cwd, try matching -n/--name
-    // or -r/--resume title against custom titles for disambiguation.
-    const allSessions = readClaudeSessions(500);
-    for (const { pid, line } of cwdProcesses) {
-      const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
-      const cwdMatch = cwdOutput.match(/^n(.+)$/m);
-      if (cwdMatch) {
-        const cwd = cwdMatch[1];
-        const candidates = allSessions.filter((s) => s.project === cwd && !claimedSessionIds.has(s.sessionId));
-
-        if (candidates.length === 0) continue;
-
-        if (candidates.length === 1) {
-          activeMap.set(candidates[0].sessionId, pid);
-          claimedSessionIds.add(candidates[0].sessionId);
-          continue;
-        }
-
-        // Multiple same-cwd candidates: try to disambiguate via custom title
-        let matched = false;
-        if (/(?:--name|--resume|-[nr])\s+/.test(line)) {
-          const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-          const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
-          // Load custom titles for candidates only (parallel grep, ~10ms each)
-          const titleResults = await Promise.all(candidates.map(async (s) => {
-            const jsonlPath = path.join(claudeDir, encodedProject, `${s.sessionId}.jsonl`);
-            if (!fs.existsSync(jsonlPath)) return { sessionId: s.sessionId, title: '' };
-            const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
-            try {
-              const parsed = JSON.parse(out.trim());
-              return { sessionId: s.sessionId, title: (parsed.customTitle || '').replace(/^"|"$/g, '').trim() };
-            } catch { return { sessionId: s.sessionId, title: '' }; }
-          }));
-
-          // Extract the command part (after the PID/CPU/MEM columns) for matching
-          // ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND...
-          const cmdParts = line.trim().split(/\s+/);
-          const cmdLine = cmdParts.slice(10).join(' '); // skip ps aux metadata columns
-
-          for (const { sessionId, title } of titleResults) {
-            if (title && cmdLine.includes(title)) {
-              activeMap.set(sessionId, pid);
-              claimedSessionIds.add(sessionId);
-              matched = true;
-              break;
-            }
-          }
-        }
-
-        if (!matched) {
-          // Fallback: first unclaimed session with matching cwd
-          activeMap.set(candidates[0].sessionId, pid);
-          claimedSessionIds.add(candidates[0].sessionId);
-        }
-      }
-    }
-
-    // Third pass: cross-reference for processes that were matched by cwd fallback.
-    // Uses terminal-specific APIs to get TTY + tab name, then cross-references
-    // with claude process TTYs to build a definitive PID → session ID mapping.
-    await refineDetectionWithITerm2(activeMap, claimedSessionIds, cwdProcesses, allSessions, execPromise);
-    await refineDetectionWithCmux(activeMap, claimedSessionIds, cwdProcesses, allSessions, execPromise);
-  } catch {
-    // ignore
   }
 
-  cachedActiveMap = activeMap;
-  activeCacheTimestamp = now;
-  return activeMap;
+  const allSessions = readClaudeSessions(500);
+  for (const { pid } of cwdProcesses) {
+    const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
+    const cwdMatch = cwdOutput.match(/^n(.+)$/m);
+    if (cwdMatch) {
+      const cwd = cwdMatch[1];
+      const match = allSessions.find((s) => s.project === cwd && !claimedSessionIds.has(s.sessionId));
+      if (match) {
+        activeMap.set(match.sessionId, pid);
+        claimedSessionIds.add(match.sessionId);
+      }
+    }
+  }
 };
 
 /**
