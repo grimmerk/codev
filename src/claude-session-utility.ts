@@ -412,12 +412,13 @@ const crossRefDisambiguate = async (
   activeMap: Map<string, number>,
   execPromise: (cmd: string) => Promise<string>,
 ): Promise<void> => {
-  // Detect terminal for each PID and group
+  // Detect terminal for each PID in parallel, then group
   const byTerminal: Record<string, { pid: number; cwd: string; candidates: ClaudeSession[] }[]> = {};
-  for (const item of needsCrossRef) {
-    const terminal = await detectTerminalApp(item.pid);
+  const terminals = await Promise.all(needsCrossRef.map(item => detectTerminalApp(item.pid)));
+  for (let i = 0; i < needsCrossRef.length; i++) {
+    const terminal = terminals[i];
     if (!byTerminal[terminal]) byTerminal[terminal] = [];
-    byTerminal[terminal].push(item);
+    byTerminal[terminal].push(needsCrossRef[i]);
   }
 
   // Load custom titles lazily per-cwd (shared across terminals)
