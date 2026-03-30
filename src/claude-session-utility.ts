@@ -408,6 +408,56 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
     return cachedActiveMap;
   }
 
+  const activeMap = new Map<string, number>();
+
+  try {
+    // Primary: read ~/.claude/sessions/<PID>.json for direct PID → sessionId mapping.
+    // These files are created on session start and deleted on session exit.
+    // Claude Code also runs concurrentSessionCleanup() to remove stale files.
+    const sessionsDir = path.join(os.homedir(), '.claude', 'sessions');
+    if (fs.existsSync(sessionsDir)) {
+      const files = fs.readdirSync(sessionsDir).filter(f => /^\d+\.json$/.test(f));
+      for (const file of files) {
+        try {
+          const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
+          const data = JSON.parse(content);
+          const pid = data.pid as number;
+          const sessionId = data.sessionId as string;
+          if (!pid || !sessionId) continue;
+
+          // Verify process is still alive (safety check for stale files)
+          try {
+            process.kill(pid, 0); // signal 0 = check existence only
+          } catch {
+            continue; // process dead, skip stale file
+          }
+
+          activeMap.set(sessionId, pid);
+        } catch {
+          // skip malformed files
+        }
+      }
+    }
+
+    // Fallback: if sessions/ directory doesn't exist (old Claude Code versions),
+    // use legacy ps aux + regex + lsof detection
+    if (!fs.existsSync(sessionsDir)) {
+      await detectActiveSessionsLegacy(activeMap);
+    }
+  } catch {
+    // ignore
+  }
+
+  cachedActiveMap = activeMap;
+  activeCacheTimestamp = now;
+  return activeMap;
+};
+
+/**
+ * Legacy detection for old Claude Code versions without ~/.claude/sessions/.
+ * Uses ps aux + regex for --resume UUID, lsof for cwd matching.
+ */
+const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promise<void> => {
   const { exec } = require('child_process');
   const execPromise = (cmd: string): Promise<string> =>
     new Promise((resolve) => {
@@ -416,112 +466,45 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
       });
     });
 
-  const activeMap = new Map<string, number>();
-  // Track which session IDs are already claimed to avoid duplicate assignment
   const claimedSessionIds = new Set<string>();
 
-  try {
-    const output = await execPromise(
-      'ps aux | grep -E "[c]laude" | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory" | grep -v "node"'
-    );
-    if (!output) {
-      cachedActiveMap = activeMap;
-      activeCacheTimestamp = now;
-      return activeMap;
+  const output = await execPromise(
+    'ps aux | grep -E "[c]laude" | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory" | grep -v "node"'
+  );
+  if (!output) return;
+
+  const cwdProcesses: { pid: number; line: string }[] = [];
+  for (const line of output.split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.trim().split(/\s+/);
+    const pid = parseInt(parts[1], 10);
+    if (!pid) continue;
+
+    const resumeMatch = line.match(/(?:--resume|-r)\s+([a-f0-9-]{36})/);
+    if (resumeMatch) {
+      activeMap.set(resumeMatch[1], pid);
+      claimedSessionIds.add(resumeMatch[1]);
+      continue;
     }
 
-    // First pass: handle processes with explicit --resume <id>
-    const cwdProcesses: { pid: number; line: string }[] = [];
-    for (const line of output.split('\n')) {
-      if (!line.trim()) continue;
-
-      const parts = line.trim().split(/\s+/);
-      const pid = parseInt(parts[1], 10);
-      if (!pid) continue;
-
-      const resumeMatch = line.match(/(?:--resume|-r)\s+([a-f0-9-]{36})/);
-      if (resumeMatch) {
-        activeMap.set(resumeMatch[1], pid);
-        claimedSessionIds.add(resumeMatch[1]);
-        continue;
-      }
-
-      if (line.includes('claude')) {
-        cwdProcesses.push({ pid, line });
-      }
+    if (line.includes('claude')) {
+      cwdProcesses.push({ pid, line });
     }
-
-    // Second pass: handle processes without explicit session UUID
-    // Use lsof to find cwd, then match to unclaimed sessions.
-    // When multiple sessions share the same cwd, try matching -n/--name
-    // or -r/--resume title against custom titles for disambiguation.
-    const allSessions = readClaudeSessions(500);
-    for (const { pid, line } of cwdProcesses) {
-      const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
-      const cwdMatch = cwdOutput.match(/^n(.+)$/m);
-      if (cwdMatch) {
-        const cwd = cwdMatch[1];
-        const candidates = allSessions.filter((s) => s.project === cwd && !claimedSessionIds.has(s.sessionId));
-
-        if (candidates.length === 0) continue;
-
-        if (candidates.length === 1) {
-          activeMap.set(candidates[0].sessionId, pid);
-          claimedSessionIds.add(candidates[0].sessionId);
-          continue;
-        }
-
-        // Multiple same-cwd candidates: try to disambiguate via custom title
-        let matched = false;
-        if (/(?:--name|--resume|-[nr])\s+/.test(line)) {
-          const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-          const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
-          // Load custom titles for candidates only (parallel grep, ~10ms each)
-          const titleResults = await Promise.all(candidates.map(async (s) => {
-            const jsonlPath = path.join(claudeDir, encodedProject, `${s.sessionId}.jsonl`);
-            if (!fs.existsSync(jsonlPath)) return { sessionId: s.sessionId, title: '' };
-            const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
-            try {
-              const parsed = JSON.parse(out.trim());
-              return { sessionId: s.sessionId, title: (parsed.customTitle || '').replace(/^"|"$/g, '').trim() };
-            } catch { return { sessionId: s.sessionId, title: '' }; }
-          }));
-
-          // Extract the command part (after the PID/CPU/MEM columns) for matching
-          // ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND...
-          const cmdParts = line.trim().split(/\s+/);
-          const cmdLine = cmdParts.slice(10).join(' '); // skip ps aux metadata columns
-
-          for (const { sessionId, title } of titleResults) {
-            if (title && cmdLine.includes(title)) {
-              activeMap.set(sessionId, pid);
-              claimedSessionIds.add(sessionId);
-              matched = true;
-              break;
-            }
-          }
-        }
-
-        if (!matched) {
-          // Fallback: first unclaimed session with matching cwd
-          activeMap.set(candidates[0].sessionId, pid);
-          claimedSessionIds.add(candidates[0].sessionId);
-        }
-      }
-    }
-
-    // Third pass: cross-reference for processes that were matched by cwd fallback.
-    // Uses terminal-specific APIs to get TTY + tab name, then cross-references
-    // with claude process TTYs to build a definitive PID → session ID mapping.
-    await refineDetectionWithITerm2(activeMap, claimedSessionIds, cwdProcesses, allSessions, execPromise);
-    await refineDetectionWithCmux(activeMap, claimedSessionIds, cwdProcesses, allSessions, execPromise);
-  } catch {
-    // ignore
   }
 
-  cachedActiveMap = activeMap;
-  activeCacheTimestamp = now;
-  return activeMap;
+  const allSessions = readClaudeSessions(500);
+  for (const { pid } of cwdProcesses) {
+    const cwdOutput = await execPromise(`lsof -p ${pid} -Fn 2>/dev/null | grep "^n/" | head -1`);
+    const cwdMatch = cwdOutput.match(/^n(.+)$/m);
+    if (cwdMatch) {
+      const cwd = cwdMatch[1];
+      const match = allSessions.find((s) => s.project === cwd && !claimedSessionIds.has(s.sessionId));
+      if (match) {
+        activeMap.set(match.sessionId, pid);
+        claimedSessionIds.add(match.sessionId);
+      }
+    }
+  }
 };
 
 /**
