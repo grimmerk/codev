@@ -444,10 +444,14 @@ const crossRefDisambiguate = async (
     return titles;
   };
 
+  // Run iTerm2 and cmux cross-reference in parallel (different PID sets, no conflict)
+  const crossRefTasks: Promise<void>[] = [];
+
   // iTerm2: one AppleScript call, then match each PID's TTY
   if (byTerminal['iterm2']?.length) {
-    const itermCheck = await execPromise('pgrep -x iTerm2 2>/dev/null');
-    if (itermCheck.trim()) {
+    crossRefTasks.push((async () => {
+      const itermCheck = await execPromise('pgrep -x iTerm2 2>/dev/null');
+      if (!itermCheck.trim()) return;
       const tmpScript = '/tmp/codev-iterm-detect.scpt';
       fs.writeFileSync(tmpScript, `tell application "iTerm2"
   set results to ""
@@ -462,82 +466,74 @@ const crossRefDisambiguate = async (
 end tell`);
       const itermOutput = await execPromise(`osascript ${tmpScript} 2>/dev/null`);
       try { fs.unlinkSync(tmpScript); } catch {}
+      if (!itermOutput.trim()) return;
 
-      if (itermOutput.trim()) {
-        const itermSessions: { tty: string; name: string }[] = [];
-        for (const line of itermOutput.split('\n')) {
-          const parts = line.split('|||');
-          if (parts.length === 2 && parts[0].trim()) {
-            itermSessions.push({ tty: parts[0].trim(), name: parts[1].trim() });
-          }
+      const itermSessions: { tty: string; name: string }[] = [];
+      for (const line of itermOutput.split('\n')) {
+        const parts = line.split('|||');
+        if (parts.length === 2 && parts[0].trim()) {
+          itermSessions.push({ tty: parts[0].trim(), name: parts[1].trim() });
         }
+      }
 
-        for (const item of byTerminal['iterm2']) {
-          const ttyOutput = (await execPromise(`ps -o tty= -p ${item.pid} 2>/dev/null`)).trim();
-          if (!ttyOutput) continue;
-          const itermSession = itermSessions.find(s => s.tty.endsWith(ttyOutput));
-          if (!itermSession) continue;
+      for (const item of byTerminal['iterm2']) {
+        const ttyOutput = (await execPromise(`ps -o tty= -p ${item.pid} 2>/dev/null`)).trim();
+        if (!ttyOutput) continue;
+        const itermSession = itermSessions.find(s => s.tty.endsWith(ttyOutput));
+        if (!itermSession) continue;
 
-          const sessionTitles = await getTitlesForCwd(item.cwd);
-          const tabName = itermSession.name;
-          for (const [sessionId, title] of sessionTitles) {
-            if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
-              activeMap.set(sessionId, item.pid);
-              break;
-            }
+        const sessionTitles = await getTitlesForCwd(item.cwd);
+        const tabName = itermSession.name;
+        for (const [sessionId, title] of sessionTitles) {
+          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
+            activeMap.set(sessionId, item.pid);
+            break;
           }
         }
       }
-    }
+    })());
   }
 
   // cmux: one tree --all call, then match each PID's TTY
   if (byTerminal['cmux']?.length) {
-    const cmuxCheck = await execPromise('pgrep -x cmux 2>/dev/null');
-    if (cmuxCheck.trim()) {
+    crossRefTasks.push((async () => {
+      const cmuxCheck = await execPromise('pgrep -x cmux 2>/dev/null');
+      if (!cmuxCheck.trim()) return;
       const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
-      if (treeOutput.trim()) {
-        const cmuxSurfaces: { tty: string; title: string }[] = [];
-        for (const line of treeOutput.split('\n')) {
-          if (!line.match(/surface (surface:\d+)/)) continue;
-          const ttyMatch = line.match(/tty=(\S+)/);
-          if (!ttyMatch) continue;
-          const titleMatch = line.match(/\[terminal\]\s+"(.+?)"\s*(\[|◀|tty=|$)/);
-          cmuxSurfaces.push({ tty: ttyMatch[1], title: titleMatch ? titleMatch[1] : '' });
-        }
+      if (!treeOutput.trim()) return;
 
-        for (const item of byTerminal['cmux']) {
-          const ttyOutput = (await execPromise(`ps -o tty= -p ${item.pid} 2>/dev/null`)).trim();
-          if (!ttyOutput) continue;
-          const cmuxSurface = cmuxSurfaces.find(s => s.tty.endsWith(ttyOutput));
-          if (!cmuxSurface) continue;
+      const cmuxSurfaces: { tty: string; title: string }[] = [];
+      for (const line of treeOutput.split('\n')) {
+        if (!line.match(/surface (surface:\d+)/)) continue;
+        const ttyMatch = line.match(/tty=(\S+)/);
+        if (!ttyMatch) continue;
+        const titleMatch = line.match(/\[terminal\]\s+"(.+?)"\s*(\[|◀|tty=|$)/);
+        cmuxSurfaces.push({ tty: ttyMatch[1], title: titleMatch ? titleMatch[1] : '' });
+      }
 
-          const sessionTitles = await getTitlesForCwd(item.cwd);
-          const tabName = cmuxSurface.title;
-          for (const [sessionId, title] of sessionTitles) {
-            if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
-              activeMap.set(sessionId, item.pid);
-              break;
-            }
+      for (const item of byTerminal['cmux']) {
+        const ttyOutput = (await execPromise(`ps -o tty= -p ${item.pid} 2>/dev/null`)).trim();
+        if (!ttyOutput) continue;
+        const cmuxSurface = cmuxSurfaces.find(s => s.tty.endsWith(ttyOutput));
+        if (!cmuxSurface) continue;
+
+        const sessionTitles = await getTitlesForCwd(item.cwd);
+        const tabName = cmuxSurface.title;
+        for (const [sessionId, title] of sessionTitles) {
+          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
+            activeMap.set(sessionId, item.pid);
+            break;
           }
         }
       }
-    }
+    })());
   }
 
-  // Ghostty: no TTY support — cwd fallback (pick first unclaimed candidate)
-  if (byTerminal['ghostty']?.length) {
-    for (const item of byTerminal['ghostty']) {
-      const fallback = item.candidates.find(s => !activeMap.has(s.sessionId));
-      if (fallback) {
-        activeMap.set(fallback.sessionId, item.pid);
-      }
-    }
-  }
+  await Promise.all(crossRefTasks);
 
-  // Unknown terminals: cwd fallback
+  // Ghostty + unknown terminals: cwd fallback (no async work, runs after cross-ref)
   for (const [terminal, items] of Object.entries(byTerminal)) {
-    if (['iterm2', 'cmux', 'ghostty'].includes(terminal)) continue;
+    if (terminal === 'iterm2' || terminal === 'cmux') continue;
     for (const item of items) {
       const fallback = item.candidates.find(s => !activeMap.has(s.sessionId));
       if (fallback) {
