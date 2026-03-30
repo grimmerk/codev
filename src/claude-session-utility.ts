@@ -417,12 +417,16 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
     const sessionsDir = path.join(os.homedir(), '.claude', 'sessions');
     if (fs.existsSync(sessionsDir)) {
       const files = fs.readdirSync(sessionsDir).filter(f => /^\d+\.json$/.test(f));
+      // Also read all sessions from history to handle /clear (sessionId changes but cwd stays)
+      const allSessions = readClaudeSessions(500);
+
       for (const file of files) {
         try {
           const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
           const data = JSON.parse(content);
           const pid = data.pid as number;
           const sessionId = data.sessionId as string;
+          const cwd = data.cwd as string;
           if (!pid || !sessionId) continue;
 
           // Verify process is still alive (safety check for stale files)
@@ -432,7 +436,19 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
             continue; // process dead, skip stale file
           }
 
-          activeMap.set(sessionId, pid);
+          // Check if sessionId exists in session list (from history.jsonl).
+          // After /clear, Claude Code updates sessions/<PID>.json with a new sessionId,
+          // but history.jsonl may still have the old one. Use cwd to find the matching session.
+          const knownSession = allSessions.find(s => s.sessionId === sessionId);
+          if (knownSession) {
+            activeMap.set(sessionId, pid);
+          } else if (cwd) {
+            // sessionId not in history — find the most recent session with matching cwd
+            const cwdMatch = allSessions.find(s => s.project === cwd && !activeMap.has(s.sessionId));
+            if (cwdMatch) {
+              activeMap.set(cwdMatch.sessionId, pid);
+            }
+          }
         } catch {
           // skip malformed files
         }
