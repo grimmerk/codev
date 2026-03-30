@@ -464,6 +464,14 @@ function SwitcherApp() {
       (window as any).electronAPI.getSessionDisplayMode().then((mode: string) => {
         setSessionDisplayMode(mode || 'first');
       });
+      // Re-focus search input so arrow keys work (not captured by scroll container)
+      setTimeout(() => {
+        if (modeRef.current === 'sessions') {
+          sessionSearchRef.current?.focus();
+        } else {
+          ref.current?.focus();
+        }
+      }, 50);
     });
 
     (window as any).electronAPI.onWorkingFolderIterated(
