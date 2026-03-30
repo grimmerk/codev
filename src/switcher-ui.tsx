@@ -303,10 +303,10 @@ function SwitcherApp() {
   const ref = useRef(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
   const forceFocusOnInput = () => {
-    if (mode === 'projects') {
-      ref.current?.focus();
-    } else {
+    if (modeRef.current === 'sessions') {
       sessionSearchRef.current?.focus();
+    } else {
+      ref.current?.focus();
     }
   };
 
@@ -451,6 +451,9 @@ function SwitcherApp() {
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
     document.addEventListener('click', (e) => {
+      // Don't steal focus from Settings panel interactions (dropdowns, buttons, etc.)
+      const target = e.target as HTMLElement;
+      if (target.closest('[data-settings-panel]')) return;
       forceFocusOnInput();
     });
 
@@ -464,6 +467,14 @@ function SwitcherApp() {
       (window as any).electronAPI.getSessionDisplayMode().then((mode: string) => {
         setSessionDisplayMode(mode || 'first');
       });
+      // Re-focus search input so arrow keys work (not captured by scroll container)
+      setTimeout(() => {
+        if (modeRef.current === 'sessions') {
+          sessionSearchRef.current?.focus();
+        } else {
+          ref.current?.focus();
+        }
+      }, 50);
     });
 
     (window as any).electronAPI.onWorkingFolderIterated(

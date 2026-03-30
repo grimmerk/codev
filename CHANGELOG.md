@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.46
+
+- Fix: arrow keys not changing selected item after returning from background
+- Fix: Settings panel close not returning focus to correct search input (React closure trap)
+
 ## 1.0.45
 
 - cmux: three-layer switch matching (title → TTY → cwd fallback), same as iTerm2

@@ -131,6 +131,7 @@ const PopupDefaultExample = ({
       placement="bottom-end"
       content={(props) => (
         <div
+          data-settings-panel
           style={{
             width: 500,
             backgroundColor: '#252525',
@@ -511,6 +512,7 @@ const PopupDefaultExample = ({
       trigger={(triggerProps) => (
         <Button
           {...triggerProps}
+          data-settings-panel
           appearance="primary"
           isSelected={isOpen}
           onClick={() => {
