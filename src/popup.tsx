@@ -612,33 +612,49 @@ const PopupDefaultExample = ({
         </div>
       )}
       trigger={(triggerProps) => (
-        <Button
-          {...triggerProps}
-          data-settings-panel
-          appearance="primary"
-          isSelected={isOpen}
-          onClick={() => {
-            if (openCallback) {
-              openCallback();
-            }
-            setIsOpen(!isOpen);
-          }}
-          style={{
-            backgroundColor: isOpen ? THEME.primary : '#444',
-            border: 'none',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#ffffff',
-            padding: '6px 12px',
-            borderRadius: '4px',
-            transition: 'background-color 0.2s',
-            display: 'flex',
-            alignItems: 'center',
-            lineHeight: '1',
-          }}
-        >
-          Settings
-        </Button>
+        <div style={{ position: 'relative', display: 'inline-block' }}>
+          <Button
+            {...triggerProps}
+            data-settings-panel
+            appearance="primary"
+            isSelected={isOpen}
+            onClick={() => {
+              if (openCallback) {
+                openCallback();
+              }
+              setIsOpen(!isOpen);
+            }}
+            style={{
+              backgroundColor: isOpen ? THEME.primary : '#444',
+              border: 'none',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              color: '#ffffff',
+              padding: '6px 12px',
+              borderRadius: '4px',
+              transition: 'background-color 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              lineHeight: '1',
+            }}
+          >
+            Settings
+          </Button>
+          {updateStatus === 'ready' && !isOpen && (
+            <span
+              style={{
+                position: 'absolute',
+                top: '-2px',
+                right: '-2px',
+                width: '8px',
+                height: '8px',
+                backgroundColor: '#4CAF50',
+                borderRadius: '50%',
+                border: '1.5px solid #1e1e1e',
+              }}
+            />
+          )}
+        </div>
       )}
     />
   );
