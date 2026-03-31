@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.47
+
+- Settings popup redesign: grouped by General/Projects/Sessions
+- Add IDE Preference + Left-Click Behavior to Settings popup
+- Custom keyboard shortcuts: edit, save, reset from Settings popup
+- MAS: Grant Access button in IDE row
+- Fix: mouse hover jump on window focus return
+- Fix: assistant message color toned down
+- Remove archived extension folder
+- Docs: Ghostty keybind workaround for paste/undo
+
 ## 1.0.46
 
 - Fix: arrow keys not changing selected item after returning from background

@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('ide-data-folder-selected', callback),
   checkIDEDataAccess: (ideMode: string) => ipcRenderer.invoke('check-ide-data-access', ideMode),
   notifyIDEPreferenceChanged: (preferredIDE: string) => ipcRenderer.send('ide-preference-changed', preferredIDE),
+  getIDEPreference: () => ipcRenderer.invoke('get-ide-preference'),
+  getIsMAS: () => ipcRenderer.invoke('get-is-mas'),
+  getLeftClickBehavior: () => ipcRenderer.invoke('get-left-click-behavior'),
+  setLeftClickBehavior: (behavior: string) => ipcRenderer.send('set-left-click-behavior', behavior),
 
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getSessionTerminalApp: () => ipcRenderer.invoke('get-session-terminal-app'),
@@ -129,8 +133,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('delete-conversation', id),
   addMessageToConversation: (id: string, message: any) => 
     ipcRenderer.invoke('add-message-to-conversation', id, message),
-  searchConversations: (searchTerm: string) => 
+  searchConversations: (searchTerm: string) =>
     ipcRenderer.invoke('search-conversations', searchTerm),
+
+  // Custom keyboard shortcuts
+  getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
+  setShortcut: (key: string, accelerator: string) => ipcRenderer.invoke('set-shortcut', key, accelerator),
+  resetShortcuts: () => ipcRenderer.invoke('reset-shortcuts'),
+  pauseShortcut: (key: string) => ipcRenderer.invoke('pause-shortcut', key),
+  resumeShortcut: (key: string) => ipcRenderer.invoke('resume-shortcut', key),
 });
 
 // All of the Node.js APIs are available in the preload process.

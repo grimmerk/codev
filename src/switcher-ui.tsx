@@ -302,6 +302,7 @@ function SwitcherApp() {
 
   const ref = useRef(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
+  const ignoreMouseEnterRef = useRef(false);
   const forceFocusOnInput = () => {
     if (modeRef.current === 'sessions') {
       sessionSearchRef.current?.focus();
@@ -467,6 +468,9 @@ function SwitcherApp() {
       (window as any).electronAPI.getSessionDisplayMode().then((mode: string) => {
         setSessionDisplayMode(mode || 'first');
       });
+      // Ignore mouse hover briefly to prevent selected item jumping to mouse position
+      ignoreMouseEnterRef.current = true;
+      setTimeout(() => { ignoreMouseEnterRef.current = false; }, 300);
       // Re-focus search input so arrow keys work (not captured by scroll container)
       setTimeout(() => {
         if (modeRef.current === 'sessions') {
@@ -829,7 +833,7 @@ function SwitcherApp() {
                     cursor: 'pointer',
                     transition: 'background-color 0.15s',
                   }}
-                  onMouseEnter={() => setSelectedSessionIndex(index)}
+                  onMouseEnter={() => { if (!ignoreMouseEnterRef.current) setSelectedSessionIndex(index); }}
                 >
                   {/* Fixed-width dot container for alignment */}
                   <div style={{ width: '14px', flexShrink: 0, paddingTop: '4px' }}>
@@ -955,13 +959,13 @@ function SwitcherApp() {
                     {/* Line 3: Last assistant response (only for active sessions) */}
                     {session.isActive && assistantResponses[session.sessionId] && (
                       <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
-                        <span style={{ color: '#64B5F6', fontSize: '11px' }}>
+                        <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
                           ◀ <Highlighter
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                             textToHighlight={assistantResponses[session.sessionId].slice(0, 80)}
                             highlightStyle={{
-                              backgroundColor: 'rgba(100, 181, 246, 0.2)',
-                              color: '#90CAF9',
+                              backgroundColor: 'rgba(139, 184, 208, 0.15)',
+                              color: '#A8CDE0',
                               padding: '0 2px',
                               borderRadius: '2px',
                             }}
