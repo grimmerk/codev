@@ -62,6 +62,8 @@ const PopupDefaultExample = ({
   const [idePreference, setIdePreference] = useState('VSCode');
   const [leftClickBehavior, setLeftClickBehavior] =
     useState('switcher_window');
+  const [isMASBuild, setIsMASBuild] = useState(false);
+  const [ideDataAccessGranted, setIdeDataAccessGranted] = useState(false);
 
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
@@ -87,6 +89,14 @@ const PopupDefaultExample = ({
       .then((behavior: string) => {
         setLeftClickBehavior(behavior || 'switcher_window');
       });
+    (window as any).electronAPI.getIsMAS().then((mas: boolean) => {
+      setIsMASBuild(mas);
+      if (mas) {
+        (window as any).electronAPI.checkIDEDataAccess(idePreference || 'VSCode').then((granted: boolean) => {
+          setIdeDataAccessGranted(granted);
+        });
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -217,7 +227,7 @@ const PopupDefaultExample = ({
               <div style={{ ...rowStyle, padding: '4px 16px' }}>
                 <span style={{ ...labelStyle, fontSize: '11px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Projects</span>
               </div>
-              <div style={rowStyle}>
+              <div style={{ ...rowStyle, gap: '6px' }}>
                 <span style={labelStyle}>IDE</span>
                 <select
                   value={idePreference}
@@ -225,12 +235,34 @@ const PopupDefaultExample = ({
                     const ide = e.target.value;
                     setIdePreference(ide);
                     (window as any).electronAPI.notifyIDEPreferenceChanged(ide);
+                    if (isMASBuild) {
+                      (window as any).electronAPI.checkIDEDataAccess(ide).then((granted: boolean) => {
+                        setIdeDataAccessGranted(granted);
+                      });
+                    }
                   }}
                   style={selectStyle}
                 >
                   <option value="VSCode">VS Code</option>
                   <option value="Cursor">Cursor</option>
                 </select>
+                {isMASBuild && (
+                  <button
+                    onClick={() => (window as any).electronAPI.openIDEDataSelector(idePreference)}
+                    style={{
+                      backgroundColor: ideDataAccessGranted ? '#28a745' : THEME.primary,
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '3px',
+                      padding: '3px 6px',
+                      fontSize: '10px',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {ideDataAccessGranted ? '✓' : 'Grant'}
+                  </button>
+                )}
               </div>
               <div style={{ ...rowStyle, gap: '8px' }}>
                 <span style={labelStyle}>Working Dir</span>

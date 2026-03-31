@@ -668,6 +668,10 @@ ipcMain.handle('get-ide-preference', () => {
   return userSettings.preferredIDE;
 });
 
+ipcMain.handle('get-is-mas', () => {
+  return isMAS();
+});
+
 ipcMain.handle('get-left-click-behavior', () => {
   return userSettings.leftClickBehavior;
 });
