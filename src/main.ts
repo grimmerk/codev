@@ -1,5 +1,6 @@
 import {
   app,
+  autoUpdater,
   BrowserWindow,
   dialog,
   globalShortcut,
@@ -970,7 +971,27 @@ const trayToggleEvtHandler = async () => {
           repo: 'grimmerk/codev',
         },
         updateInterval: '1 hour',
-        notifyUser: true,
+        notifyUser: false,
+      });
+
+      // Forward autoUpdater events to renderer for custom UI
+      autoUpdater.on('checking-for-update', () => {
+        switcherWindow?.webContents.send('update-status', { status: 'checking' });
+      });
+      autoUpdater.on('update-available', () => {
+        switcherWindow?.webContents.send('update-status', { status: 'downloading' });
+      });
+      autoUpdater.on('update-not-available', () => {
+        switcherWindow?.webContents.send('update-status', { status: 'up-to-date' });
+      });
+      autoUpdater.on('update-downloaded', (_event: any, releaseNotes: string, releaseName: string) => {
+        switcherWindow?.webContents.send('update-status', { status: 'ready', releaseName });
+      });
+      autoUpdater.on('error', (err: Error) => {
+        if (isDebug) {
+          console.error('Auto-update error:', err);
+        }
+        switcherWindow?.webContents.send('update-status', { status: 'error', error: err.message });
       });
     } catch (e) {
       if (isDebug) {
@@ -1555,6 +1576,27 @@ app.once('before-quit', () => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+// Auto-update IPC handlers
+ipcMain.on('check-for-update', () => {
+  if (!isMAS()) {
+    try {
+      autoUpdater.checkForUpdates();
+    } catch (e) {
+      if (isDebug) {
+        console.error('Manual update check failed:', e);
+      }
+      switcherWindow?.webContents.send('update-status', {
+        status: 'error',
+        error: e instanceof Error ? e.message : 'Update check failed',
+      });
+    }
+  }
+});
+
+ipcMain.on('install-update', () => {
+  autoUpdater.quitAndInstall();
 });
 
 // Login item settings are now controlled by the user via Settings UI toggle

@@ -71,6 +71,9 @@ const PopupDefaultExample = ({
   });
   const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
   const [shortcutError, setShortcutError] = useState('');
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'downloading' | 'ready' | 'up-to-date' | 'error'>('idle');
+  const [updateReleaseName, setUpdateReleaseName] = useState('');
+  const [updateTimer, setUpdateTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
@@ -106,6 +109,12 @@ const PopupDefaultExample = ({
     });
     (window as any).electronAPI.getShortcuts().then((s: typeof shortcuts) => {
       if (s) setShortcuts(s);
+    });
+    (window as any).electronAPI.onUpdateStatus((_event: any, data: any) => {
+      setUpdateStatus(data.status);
+      if (data.releaseName) setUpdateReleaseName(data.releaseName);
+      // Clear timeout when we get a real response
+      setUpdateTimer((prev) => { if (prev) clearTimeout(prev); return null; });
     });
   }, []);
 
@@ -205,6 +214,14 @@ const PopupDefaultExample = ({
     setShortcutError('');
   };
 
+  const triggerUpdateCheck = () => {
+    setUpdateStatus('checking');
+    if (updateTimer) clearTimeout(updateTimer);
+    const timer = setTimeout(() => setUpdateStatus('error'), 30000);
+    setUpdateTimer(timer);
+    (window as any).electronAPI.checkForUpdate();
+  };
+
   const shortcutRows = [
     { key: 'quickSwitcher', label: 'Quick Switcher' },
     { key: 'aiInsight', label: 'AI Insight' },
@@ -229,9 +246,44 @@ const PopupDefaultExample = ({
           }}
         >
           <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
-          {/* Version + Quit — compact top bar */}
+          {/* Version + Update + Quit — compact top bar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid #333' }}>
-            <span style={{ fontSize: '11px', color: '#666' }}>v{appVersion}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#666' }}>v{appVersion}</span>
+              {updateStatus === 'idle' && (
+                <span
+                  onClick={triggerUpdateCheck}
+                  style={{ fontSize: '10px', color: THEME.primary, cursor: 'pointer' }}
+                >
+                  Check for Update
+                </span>
+              )}
+              {updateStatus === 'checking' && (
+                <span style={{ fontSize: '10px', color: '#888' }}>Checking...</span>
+              )}
+              {updateStatus === 'downloading' && (
+                <span style={{ fontSize: '10px', color: '#888' }}>Downloading...</span>
+              )}
+              {updateStatus === 'ready' && (
+                <span
+                  onClick={() => (window as any).electronAPI.installUpdate()}
+                  style={{ fontSize: '10px', color: '#4CAF50', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  {updateReleaseName ? `${updateReleaseName} ready — ` : ''}Install & Restart
+                </span>
+              )}
+              {updateStatus === 'up-to-date' && (
+                <span style={{ fontSize: '10px', color: '#888' }}>Latest</span>
+              )}
+              {updateStatus === 'error' && (
+                <span
+                  onClick={triggerUpdateCheck}
+                  style={{ fontSize: '10px', color: '#e05252', cursor: 'pointer' }}
+                >
+                  Retry
+                </span>
+              )}
+            </div>
             <span
               onClick={() => closeAppClick()}
               style={{ fontSize: '11px', color: '#CC6666', cursor: 'pointer', textDecoration: 'underline' }}
