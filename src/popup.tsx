@@ -64,6 +64,13 @@ const PopupDefaultExample = ({
     useState('switcher_window');
   const [isMASBuild, setIsMASBuild] = useState(false);
   const [ideDataAccessGranted, setIdeDataAccessGranted] = useState(false);
+  const [shortcuts, setShortcuts] = useState({
+    quickSwitcher: 'Command+Control+R',
+    aiInsight: 'Command+Control+E',
+    aiChat: 'Command+Control+C',
+  });
+  const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
+  const [shortcutError, setShortcutError] = useState('');
 
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
@@ -97,6 +104,9 @@ const PopupDefaultExample = ({
         });
       }
     });
+    (window as any).electronAPI.getShortcuts().then((s: typeof shortcuts) => {
+      if (s) setShortcuts(s);
+    });
   }, []);
 
   useEffect(() => {
@@ -111,6 +121,76 @@ const PopupDefaultExample = ({
     setLaunchAtLogin(checked);
     (window as any).electronAPI.setLoginItemSettings(checked);
   };
+
+  const acceleratorToDisplay = (acc: string): string => {
+    return acc
+      .replace(/Command/g, '\u2318')
+      .replace(/Control/g, '\u2303')
+      .replace(/Alt/g, '\u2325')
+      .replace(/Shift/g, '\u21E7')
+      .replace(/\+/g, '+');
+  };
+
+  const keyEventToAccelerator = (e: React.KeyboardEvent): string | null => {
+    e.preventDefault();
+    if (e.key === 'Escape') return null;
+
+    const parts: string[] = [];
+    if (e.metaKey) parts.push('Command');
+    if (e.ctrlKey) parts.push('Control');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+
+    if (parts.length === 0) return null;
+
+    let key = e.key;
+    if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null;
+    if (key.length === 1) key = key.toUpperCase();
+
+    parts.push(key);
+    return parts.join('+');
+  };
+
+  const handleShortcutKeyDown = async (e: React.KeyboardEvent) => {
+    if (!editingShortcut) return;
+    const accelerator = keyEventToAccelerator(e);
+    if (accelerator === null) {
+      // Escape pressed or just modifier key
+      if (e.key === 'Escape') {
+        setEditingShortcut(null);
+        setShortcutError('');
+      }
+      return;
+    }
+
+    const result = await (window as any).electronAPI.setShortcut(editingShortcut, accelerator);
+    if (result.success) {
+      setShortcuts((prev) => ({ ...prev, [editingShortcut]: accelerator }));
+      setEditingShortcut(null);
+      setShortcutError('');
+    } else {
+      setShortcutError(result.error || 'Failed to set shortcut');
+    }
+  };
+
+  const handleResetShortcuts = async () => {
+    const defaults = await (window as any).electronAPI.resetShortcuts();
+    if (defaults) {
+      setShortcuts({
+        quickSwitcher: defaults.quickSwitcher,
+        aiInsight: defaults.aiInsight,
+        aiChat: defaults.aiChat,
+      });
+    }
+    setEditingShortcut(null);
+    setShortcutError('');
+  };
+
+  const shortcutRows = [
+    { key: 'quickSwitcher', label: 'Quick Switcher' },
+    { key: 'aiInsight', label: 'AI Insight' },
+    { key: 'aiChat', label: 'AI Chat' },
+  ];
 
   return (
     <Popup
@@ -129,6 +209,7 @@ const PopupDefaultExample = ({
             overflow: 'hidden',
           }}
         >
+          <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
           {/* Version + Quit — compact top bar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid #333' }}>
             <span style={{ fontSize: '11px', color: '#666' }}>v{appVersion}</span>
@@ -348,44 +429,103 @@ const PopupDefaultExample = ({
           >
             <div
               style={{
-                fontSize: '13px',
-                fontWeight: 600,
-                color: THEME.text.secondary,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
                 marginBottom: '6px',
               }}
             >
-              Shortcuts
+              <span
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: THEME.text.secondary,
+                }}
+              >
+                Shortcuts
+              </span>
+              <span
+                onClick={handleResetShortcuts}
+                style={{
+                  fontSize: '11px',
+                  color: '#888',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                Reset
+              </span>
             </div>
-            {[
-              { keys: '\u2303+\u2318+R', label: 'Quick Switcher' },
-              { keys: '\u2303+\u2318+E', label: 'AI Insight' },
-              { keys: '\u2303+\u2318+C', label: 'AI Chat' },
-            ].map((shortcut) => (
+            {shortcutRows.map((row) => (
               <div
-                key={shortcut.keys}
+                key={row.key}
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   padding: '3px 0',
+                  gap: '8px',
                 }}
               >
+                {editingShortcut === row.key ? (
+                  <div
+                    tabIndex={0}
+                    onKeyDown={handleShortcutKeyDown}
+                    ref={(el) => el?.focus()}
+                    style={{
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      color: shortcutError ? '#e05252' : THEME.primary,
+                      backgroundColor: '#333',
+                      border: `1px solid ${shortcutError ? '#e05252' : THEME.primary}`,
+                      borderRadius: '3px',
+                      padding: '2px 6px',
+                      minWidth: '90px',
+                      textAlign: 'center',
+                      outline: 'none',
+                      animation: shortcutError ? 'none' : 'pulse 1.5s infinite',
+                    }}
+                  >
+                    {shortcutError || 'Press keys...'}
+                  </div>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: '12px',
+                      color: THEME.text.secondary,
+                      fontFamily: 'monospace',
+                    }}
+                  >
+                    {acceleratorToDisplay(shortcuts[row.key as keyof typeof shortcuts])}
+                  </span>
+                )}
                 <span
                   style={{
                     fontSize: '12px',
                     color: THEME.text.secondary,
-                    fontFamily: 'monospace',
+                    flex: 1,
                   }}
                 >
-                  {shortcut.keys}
+                  {row.label}
                 </span>
                 <span
+                  onClick={() => {
+                    if (editingShortcut === row.key) {
+                      setEditingShortcut(null);
+                      setShortcutError('');
+                    } else {
+                      setEditingShortcut(row.key);
+                      setShortcutError('');
+                    }
+                  }}
                   style={{
-                    fontSize: '12px',
-                    color: THEME.text.secondary,
+                    fontSize: '11px',
+                    color: editingShortcut === row.key ? '#e05252' : THEME.primary,
+                    cursor: 'pointer',
+                    flexShrink: 0,
                   }}
                 >
-                  {shortcut.label}
+                  {editingShortcut === row.key ? 'Cancel' : 'Edit'}
                 </span>
               </div>
             ))}

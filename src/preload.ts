@@ -133,8 +133,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('delete-conversation', id),
   addMessageToConversation: (id: string, message: any) => 
     ipcRenderer.invoke('add-message-to-conversation', id, message),
-  searchConversations: (searchTerm: string) => 
+  searchConversations: (searchTerm: string) =>
     ipcRenderer.invoke('search-conversations', searchTerm),
+
+  // Custom keyboard shortcuts
+  getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
+  setShortcut: (key: string, accelerator: string) => ipcRenderer.invoke('set-shortcut', key, accelerator),
+  resetShortcuts: () => ipcRenderer.invoke('reset-shortcuts'),
 });
 
 // All of the Node.js APIs are available in the preload process.

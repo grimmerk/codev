@@ -1119,8 +1119,16 @@ const trayToggleEvtHandler = async () => {
   tray = new TrayGenerator(switcherWindow, title, trayToggleEvtHandler);
 
   // https://www.electronjs.org/docs/latest/tutorial/keyboard-shortcuts#global-shortcuts
-  // Register Cmd+Ctrl+R shortcut to always show the main window, regardless of left-click setting
-  globalShortcut.register('Command+Control+R', () => {
+
+  // Default shortcut accelerators
+  const DEFAULT_SHORTCUTS: Record<string, string> = {
+    quickSwitcher: 'Command+Control+R',
+    aiInsight: 'Command+Control+E',
+    aiChat: 'Command+Control+C',
+  };
+
+  // Shortcut callback: Quick Switcher
+  const quickSwitcherCallback = () => {
     if (isDebug) {
       console.log('Command+Control+R triggered - always shows Switcher window');
     }
@@ -1152,10 +1160,10 @@ const trayToggleEvtHandler = async () => {
         showSwitcherWindow();
       }
     }
-  });
+  };
 
-  // Register shortcut for Smart Chat Mode (Ctrl+Cmd+C)
-  globalShortcut.register('Command+Control+C', () => {
+  // Shortcut callback: Smart Chat (Ctrl+Cmd+C)
+  const aiChatCallback = () => {
     // Check if AI Assistant window already exists
     if (aiAssistantWindow && !aiAssistantWindow.isDestroyed()) {
       // If window is visible, check its current mode
@@ -1239,10 +1247,10 @@ const trayToggleEvtHandler = async () => {
 
     // Focus window to bring it to front
     aiAssistantWindow.focus();
-  });
+  };
 
-  // Register shortcut for AI Assistant (Ctrl+Cmd+E)
-  globalShortcut.register('Command+Control+E', () => {
+  // Shortcut callback: AI Insight (Ctrl+Cmd+E)
+  const aiInsightCallback = () => {
     // Simplified approach: directly read clipboard content
     const clipboardContent = clipboard.readText().trim();
 
@@ -1426,6 +1434,75 @@ const trayToggleEvtHandler = async () => {
     }
 
     // End of the new implementation
+  };
+
+  // Map shortcut keys to their callbacks
+  const shortcutCallbacks: Record<string, () => void> = {
+    quickSwitcher: quickSwitcherCallback,
+    aiInsight: aiInsightCallback,
+    aiChat: aiChatCallback,
+  };
+
+  // Register all shortcuts from settings (or defaults)
+  const registerAllShortcuts = async () => {
+    globalShortcut.unregisterAll();
+    for (const key of Object.keys(DEFAULT_SHORTCUTS)) {
+      const accelerator = ((await settings.get(`shortcut-${key}`)) as string) || DEFAULT_SHORTCUTS[key];
+      const callback = shortcutCallbacks[key];
+      if (callback) {
+        const registered = globalShortcut.register(accelerator, callback);
+        if (!registered && isDebug) {
+          console.log(`Failed to register shortcut ${accelerator} for ${key}`);
+        }
+      }
+    }
+  };
+
+  await registerAllShortcuts();
+
+  // IPC handler: get all shortcut accelerators
+  ipcMain.handle('get-shortcuts', async () => {
+    return {
+      quickSwitcher: ((await settings.get('shortcut-quickSwitcher')) as string) || DEFAULT_SHORTCUTS.quickSwitcher,
+      aiInsight: ((await settings.get('shortcut-aiInsight')) as string) || DEFAULT_SHORTCUTS.aiInsight,
+      aiChat: ((await settings.get('shortcut-aiChat')) as string) || DEFAULT_SHORTCUTS.aiChat,
+    };
+  });
+
+  // IPC handler: set a single shortcut
+  ipcMain.handle('set-shortcut', async (_event, key: string, accelerator: string) => {
+    if (!DEFAULT_SHORTCUTS[key]) {
+      return { success: false, error: 'Invalid shortcut key' };
+    }
+
+    const callback = shortcutCallbacks[key];
+    if (!callback) {
+      return { success: false, error: 'Invalid shortcut key' };
+    }
+
+    // Unregister the old shortcut for this key
+    const oldAccelerator = ((await settings.get(`shortcut-${key}`)) as string) || DEFAULT_SHORTCUTS[key];
+    globalShortcut.unregister(oldAccelerator);
+
+    // Try to register the new shortcut
+    const registered = globalShortcut.register(accelerator, callback);
+    if (registered) {
+      await settings.set(`shortcut-${key}`, accelerator);
+      return { success: true };
+    } else {
+      // Re-register the old shortcut since the new one failed
+      globalShortcut.register(oldAccelerator, callback);
+      return { success: false, error: 'Shortcut already in use by another application' };
+    }
+  });
+
+  // IPC handler: reset all shortcuts to defaults
+  ipcMain.handle('reset-shortcuts', async () => {
+    for (const key of Object.keys(DEFAULT_SHORTCUTS)) {
+      await settings.unset(`shortcut-${key}`);
+    }
+    await registerAllShortcuts();
+    return DEFAULT_SHORTCUTS;
   });
 })();
 
