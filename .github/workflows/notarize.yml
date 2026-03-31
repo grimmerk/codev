@@ -90,11 +90,24 @@ jobs:
           echo "$NOTES" > /tmp/release-notes.txt
           echo "notes_file=/tmp/release-notes.txt" >> $GITHUB_OUTPUT
 
+      - name: Create signed ZIP for auto-updater
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd ./out/CodeV-darwin-arm64
+          zip -r -y "../CodeV-darwin-arm64-${VERSION}.zip" CodeV.app
+          echo "Created signed zip: ./out/CodeV-darwin-arm64-${VERSION}.zip"
+
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: CodeV-${{ steps.version.outputs.version }}.dmg
           path: ./out/CodeV.dmg
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodeV-${{ steps.version.outputs.version }}.zip
+          path: ./out/CodeV-darwin-arm64-${{ steps.version.outputs.version }}.zip
 
       - name: Create GitHub Release
         if: ${{ inputs.create_release }}
@@ -105,13 +118,15 @@ jobs:
           if [ -z "$TAG" ]; then
             TAG="v${{ steps.version.outputs.version }}"
           fi
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_FILE="./out/CodeV-darwin-arm64-${VERSION}.zip"
           NOTES="${{ inputs.release_notes }}"
           if [ -z "$NOTES" ] && [ -f /tmp/release-notes.txt ]; then
-            gh release create "$TAG" ./out/CodeV.dmg \
+            gh release create "$TAG" ./out/CodeV.dmg "$ZIP_FILE" \
               --title "$TAG" \
               --notes-file /tmp/release-notes.txt
           else
-            gh release create "$TAG" ./out/CodeV.dmg \
+            gh release create "$TAG" ./out/CodeV.dmg "$ZIP_FILE" \
               --title "$TAG" \
               --notes "${NOTES:-Non-App Store notarized build}"
           fi
