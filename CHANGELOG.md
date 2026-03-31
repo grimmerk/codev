@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.48
+
+- In-app auto-update for non-MAS builds (via update-electron-app)
+- CI: upload signed zip alongside DMG for Squirrel.Mac auto-updater
+
 ## 1.0.47
 
 - Settings popup redesign: grouped by General/Projects/Sessions

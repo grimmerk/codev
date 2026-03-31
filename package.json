@@ -1,8 +1,12 @@
 {
   "name": "CodeV",
   "productName": "CodeV",
-  "version": "1.0.47",
+  "version": "1.0.48",
   "description": "Quick switcher for VS Code, Cursor, and Claude Code sessions",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grimmerk/codev"
+  },
   "main": ".webpack/main",
   "scripts": {
     "db": "prisma migrate dev",
@@ -84,7 +88,8 @@
     "react-syntax-highlighter": "15.5.0",
     "reflect-metadata": "^0.1.13",
     "remark-gfm": "^3.0.1",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "update-electron-app": "^3.1.2"
   },
   "packageManager": "yarn@1.22.22"
 }

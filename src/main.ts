@@ -960,6 +960,25 @@ const trayToggleEvtHandler = async () => {
 (async () => {
   await app.whenReady();
 
+  // Auto-update: check for updates via update.electronjs.org (non-MAS only)
+  if (!isMAS()) {
+    try {
+      const { updateElectronApp, UpdateSourceType } = require('update-electron-app');
+      updateElectronApp({
+        updateSource: {
+          type: UpdateSourceType.ElectronPublicUpdateService,
+          repo: 'grimmerk/codev',
+        },
+        updateInterval: '1 hour',
+        notifyUser: true,
+      });
+    } catch (e) {
+      if (isDebug) {
+        console.error('Auto-update init failed:', e);
+      }
+    }
+  }
+
   switcherWindow = createSwitcherWindow();
   if (isDebug) {
     console.log('when ready');
