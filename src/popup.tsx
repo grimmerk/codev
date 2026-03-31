@@ -119,6 +119,17 @@ const PopupDefaultExample = ({
             overflow: 'hidden',
           }}
         >
+          {/* Version + Quit — compact top bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid #333' }}>
+            <span style={{ fontSize: '11px', color: '#666' }}>v{appVersion}</span>
+            <span
+              onClick={() => closeAppClick()}
+              style={{ fontSize: '11px', color: '#999', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              Quit
+            </span>
+          </div>
+
           {/* General settings (always visible) */}
           <div style={{ padding: '4px 0', borderBottom: '1px solid #333' }}>
             <div style={{ ...rowStyle, padding: '4px 16px' }}>
@@ -348,41 +359,6 @@ const PopupDefaultExample = ({
             ))}
           </div>
 
-          {/* Version + Quit - single row */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              backgroundColor: '#1e1e1e',
-              padding: '10px 16px',
-              borderTop: '1px solid #333',
-            }}
-          >
-            <span
-              style={{
-                fontSize: '13px',
-                color: '#666',
-              }}
-            >
-              v{appVersion}
-            </span>
-            <button
-              onClick={() => closeAppClick()}
-              style={{
-                backgroundColor: THEME.button.warning,
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                padding: '5px 14px',
-                fontSize: '13px',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Quit CodeV
-            </button>
-          </div>
         </div>
       )}
       trigger={(triggerProps) => (
