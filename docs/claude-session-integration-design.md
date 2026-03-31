@@ -47,6 +47,7 @@ Properties:
 - Single file, ~3MB, fast to read (~40ms in Node.js)
 - Requires deduplication (multiple lines per session — one per user prompt)
 - No `summary`, `title`, or `custom-title` fields
+- **Message count caveat**: CodeV's `messageCount` is the number of `history.jsonl` entries per session (= interactive user prompts only). This is much lower than the actual conversation message count — e.g., a session with 2810 user+assistant messages in the session JSONL may only have ~339 entries in `history.jsonl`. Subagent prompts, tool results, and system messages are not recorded in `history.jsonl`. For accurate message counts, reading the session JSONL (`projects/<path>/<id>.jsonl`) is needed (c9watch does this, counting user+assistant entries).
 - `messageCount` can only count user prompts (not assistant responses)
 
 ### 2. `~/.claude/projects/{path}/{session-id}.jsonl` — Secondary (used for custom titles)
