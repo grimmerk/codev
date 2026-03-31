@@ -124,7 +124,7 @@ const PopupDefaultExample = ({
             <span style={{ fontSize: '11px', color: '#666' }}>v{appVersion}</span>
             <span
               onClick={() => closeAppClick()}
-              style={{ fontSize: '11px', color: '#999', cursor: 'pointer', textDecoration: 'underline' }}
+              style={{ fontSize: '11px', color: '#CC6666', cursor: 'pointer', textDecoration: 'underline' }}
             >
               Quit
             </span>
