@@ -1469,6 +1469,21 @@ const trayToggleEvtHandler = async () => {
     };
   });
 
+  // IPC handler: temporarily unregister a shortcut (while editing)
+  ipcMain.handle('pause-shortcut', async (_event, key: string) => {
+    if (!DEFAULT_SHORTCUTS[key]) return;
+    const acc = ((await settings.get(`shortcut-${key}`)) as string) || DEFAULT_SHORTCUTS[key];
+    globalShortcut.unregister(acc);
+  });
+
+  // IPC handler: re-register a shortcut (if editing was cancelled)
+  ipcMain.handle('resume-shortcut', async (_event, key: string) => {
+    if (!DEFAULT_SHORTCUTS[key]) return;
+    const acc = ((await settings.get(`shortcut-${key}`)) as string) || DEFAULT_SHORTCUTS[key];
+    const callback = shortcutCallbacks[key];
+    if (callback) globalShortcut.register(acc, callback);
+  });
+
   // IPC handler: set a single shortcut
   ipcMain.handle('set-shortcut', async (_event, key: string, accelerator: string) => {
     if (!DEFAULT_SHORTCUTS[key]) {

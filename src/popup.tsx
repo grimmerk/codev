@@ -153,15 +153,34 @@ const PopupDefaultExample = ({
 
   const handleShortcutKeyDown = async (e: React.KeyboardEvent) => {
     if (!editingShortcut) return;
-    const accelerator = keyEventToAccelerator(e);
-    if (accelerator === null) {
-      // Escape pressed or just modifier key
-      if (e.key === 'Escape') {
-        setEditingShortcut(null);
-        setShortcutError('');
-      }
+    e.preventDefault();
+
+    if (e.key === 'Escape') {
+      // Resume the paused shortcut
+      (window as any).electronAPI.resumeShortcut(editingShortcut);
+      setEditingShortcut(null);
+      setShortcutError('');
       return;
     }
+
+    // Skip if only modifier key pressed
+    if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
+
+    const parts: string[] = [];
+    if (e.metaKey) parts.push('Command');
+    if (e.ctrlKey) parts.push('Control');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+
+    if (parts.length === 0) {
+      setShortcutError('Need ⌘, ⌃, ⌥, or ⇧');
+      return;
+    }
+
+    let key = e.key;
+    if (key.length === 1) key = key.toUpperCase();
+    parts.push(key);
+    const accelerator = parts.join('+');
 
     const result = await (window as any).electronAPI.setShortcut(editingShortcut, accelerator);
     if (result.success) {
@@ -511,9 +530,16 @@ const PopupDefaultExample = ({
                 <span
                   onClick={() => {
                     if (editingShortcut === row.key) {
+                      // Cancel editing — resume the shortcut
+                      (window as any).electronAPI.resumeShortcut(row.key);
                       setEditingShortcut(null);
                       setShortcutError('');
                     } else {
+                      // Start editing — pause the shortcut so it doesn't trigger
+                      if (editingShortcut) {
+                        (window as any).electronAPI.resumeShortcut(editingShortcut);
+                      }
+                      (window as any).electronAPI.pauseShortcut(row.key);
                       setEditingShortcut(row.key);
                       setShortcutError('');
                     }

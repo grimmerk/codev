@@ -140,6 +140,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
   setShortcut: (key: string, accelerator: string) => ipcRenderer.invoke('set-shortcut', key, accelerator),
   resetShortcuts: () => ipcRenderer.invoke('reset-shortcuts'),
+  pauseShortcut: (key: string) => ipcRenderer.invoke('pause-shortcut', key),
+  resumeShortcut: (key: string) => ipcRenderer.invoke('resume-shortcut', key),
 });
 
 // All of the Node.js APIs are available in the preload process.
