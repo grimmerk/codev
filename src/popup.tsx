@@ -110,6 +110,12 @@ const PopupDefaultExample = ({
     (window as any).electronAPI.getShortcuts().then((s: typeof shortcuts) => {
       if (s) setShortcuts(s);
     });
+    (window as any).electronAPI.getUpdateStatus().then((data: any) => {
+      if (data) {
+        setUpdateStatus(data.status);
+        if (data.releaseName) setUpdateReleaseName(data.releaseName);
+      }
+    });
     (window as any).electronAPI.onUpdateStatus((_event: any, data: any) => {
       setUpdateStatus(data.status);
       if (data.releaseName) setUpdateReleaseName(data.releaseName);
@@ -273,7 +279,12 @@ const PopupDefaultExample = ({
                 </span>
               )}
               {updateStatus === 'up-to-date' && (
-                <span style={{ fontSize: '10px', color: '#888' }}>Latest</span>
+                <span
+                  onClick={triggerUpdateCheck}
+                  style={{ fontSize: '10px', color: '#888', cursor: 'pointer' }}
+                >
+                  Latest ↻
+                </span>
               )}
               {updateStatus === 'error' && (
                 <span
