@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.50
+
+- Green dot badge on Settings button when update is ready to install
+
 ## 1.0.49
 
 - Custom update UI: "Check for Update" + "Install & Restart" in Settings popup
