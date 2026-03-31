@@ -119,147 +119,26 @@ const PopupDefaultExample = ({
             overflow: 'hidden',
           }}
         >
-          {/* Working Directory - single row */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              padding: '10px 16px',
-              backgroundColor: '#1e1e1e',
-              borderBottom: '1px solid #333',
-              gap: '8px',
-            }}
-          >
-            <span style={{ fontSize: '16px', flexShrink: 0 }}>📂</span>
-            <div
-              style={{
-                color: '#d0d0d0',
-                fontSize: '13px',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                flex: 1,
-              }}
-            >
-              {workingFolderPath || 'No working folder selected'}
+          {/* General settings (always visible) */}
+          <div style={{ padding: '4px 0', borderBottom: '1px solid #333' }}>
+            <div style={{ ...rowStyle, padding: '4px 16px' }}>
+              <span style={{ ...labelStyle, fontSize: '11px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>General</span>
             </div>
-            <button
-              onClick={() => openFolderSelector()}
-              style={{
-                backgroundColor: 'transparent',
-                border: '1px solid #555',
-                borderRadius: '4px',
-                padding: '4px 8px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                lineHeight: '1',
-                flexShrink: 0,
-                color: THEME.text.primary,
-              }}
-              title="Change Folder"
-            >
-              📁
-            </button>
-          </div>
-
-          {/* Settings rows */}
-          <div style={{ padding: '8px 0' }}>
-            {/* Default Tab */}
-            {switcherMode === 'sessions' && (
-              <>
-                <div style={rowStyle}>
-                  <span style={labelStyle}>Default Tab</span>
-                  <select
-                    value={defaultSwitcherMode}
-                    onChange={(e) => {
-                      const mode = e.target.value;
-                      setDefaultSwitcherMode(mode);
-                      (window as any).electronAPI.setDefaultSwitcherMode(mode);
-                    }}
-                    style={selectStyle}
-                  >
-                    <option value="projects">Projects</option>
-                    <option value="sessions">Sessions</option>
-                  </select>
-                </div>
-
-                {/* Launch Terminal */}
-                <div style={rowStyle}>
-                  <span style={labelStyle}>Launch Terminal</span>
-                  <select
-                    value={sessionTerminalApp}
-                    onChange={(e) => {
-                      const app = e.target.value;
-                      setSessionTerminalApp(app);
-                      (window as any).electronAPI.setSessionTerminalApp(app);
-                    }}
-                    style={selectStyle}
-                  >
-                    <option value="iterm2">iTerm2</option>
-                    <option value="ghostty">Ghostty</option>
-                    <option value="cmux">cmux</option>
-                  </select>
-                </div>
-
-                {/* Launch Mode (for iTerm2 and Ghostty) */}
-                {(sessionTerminalApp === 'iterm2' ||
-                  sessionTerminalApp === 'ghostty') && (
-                  <div style={rowStyle}>
-                    <span style={labelStyle}>Launch Mode</span>
-                    <select
-                      value={sessionTerminalMode}
-                      onChange={(e) => {
-                        const mode = e.target.value;
-                        setSessionTerminalMode(mode);
-                        (window as any).electronAPI.setSessionTerminalMode(mode);
-                      }}
-                      style={selectStyle}
-                    >
-                      <option value="tab">New Tab</option>
-                      <option value="window">New Window</option>
-                    </select>
-                  </div>
-                )}
-
-                {/* Session Preview */}
-                <div style={rowStyle}>
-                  <span style={labelStyle}>Session Preview</span>
-                  <select
-                    value={sessionDisplayMode}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSessionDisplayMode(val);
-                      (window as any).electronAPI.setSessionDisplayMode(val);
-                      if (saveCallback) saveCallback('sessionDisplayMode', val);
-                    }}
-                    style={selectStyle}
-                  >
-                    <option value="first">First User Prompt</option>
-                    <option value="last">Last User Prompt</option>
-                    <option value="both">First + Last</option>
-                  </select>
-                </div>
-              </>
-            )}
-
-            {/* IDE Preference */}
             <div style={rowStyle}>
-              <span style={labelStyle}>IDE</span>
+              <span style={labelStyle}>Default Tab</span>
               <select
-                value={idePreference}
+                value={defaultSwitcherMode}
                 onChange={(e) => {
-                  const ide = e.target.value;
-                  setIdePreference(ide);
-                  (window as any).electronAPI.notifyIDEPreferenceChanged(ide);
+                  const mode = e.target.value;
+                  setDefaultSwitcherMode(mode);
+                  (window as any).electronAPI.setDefaultSwitcherMode(mode);
                 }}
                 style={selectStyle}
               >
-                <option value="VSCode">VS Code</option>
-                <option value="Cursor">Cursor</option>
+                <option value="projects">Projects</option>
+                <option value="sessions">Sessions</option>
               </select>
             </div>
-
-            {/* Left-Click Behavior */}
             <div style={rowStyle}>
               <span style={labelStyle}>Left-Click</span>
               <select
@@ -276,8 +155,6 @@ const PopupDefaultExample = ({
                 <option value="pure_chat">AI Smart Chat</option>
               </select>
             </div>
-
-            {/* Launch at Login */}
             <div style={rowStyle}>
               <span style={labelStyle}>Launch at Login</span>
               <label
@@ -322,6 +199,102 @@ const PopupDefaultExample = ({
               </label>
             </div>
           </div>
+
+          {/* Projects settings (only in Projects tab) */}
+          {switcherMode === 'projects' && (
+            <div style={{ padding: '4px 0', borderBottom: '1px solid #333' }}>
+              <div style={{ ...rowStyle, padding: '4px 16px' }}>
+                <span style={{ ...labelStyle, fontSize: '11px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Projects</span>
+              </div>
+              <div style={rowStyle}>
+                <span style={labelStyle}>IDE</span>
+                <select
+                  value={idePreference}
+                  onChange={(e) => {
+                    const ide = e.target.value;
+                    setIdePreference(ide);
+                    (window as any).electronAPI.notifyIDEPreferenceChanged(ide);
+                  }}
+                  style={selectStyle}
+                >
+                  <option value="VSCode">VS Code</option>
+                  <option value="Cursor">Cursor</option>
+                </select>
+              </div>
+              <div style={{ ...rowStyle, gap: '8px' }}>
+                <span style={labelStyle}>Working Dir</span>
+                <div style={{ color: '#aaa', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>
+                  {workingFolderPath || 'None'}
+                </div>
+                <button
+                  onClick={() => openFolderSelector()}
+                  style={{ backgroundColor: 'transparent', border: '1px solid #555', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px', color: THEME.text.primary, flexShrink: 0 }}
+                  title="Change Folder"
+                >
+                  📁
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Sessions settings (only in Sessions tab) */}
+          {switcherMode === 'sessions' && (
+            <div style={{ padding: '4px 0', borderBottom: '1px solid #333' }}>
+              <div style={{ ...rowStyle, padding: '4px 16px' }}>
+                <span style={{ ...labelStyle, fontSize: '11px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Sessions</span>
+              </div>
+              <div style={rowStyle}>
+                <span style={labelStyle}>Launch Terminal</span>
+                <select
+                  value={sessionTerminalApp}
+                  onChange={(e) => {
+                    const app = e.target.value;
+                    setSessionTerminalApp(app);
+                    (window as any).electronAPI.setSessionTerminalApp(app);
+                  }}
+                  style={selectStyle}
+                >
+                  <option value="iterm2">iTerm2</option>
+                  <option value="ghostty">Ghostty</option>
+                  <option value="cmux">cmux</option>
+                </select>
+              </div>
+              {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'ghostty') && (
+                <div style={rowStyle}>
+                  <span style={labelStyle}>Launch Mode</span>
+                  <select
+                    value={sessionTerminalMode}
+                    onChange={(e) => {
+                      const mode = e.target.value;
+                      setSessionTerminalMode(mode);
+                      (window as any).electronAPI.setSessionTerminalMode(mode);
+                    }}
+                    style={selectStyle}
+                  >
+                    <option value="tab">New Tab</option>
+                    <option value="window">New Window</option>
+                  </select>
+                </div>
+              )}
+              <div style={rowStyle}>
+                <span style={labelStyle}>Session Preview</span>
+                <select
+                  value={sessionDisplayMode}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSessionDisplayMode(val);
+                    (window as any).electronAPI.setSessionDisplayMode(val);
+                    if (saveCallback) saveCallback('sessionDisplayMode', val);
+                  }}
+                  style={selectStyle}
+                >
+                  <option value="first">First User Prompt</option>
+                  <option value="last">Last User Prompt</option>
+                  <option value="both">First + Last</option>
+                </select>
+              </div>
+            </div>
+          )}
 
           {/* Shortcuts section */}
           <div
