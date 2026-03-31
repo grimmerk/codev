@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.52
+
+- Fix: VS Code Claude Code sessions no longer cause false purple dots on terminal sessions
+
 ## 1.0.51
 
 - Fix: cache update status to survive renderer race condition
