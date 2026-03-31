@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.49
+
+- Custom update UI: "Check for Update" + "Install & Restart" in Settings popup
+- No auto-popup dialogs — update check is manual only
+
 ## 1.0.48
 
 - In-app auto-update for non-MAS builds (via update-electron-app)
