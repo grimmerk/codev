@@ -1587,6 +1587,10 @@ ipcMain.on('check-for-update', () => {
       if (isDebug) {
         console.error('Manual update check failed:', e);
       }
+      switcherWindow?.webContents.send('update-status', {
+        status: 'error',
+        error: e instanceof Error ? e.message : 'Update check failed',
+      });
     }
   }
 });

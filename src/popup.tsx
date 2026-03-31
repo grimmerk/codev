@@ -73,6 +73,7 @@ const PopupDefaultExample = ({
   const [shortcutError, setShortcutError] = useState('');
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'downloading' | 'ready' | 'up-to-date' | 'error'>('idle');
   const [updateReleaseName, setUpdateReleaseName] = useState('');
+  const [updateTimer, setUpdateTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
@@ -112,6 +113,8 @@ const PopupDefaultExample = ({
     (window as any).electronAPI.onUpdateStatus((_event: any, data: any) => {
       setUpdateStatus(data.status);
       if (data.releaseName) setUpdateReleaseName(data.releaseName);
+      // Clear timeout when we get a real response
+      setUpdateTimer((prev) => { if (prev) clearTimeout(prev); return null; });
     });
   }, []);
 
@@ -211,6 +214,14 @@ const PopupDefaultExample = ({
     setShortcutError('');
   };
 
+  const triggerUpdateCheck = () => {
+    setUpdateStatus('checking');
+    if (updateTimer) clearTimeout(updateTimer);
+    const timer = setTimeout(() => setUpdateStatus('error'), 30000);
+    setUpdateTimer(timer);
+    (window as any).electronAPI.checkForUpdate();
+  };
+
   const shortcutRows = [
     { key: 'quickSwitcher', label: 'Quick Switcher' },
     { key: 'aiInsight', label: 'AI Insight' },
@@ -241,10 +252,7 @@ const PopupDefaultExample = ({
               <span style={{ fontSize: '11px', color: '#666' }}>v{appVersion}</span>
               {updateStatus === 'idle' && (
                 <span
-                  onClick={() => {
-                    setUpdateStatus('checking');
-                    (window as any).electronAPI.checkForUpdate();
-                  }}
+                  onClick={triggerUpdateCheck}
                   style={{ fontSize: '10px', color: THEME.primary, cursor: 'pointer' }}
                 >
                   Check for Update
@@ -269,10 +277,7 @@ const PopupDefaultExample = ({
               )}
               {updateStatus === 'error' && (
                 <span
-                  onClick={() => {
-                    setUpdateStatus('checking');
-                    (window as any).electronAPI.checkForUpdate();
-                  }}
+                  onClick={triggerUpdateCheck}
                   style={{ fontSize: '10px', color: '#e05252', cursor: 'pointer' }}
                 >
                   Retry
