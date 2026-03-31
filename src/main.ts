@@ -54,6 +54,7 @@ if (require('electron-squirrel-startup')) {
 
 let tray: TrayGenerator = null;
 let switcherWindow: BrowserWindow = null;
+let lastUpdateStatus: Record<string, string> | null = null;
 let aiAssistantWindow: BrowserWindow = null; // Track the AI Assistant window
 let settingsWindow: BrowserWindow = null; // Track the settings window
 let serverProcess: any;
@@ -974,24 +975,29 @@ const trayToggleEvtHandler = async () => {
         notifyUser: false,
       });
 
+      const sendUpdateStatus = (data: Record<string, string>) => {
+        lastUpdateStatus = data;
+        switcherWindow?.webContents.send('update-status', data);
+      };
+
       // Forward autoUpdater events to renderer for custom UI
       autoUpdater.on('checking-for-update', () => {
-        switcherWindow?.webContents.send('update-status', { status: 'checking' });
+        sendUpdateStatus({ status: 'checking' });
       });
       autoUpdater.on('update-available', () => {
-        switcherWindow?.webContents.send('update-status', { status: 'downloading' });
+        sendUpdateStatus({ status: 'downloading' });
       });
       autoUpdater.on('update-not-available', () => {
-        switcherWindow?.webContents.send('update-status', { status: 'up-to-date' });
+        sendUpdateStatus({ status: 'up-to-date' });
       });
       autoUpdater.on('update-downloaded', (_event: any, releaseNotes: string, releaseName: string) => {
-        switcherWindow?.webContents.send('update-status', { status: 'ready', releaseName });
+        sendUpdateStatus({ status: 'ready', releaseName });
       });
       autoUpdater.on('error', (err: Error) => {
         if (isDebug) {
           console.error('Auto-update error:', err);
         }
-        switcherWindow?.webContents.send('update-status', { status: 'error', error: err.message });
+        sendUpdateStatus({ status: 'error', error: err.message });
       });
     } catch (e) {
       if (isDebug) {
@@ -1597,6 +1603,10 @@ ipcMain.on('check-for-update', () => {
 
 ipcMain.on('install-update', () => {
   autoUpdater.quitAndInstall();
+});
+
+ipcMain.handle('get-update-status', () => {
+  return lastUpdateStatus;
 });
 
 // Login item settings are now controlled by the user via Settings UI toggle
