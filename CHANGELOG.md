@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.51
+
+- Fix: cache update status to survive renderer race condition
+- "Latest" now clickable to re-check for updates
+
 ## 1.0.50
 
 - Green dot badge on Settings button when update is ready to install
