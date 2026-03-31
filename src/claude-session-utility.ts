@@ -576,7 +576,11 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
           const pid = data.pid as number;
           const sessionId = data.sessionId as string;
           const cwd = data.cwd as string;
+          const entrypoint = data.entrypoint as string;
           if (!pid || !sessionId) continue;
+
+          // Skip non-terminal sessions (VS Code, Claude Desktop) — can't switch to them
+          if (entrypoint && entrypoint !== 'cli') continue;
 
           // Verify process is still alive
           try { process.kill(pid, 0); } catch { continue; }
