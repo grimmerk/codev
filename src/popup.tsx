@@ -1,7 +1,6 @@
 /** Enhanced popup menu for working folder selection and app settings */
 import Button from '@atlaskit/button';
 import Popup from '@atlaskit/popup';
-import { css } from '@emotion/react';
 import { useEffect, useState } from 'react';
 import { closeAppClick, openFolderSelector } from './switcher-ui';
 
@@ -19,59 +18,27 @@ const THEME = {
   },
 };
 
-const contentStyles = css({
-  padding: 15,
-  width: 600,
-  backgroundColor: '#252525',
-  borderRadius: '6px',
-  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-  border: '1px solid #3a3a3a',
-});
+const selectStyle: React.CSSProperties = {
+  backgroundColor: '#333',
+  color: THEME.text.primary,
+  border: '1px solid #555',
+  borderRadius: '4px',
+  padding: '4px 8px',
+  fontSize: '13px',
+  cursor: 'pointer',
+  outline: 'none',
+};
 
-// Custom button styles
-const buttonStyles = {
-  default: {
-    backgroundColor: THEME.primary,
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '8px 16px',
-    fontSize: '14px',
-    cursor: 'pointer',
-    transition: 'background-color 0.2s',
-    fontWeight: 500,
-    '&:hover': {
-      backgroundColor: '#0097a7',
-    },
-  },
-  warning: {
-    backgroundColor: THEME.button.warning,
-    color: 'white',
-    border: 'none',
-    borderRadius: '4px',
-    padding: '8px 16px',
-    fontSize: '14px',
-    cursor: 'pointer',
-    transition: 'background-color 0.2s',
-    fontWeight: 500,
-    '&:hover': {
-      backgroundColor: '#c63737',
-    },
-  },
-  menu: {
-    backgroundColor: 'transparent',
-    color: THEME.text.primary,
-    border: '1px solid #444',
-    borderRadius: '4px',
-    padding: '6px 12px',
-    fontSize: '14px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    '&:hover': {
-      borderColor: THEME.primary,
-      color: THEME.primary,
-    },
-  },
+const rowStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  padding: '6px 16px',
+};
+
+const labelStyle: React.CSSProperties = {
+  fontSize: '14px',
+  color: THEME.text.primary,
 };
 
 const PopupDefaultExample = ({
@@ -92,6 +59,9 @@ const PopupDefaultExample = ({
   const [sessionTerminalMode, setSessionTerminalMode] = useState('tab');
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
   const [defaultSwitcherMode, setDefaultSwitcherMode] = useState('projects');
+  const [idePreference, setIdePreference] = useState('VSCode');
+  const [leftClickBehavior, setLeftClickBehavior] =
+    useState('switcher_window');
 
   useEffect(() => {
     (window as any).electronAPI.getAppVersion().then((version: string) => {
@@ -109,6 +79,14 @@ const PopupDefaultExample = ({
     (window as any).electronAPI.getDefaultSwitcherMode().then((mode: string) => {
       setDefaultSwitcherMode(mode || 'projects');
     });
+    (window as any).electronAPI.getIDEPreference().then((ide: string) => {
+      setIdePreference(ide || 'VSCode');
+    });
+    (window as any).electronAPI
+      .getLeftClickBehavior()
+      .then((behavior: string) => {
+        setLeftClickBehavior(behavior || 'switcher_window');
+      });
   }, []);
 
   useEffect(() => {
@@ -129,383 +107,308 @@ const PopupDefaultExample = ({
       isOpen={isOpen}
       onClose={() => setIsOpen(false)}
       placement="bottom-end"
-      content={(props) => (
+      content={() => (
         <div
           data-settings-panel
           style={{
-            width: 500,
+            width: 420,
             backgroundColor: '#252525',
             borderRadius: '6px',
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
             border: '1px solid #3a3a3a',
-            overflow: 'hidden', // Ensure no content overflows
+            overflow: 'hidden',
           }}
         >
-          {/* Header */}
+          {/* Working Directory - single row */}
           <div
             style={{
-              fontSize: '20px',
-              fontWeight: 'bold',
-              color: '#ffffff',
-              textAlign: 'center',
-              padding: '15px 0',
+              display: 'flex',
+              alignItems: 'center',
+              padding: '10px 16px',
               backgroundColor: '#1e1e1e',
               borderBottom: '1px solid #333',
+              gap: '8px',
             }}
           >
-            Settings
+            <span style={{ fontSize: '16px', flexShrink: 0 }}>📂</span>
+            <div
+              style={{
+                color: '#d0d0d0',
+                fontSize: '13px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                flex: 1,
+              }}
+            >
+              {workingFolderPath || 'No working folder selected'}
+            </div>
+            <button
+              onClick={() => openFolderSelector()}
+              style={{
+                backgroundColor: 'transparent',
+                border: '1px solid #555',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                lineHeight: '1',
+                flexShrink: 0,
+                color: THEME.text.primary,
+              }}
+              title="Change Folder"
+            >
+              📁
+            </button>
           </div>
 
-          {/* Working Directory Section */}
+          {/* Settings rows */}
+          <div style={{ padding: '8px 0' }}>
+            {/* Default Tab */}
+            {switcherMode === 'sessions' && (
+              <>
+                <div style={rowStyle}>
+                  <span style={labelStyle}>Default Tab</span>
+                  <select
+                    value={defaultSwitcherMode}
+                    onChange={(e) => {
+                      const mode = e.target.value;
+                      setDefaultSwitcherMode(mode);
+                      (window as any).electronAPI.setDefaultSwitcherMode(mode);
+                    }}
+                    style={selectStyle}
+                  >
+                    <option value="projects">Projects</option>
+                    <option value="sessions">Sessions</option>
+                  </select>
+                </div>
+
+                {/* Launch Terminal */}
+                <div style={rowStyle}>
+                  <span style={labelStyle}>Launch Terminal</span>
+                  <select
+                    value={sessionTerminalApp}
+                    onChange={(e) => {
+                      const app = e.target.value;
+                      setSessionTerminalApp(app);
+                      (window as any).electronAPI.setSessionTerminalApp(app);
+                    }}
+                    style={selectStyle}
+                  >
+                    <option value="iterm2">iTerm2</option>
+                    <option value="ghostty">Ghostty</option>
+                    <option value="cmux">cmux</option>
+                  </select>
+                </div>
+
+                {/* Launch Mode (for iTerm2 and Ghostty) */}
+                {(sessionTerminalApp === 'iterm2' ||
+                  sessionTerminalApp === 'ghostty') && (
+                  <div style={rowStyle}>
+                    <span style={labelStyle}>Launch Mode</span>
+                    <select
+                      value={sessionTerminalMode}
+                      onChange={(e) => {
+                        const mode = e.target.value;
+                        setSessionTerminalMode(mode);
+                        (window as any).electronAPI.setSessionTerminalMode(mode);
+                      }}
+                      style={selectStyle}
+                    >
+                      <option value="tab">New Tab</option>
+                      <option value="window">New Window</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Session Preview */}
+                <div style={rowStyle}>
+                  <span style={labelStyle}>Session Preview</span>
+                  <select
+                    value={sessionDisplayMode}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSessionDisplayMode(val);
+                      (window as any).electronAPI.setSessionDisplayMode(val);
+                      if (saveCallback) saveCallback('sessionDisplayMode', val);
+                    }}
+                    style={selectStyle}
+                  >
+                    <option value="first">First User Prompt</option>
+                    <option value="last">Last User Prompt</option>
+                    <option value="both">First + Last</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            {/* IDE Preference */}
+            <div style={rowStyle}>
+              <span style={labelStyle}>IDE</span>
+              <select
+                value={idePreference}
+                onChange={(e) => {
+                  const ide = e.target.value;
+                  setIdePreference(ide);
+                  (window as any).electronAPI.notifyIDEPreferenceChanged(ide);
+                }}
+                style={selectStyle}
+              >
+                <option value="VSCode">VS Code</option>
+                <option value="Cursor">Cursor</option>
+              </select>
+            </div>
+
+            {/* Left-Click Behavior */}
+            <div style={rowStyle}>
+              <span style={labelStyle}>Left-Click</span>
+              <select
+                value={leftClickBehavior}
+                onChange={(e) => {
+                  const behavior = e.target.value;
+                  setLeftClickBehavior(behavior);
+                  (window as any).electronAPI.setLeftClickBehavior(behavior);
+                }}
+                style={selectStyle}
+              >
+                <option value="switcher_window">Quick Switcher</option>
+                <option value="ai_assistant">AI Insight Chat</option>
+                <option value="pure_chat">AI Smart Chat</option>
+              </select>
+            </div>
+
+            {/* Launch at Login */}
+            <div style={rowStyle}>
+              <span style={labelStyle}>Launch at Login</span>
+              <label
+                style={{
+                  position: 'relative',
+                  display: 'inline-block',
+                  width: '40px',
+                  height: '22px',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={launchAtLogin}
+                  onChange={(e) => handleLaunchAtLoginChange(e.target.checked)}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: launchAtLogin ? THEME.primary : '#555',
+                    borderRadius: '11px',
+                    transition: 'background-color 0.2s',
+                  }}
+                />
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left: launchAtLogin ? '20px' : '2px',
+                    width: '18px',
+                    height: '18px',
+                    backgroundColor: '#fff',
+                    borderRadius: '50%',
+                    transition: 'left 0.2s',
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* Shortcuts section */}
           <div
             style={{
-              padding: '20px',
+              borderTop: '1px solid #333',
+              padding: '10px 16px',
             }}
           >
             <div
               style={{
-                fontSize: '18px',
-                fontWeight: 'bold',
-                color: '#ffffff',
-                marginBottom: '15px',
+                fontSize: '13px',
+                fontWeight: 600,
+                color: THEME.text.secondary,
+                marginBottom: '6px',
               }}
             >
-              Working Directory
+              Shortcuts
             </div>
-
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                backgroundColor: '#1e1e1e',
-                padding: '12px 15px',
-                borderRadius: '4px',
-                border: '1px solid #333',
-                marginBottom: '20px',
-              }}
-            >
+            {[
+              { keys: '\u2303+\u2318+R', label: 'Quick Switcher' },
+              { keys: '\u2303+\u2318+E', label: 'AI Insight' },
+              { keys: '\u2303+\u2318+C', label: 'AI Chat' },
+            ].map((shortcut) => (
               <div
+                key={shortcut.keys}
                 style={{
-                  marginRight: '10px',
-                  fontSize: '18px',
-                  color: THEME.text.folder,
-                }}
-              >
-                📂
-              </div>
-              <div
-                style={{
-                  color: '#d0d0d0',
-                  fontSize: '15px',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  flex: 1,
-                }}
-              >
-                {workingFolderPath || 'No working folder selected'}
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'center',
-              }}
-            >
-              <Button
-                appearance="primary"
-                onClick={() => {
-                  openFolderSelector();
-                }}
-                style={{
-                  backgroundColor: THEME.primary,
-                  color: 'white',
-                  fontSize: '16px',
-                  padding: '10px 20px',
-                  minWidth: '180px',
-                  borderRadius: '4px',
-                  border: 'none',
                   display: 'flex',
+                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  lineHeight: '1',
+                  padding: '3px 0',
                 }}
               >
-                Change Folder
-              </Button>
-            </div>
+                <span
+                  style={{
+                    fontSize: '12px',
+                    color: THEME.text.secondary,
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  {shortcut.keys}
+                </span>
+                <span
+                  style={{
+                    fontSize: '12px',
+                    color: THEME.text.secondary,
+                  }}
+                >
+                  {shortcut.label}
+                </span>
+              </div>
+            ))}
           </div>
 
-          {/* Launch at Login Section */}
-          <div
-            style={{
-              padding: '0 20px 20px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '15px',
-                color: THEME.text.primary,
-              }}
-            >
-              Launch at Login
-            </div>
-            <label
-              style={{
-                position: 'relative',
-                display: 'inline-block',
-                width: '44px',
-                height: '24px',
-                cursor: 'pointer',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={launchAtLogin}
-                onChange={(e) => handleLaunchAtLoginChange(e.target.checked)}
-                style={{ opacity: 0, width: 0, height: 0 }}
-              />
-              <span
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: launchAtLogin ? THEME.primary : '#555',
-                  borderRadius: '12px',
-                  transition: 'background-color 0.2s',
-                }}
-              />
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '2px',
-                  left: launchAtLogin ? '22px' : '2px',
-                  width: '20px',
-                  height: '20px',
-                  backgroundColor: '#fff',
-                  borderRadius: '50%',
-                  transition: 'left 0.2s',
-                }}
-              />
-            </label>
-          </div>
-
-          {switcherMode === 'sessions' && (<>
-          {/* Default Tab */}
-          <div
-            style={{
-              padding: '0 20px 20px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '15px',
-                color: THEME.text.primary,
-              }}
-            >
-              Default Tab
-            </div>
-            <select
-              value={defaultSwitcherMode}
-              onChange={(e) => {
-                const mode = e.target.value;
-                setDefaultSwitcherMode(mode);
-                (window as any).electronAPI.setDefaultSwitcherMode(mode);
-              }}
-              style={{
-                backgroundColor: '#333',
-                color: THEME.text.primary,
-                border: '1px solid #555',
-                borderRadius: '4px',
-                padding: '4px 8px',
-                fontSize: '13px',
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              <option value="projects">Projects</option>
-              <option value="sessions">Sessions</option>
-            </select>
-          </div>
-
-          {/* Session Terminal App */}
-          <div
-            style={{
-              padding: '0 20px 20px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '15px',
-                color: THEME.text.primary,
-              }}
-            >
-              Launch Terminal
-            </div>
-            <select
-              value={sessionTerminalApp}
-              onChange={(e) => {
-                const app = e.target.value;
-                setSessionTerminalApp(app);
-                (window as any).electronAPI.setSessionTerminalApp(app);
-              }}
-              style={{
-                backgroundColor: '#333',
-                color: THEME.text.primary,
-                border: '1px solid #555',
-                borderRadius: '4px',
-                padding: '4px 8px',
-                fontSize: '13px',
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              <option value="iterm2">iTerm2</option>
-              <option value="ghostty">Ghostty</option>
-              <option value="cmux">cmux</option>
-            </select>
-          </div>
-
-          {/* Session Terminal Mode (for iTerm2 and Ghostty) */}
-          {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'ghostty') && (
-          <div
-            style={{
-              padding: '0 20px 20px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '15px',
-                color: THEME.text.primary,
-              }}
-            >
-              Launch Mode
-            </div>
-            <select
-              value={sessionTerminalMode}
-              onChange={(e) => {
-                const mode = e.target.value;
-                setSessionTerminalMode(mode);
-                (window as any).electronAPI.setSessionTerminalMode(mode);
-              }}
-              style={{
-                backgroundColor: '#333',
-                color: THEME.text.primary,
-                border: '1px solid #555',
-                borderRadius: '4px',
-                padding: '4px 8px',
-                fontSize: '13px',
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              <option value="tab">New Tab</option>
-              <option value="window">New Window</option>
-            </select>
-          </div>
-          )}
-
-          {/* Session Display Mode */}
-          <div
-            style={{
-              padding: '0 20px 20px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <div
-              style={{
-                fontSize: '15px',
-                color: THEME.text.primary,
-              }}
-            >
-              Session Preview
-            </div>
-            <select
-              value={sessionDisplayMode}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSessionDisplayMode(val);
-                (window as any).electronAPI.setSessionDisplayMode(val);
-                if (saveCallback) saveCallback('sessionDisplayMode', val);
-              }}
-              style={{
-                backgroundColor: '#333',
-                color: THEME.text.primary,
-                border: '1px solid #555',
-                borderRadius: '4px',
-                padding: '4px 8px',
-                fontSize: '13px',
-                cursor: 'pointer',
-                outline: 'none',
-              }}
-            >
-              <option value="first">First User Prompt</option>
-              <option value="last">Last User Prompt</option>
-              <option value="both">First + Last</option>
-            </select>
-          </div>
-
-          </>)}
-
-          {/* App Info and Quit Section */}
+          {/* Version + Quit - single row */}
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
               backgroundColor: '#1e1e1e',
-              padding: '15px 20px',
+              padding: '10px 16px',
               borderTop: '1px solid #333',
             }}
           >
-            <div
+            <span
               style={{
-                fontSize: '15px',
-                fontWeight: '500',
-                color: '#888',
+                fontSize: '13px',
+                color: '#666',
               }}
             >
-              CodeV v{appVersion}
-            </div>
-
-            <Button
-              appearance="warning"
-              onClick={() => {
-                closeAppClick();
-              }}
+              v{appVersion}
+            </span>
+            <button
+              onClick={() => closeAppClick()}
               style={{
-                backgroundColor: '#d9534f',
+                backgroundColor: THEME.button.warning,
                 color: 'white',
-                fontSize: '15px',
-                fontWeight: 'bold',
-                padding: '8px 20px',
-                borderRadius: '4px',
                 border: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                lineHeight: '1',
+                borderRadius: '4px',
+                padding: '5px 14px',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
               }}
             >
-              {'[> Quit CodeV'}
-            </Button>
+              Quit CodeV
+            </button>
           </div>
         </div>
       )}

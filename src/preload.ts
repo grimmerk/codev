@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('ide-data-folder-selected', callback),
   checkIDEDataAccess: (ideMode: string) => ipcRenderer.invoke('check-ide-data-access', ideMode),
   notifyIDEPreferenceChanged: (preferredIDE: string) => ipcRenderer.send('ide-preference-changed', preferredIDE),
+  getIDEPreference: () => ipcRenderer.invoke('get-ide-preference'),
+  getLeftClickBehavior: () => ipcRenderer.invoke('get-left-click-behavior'),
+  setLeftClickBehavior: (behavior: string) => ipcRenderer.send('set-left-click-behavior', behavior),
 
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getSessionTerminalApp: () => ipcRenderer.invoke('get-session-terminal-app'),

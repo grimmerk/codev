@@ -647,10 +647,44 @@ ipcMain.on('open-folder-selector', async (event) => {
   }
 });
 
-ipcMain.on('ide-preference-changed', (_event, preferredIDE: string) => {
+ipcMain.on('ide-preference-changed', async (_event, preferredIDE: string) => {
   userSettings.preferredIDE = preferredIDE as IDEMode;
   updateCurrentIDEMode(preferredIDE);
   console.log('IDE preference updated to:', preferredIDE);
+  try {
+    await fetch('http://localhost:55688/ai-assistant-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferredIDE }),
+    });
+  } catch (error) {
+    if (isDebug) {
+      console.error('Failed to save IDE preference:', error);
+    }
+  }
+});
+
+ipcMain.handle('get-ide-preference', () => {
+  return userSettings.preferredIDE;
+});
+
+ipcMain.handle('get-left-click-behavior', () => {
+  return userSettings.leftClickBehavior;
+});
+
+ipcMain.on('set-left-click-behavior', async (_event, behavior: string) => {
+  userSettings.leftClickBehavior = behavior;
+  try {
+    await fetch('http://localhost:55688/ai-assistant-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leftClickBehavior: behavior }),
+    });
+  } catch (error) {
+    if (isDebug) {
+      console.error('Failed to save left-click behavior:', error);
+    }
+  }
 });
 
 ipcMain.handle('check-ide-data-access', async (_event, ideMode: string) => {
