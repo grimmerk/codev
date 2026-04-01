@@ -529,11 +529,56 @@ end tell`);
     })());
   }
 
+  // Terminal.app: similar to iTerm2 but window → tab (no session layer)
+  if (byTerminal['terminal']?.length) {
+    crossRefTasks.push((async () => {
+      const termCheck = await execPromise('pgrep -x Terminal 2>/dev/null');
+      if (!termCheck.trim()) return;
+      const tmpScript = '/tmp/codev-terminal-detect.scpt';
+      fs.writeFileSync(tmpScript, `tell application "Terminal"
+  set results to ""
+  repeat with w in windows
+    repeat with t in tabs of w
+      set results to results & (tty of t) & "|||" & (custom title of t) & linefeed
+    end repeat
+  end repeat
+  return results
+end tell`);
+      const termOutput = await execPromise(`osascript ${tmpScript} 2>/dev/null`);
+      try { fs.unlinkSync(tmpScript); } catch {}
+      if (!termOutput.trim()) return;
+
+      const termTabs: { tty: string; title: string }[] = [];
+      for (const line of termOutput.split('\n')) {
+        const parts = line.split('|||');
+        if (parts.length === 2 && parts[0].trim()) {
+          termTabs.push({ tty: parts[0].trim(), title: parts[1].trim() });
+        }
+      }
+
+      for (const item of byTerminal['terminal']) {
+        const ttyOutput = (await execPromise(`ps -o tty= -p ${item.pid} 2>/dev/null`)).trim();
+        if (!ttyOutput) continue;
+        const termTab = termTabs.find(s => s.tty.endsWith(ttyOutput));
+        if (!termTab) continue;
+
+        const sessionTitles = await getTitlesForCwd(item.cwd);
+        const tabName = termTab.title;
+        for (const [sessionId, title] of sessionTitles) {
+          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
+            activeMap.set(sessionId, item.pid);
+            break;
+          }
+        }
+      }
+    })());
+  }
+
   await Promise.all(crossRefTasks);
 
   // Ghostty + unknown terminals: cwd fallback (no async work, runs after cross-ref)
   for (const [terminal, items] of Object.entries(byTerminal)) {
-    if (terminal === 'iterm2' || terminal === 'cmux') continue;
+    if (terminal === 'iterm2' || terminal === 'cmux' || terminal === 'terminal') continue;
     for (const item of items) {
       const fallback = item.candidates.find(s => !activeMap.has(s.sessionId));
       if (fallback) {
@@ -707,6 +752,9 @@ export const openSession = async (
       break;
     case 'ghostty':
       openSessionInGhostty(sessionId, projectPath, isActive, terminalMode, customTitle);
+      break;
+    case 'terminal':
+      openSessionInTerminalApp(sessionId, projectPath, isActive, activePid, terminalMode, customTitle);
       break;
     case 'iterm2':
     default:
@@ -1015,6 +1063,91 @@ end tell`;
       if (error) {
         console.error('[ghostty] launch error:', error.message);
         // Fallback: clipboard
+        copyResumeCommand(sessionId, projectPath);
+      }
+      try { fs.unlinkSync(tmpScript); } catch {}
+    });
+  }
+};
+
+/**
+ * Open a Claude Code session in macOS Terminal.app.
+ * Similar to iTerm2 but simpler structure: window → tab (no session layer).
+ * TTY matching works via `tty of tab`. Uses `do script` for command execution.
+ */
+export const openSessionInTerminalApp = (
+  sessionId: string,
+  projectPath: string,
+  isActive: boolean,
+  activePid?: number,
+  terminalMode: string = 'tab',
+  customTitle?: string,
+): void => {
+  const { exec } = require('child_process');
+
+  if (isActive && activePid) {
+    // Two-layer matching: title first, then TTY
+    const titleMatch = customTitle
+      ? `
+  -- Layer 1: title matching
+  repeat with w in windows
+    repeat with t in tabs of w
+      if custom title of t contains "${customTitle.replace(/"/g, '\\"')}" then
+        set selected tab of w to t
+        set index of w to 1
+        return "found-by-title"
+      end if
+    end repeat
+  end repeat`
+      : '';
+
+    const tmpScript = '/tmp/codev-terminal-switch.scpt';
+    const switchScript = `tell application "Terminal"
+  activate
+  ${titleMatch}
+  -- Layer 2: TTY matching
+  set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
+  if targetTty is not "" then
+    repeat with w in windows
+      repeat with t in tabs of w
+        if tty of t ends with targetTty then
+          set selected tab of w to t
+          set index of w to 1
+          return "found-by-tty"
+        end if
+      end repeat
+    end repeat
+  end if
+  return "not found"
+end tell`;
+    console.log(`[Terminal.app] switch: pid=${activePid}, customTitle=${customTitle || 'none'}`);
+    fs.writeFileSync(tmpScript, switchScript);
+    exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
+      console.log(`[Terminal.app] switch result: ${(stdout || '').trim()}`, error?.message || '');
+      try { fs.unlinkSync(tmpScript); } catch {}
+    });
+  } else {
+    // Launch new tab or window and run claude --resume
+    const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
+    const escapedCmd = command.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const tmpScript = '/tmp/codev-terminal-launch.scpt';
+    const launchScript = terminalMode === 'window'
+      ? `tell application "Terminal"
+  activate
+  do script "${escapedCmd}"
+end tell`
+      : `tell application "Terminal"
+  activate
+  if (count of windows) > 0 then
+    do script "${escapedCmd}" in front window
+  else
+    do script "${escapedCmd}"
+  end if
+end tell`;
+    fs.writeFileSync(tmpScript, launchScript);
+    exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
+      if (error) {
+        console.error('[Terminal.app] launch error:', error.message);
         copyResumeCommand(sessionId, projectPath);
       }
       try { fs.unlinkSync(tmpScript); } catch {}

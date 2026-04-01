@@ -232,6 +232,7 @@ Detection Flow:
 │ 3. Cross-ref (only for same-cwd ambiguity)                        │
 │    Runs per-terminal in parallel (Promise.all):                   │
 │    ├─ iTerm2: AppleScript TTY+name → match custom titles (~130ms) │
+│    ├─ Terminal.app: AppleScript TTY+title → match custom titles   │
 │    ├─ cmux: tree --all tty= → match custom titles (~70ms)         │
 │    └─ Ghostty/other: cwd fallback (no TTY upstream)               │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -289,6 +290,21 @@ Detection Flow:
 - `ps -o tty=` output has trailing whitespace → pipe through `tr -d '[:space:]'`
 - AppleScript inline `-e '...'` fails with embedded double quotes → write to temp `.scpt` file, execute with `osascript <file>`
 
+### Terminal.app integration
+
+| Action | Method |
+|--------|--------|
+| **Detect** | Process tree walk → `commLower === 'terminal'` or `commLower.includes('terminal.app')` |
+| **Switch** | Two-layer AppleScript matching: (1) title match → (2) TTY fallback |
+| **Launch (tab)** | AppleScript: `do script "cmd" in front window` |
+| **Launch (window)** | AppleScript: `do script "cmd"` (standalone) |
+
+**Key differences from iTerm2:**
+- Structure is `window → tab` (no session layer). Properties: `tty of tab`, `custom title of tab`.
+- Uses `do script` (not `write text`) for command execution.
+- `do script in front window` creates a new tab; `do script` without target creates a new window.
+- Cross-reference uses same TTY + title pattern as iTerm2.
+
 ## UI Design
 
 ### Mode switching
@@ -312,7 +328,7 @@ Header with toggle buttons + `Tab` key:
 - Project name: bold white
 - Custom title: green (`#7ec87e`), in quotes
 - Branch name: grey italic (`#888`), in brackets, `[HEAD]` filtered out
-- Terminal badge: small uppercase bordered text (ITERM2, CMUX, GHOSTTY)
+- Terminal badge: small uppercase bordered text (ITERM2, TERMINAL, CMUX, GHOSTTY)
 - First prompt: grey (`#999`)
 - Last user prompt: amber (`#c89030`)
 - Last assistant response: blue (`#64B5F6`), only for active sessions

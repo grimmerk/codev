@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.55
+
+- Feat: macOS Terminal.app support — launch, switch (title + TTY matching), cross-ref disambiguation
+
 ## 1.0.54
 
 - Fix: cmux launch now waits for cmux to be ready before creating workspace (#75)
