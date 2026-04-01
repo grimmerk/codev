@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.54
+
+- Fix: cmux launch now waits for cmux to be ready before creating workspace (#75)
+- Fix: revert accidental DevTools enable in switcher window
+
 ## 1.0.53
 
 - Upgrade Electron 29 → 41 (Node 24, Chromium 146)

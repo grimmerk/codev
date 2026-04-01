@@ -1163,26 +1163,57 @@ export const openSessionInCmux = (
     })();
   } else {
     // Launch new workspace with command
-    const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "claude --resume ${sessionId}"`;
-    console.log('[cmux] launch cmd:', cmuxCmd);
-    exec(cmuxCmd,
-      { encoding: 'utf-8', timeout: 5000 },
-      (error: any, stdout: string, stderr: string) => {
-        console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
-        if (error) {
-          console.error('cmux new-workspace failed, falling back to clipboard:', error.message);
-          copyResumeCommand(sessionId, projectPath);
-          exec('osascript -e \'tell application "cmux" to activate\'');
-        } else {
-          // Select the newly created workspace and activate cmux
-          const wsMatch = stdout.match(/workspace:\d+/);
-          if (wsMatch) {
-            exec(`${CMUX_CLI} select-workspace --workspace ${wsMatch[0]}`);
+    // cmux's new-workspace doesn't auto-launch cmux (unlike open-cwd),
+    // so we need to check if cmux is running and launch it first if needed.
+    const launchInCmux = () => {
+      const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "claude --resume ${sessionId}"`;
+      console.log('[cmux] launch cmd:', cmuxCmd);
+      exec(cmuxCmd,
+        { encoding: 'utf-8', timeout: 5000 },
+        (error: any, stdout: string, stderr: string) => {
+          console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
+          if (error) {
+            console.error('cmux new-workspace failed, falling back to clipboard:', error.message);
+            copyResumeCommand(sessionId, projectPath);
+            exec('osascript -e \'tell application "cmux" to activate\'');
+          } else {
+            const wsMatch = stdout.match(/workspace:\d+/);
+            if (wsMatch) {
+              exec(`${CMUX_CLI} select-workspace --workspace ${wsMatch[0]}`);
+            }
+            exec('osascript -e \'tell application "cmux" to activate\'');
           }
-          exec('osascript -e \'tell application "cmux" to activate\'');
         }
+      );
+    };
+
+    // Check if cmux is running via pgrep
+    exec('pgrep -x cmux', (error: any) => {
+      if (error) {
+        // cmux not running — launch it and wait until ready
+        console.log('[cmux] not running, launching...');
+        exec('open -a cmux');
+        let attempts = 0;
+        const waitForCmux = () => {
+          attempts++;
+          exec(`${CMUX_CLI} tree 2>/dev/null`, { timeout: 2000 }, (err: any) => {
+            if (!err) {
+              console.log(`[cmux] ready after ${attempts * 500}ms`);
+              launchInCmux();
+            } else if (attempts < 10) {
+              setTimeout(waitForCmux, 500);
+            } else {
+              console.error('[cmux] timed out waiting for cmux, falling back to clipboard');
+              copyResumeCommand(sessionId, projectPath);
+              exec('osascript -e \'tell application "cmux" to activate\'');
+            }
+          });
+        };
+        setTimeout(waitForCmux, 500);
+      } else {
+        launchInCmux();
       }
-    );
+    });
   }
 };
 
