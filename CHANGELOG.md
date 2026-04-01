@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.53
+
+- Upgrade Electron 29 → 41 (Node 24, Chromium 146)
+- Upgrade electron-forge 7.2 → 7.11, TypeScript 5.3 → 5.7
+- Upgrade better-sqlite3 v11 → v12, react-select, axios, prettier, etc.
+- Add `IElectronAPI` type definition — removes ~100 `as any` casts
+- Design doc: add VS Code session data gap analysis
+
 ## 1.0.52
 
 - Fix: VS Code Claude Code sessions no longer cause false purple dots on terminal sessions
