@@ -404,9 +404,9 @@ const createSwitcherWindow = (): BrowserWindow => {
   // and load the index.html of the app.
   window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY);
 
-  // if (true){ //isDebug){//!app.isPackaged) {
-  // window.webContents.openDevTools();
-  // }
+  if (isDebug) {
+    window.webContents.openDevTools({ mode: 'detach' });
+  }
 
   if (tray) {
     // TODO: change to use some Tray method & not set tray here

@@ -6,6 +6,7 @@ import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 
 import { mainConfig } from './webpack.main.config';
+import { preloadConfig } from './webpack.preload.config';
 import { rendererConfig } from './webpack.renderer.config';
 
 import * as fs from 'fs';
@@ -65,6 +66,7 @@ const config: ForgeConfig = {
             name: 'switcher_window',
             preload: {
               js: './src/preload.ts',
+              config: preloadConfig,
             },
           },
           {
@@ -73,6 +75,7 @@ const config: ForgeConfig = {
             name: 'ai_assistant_window',
             preload: {
               js: './src/preload.ts',
+              config: preloadConfig,
             },
           },
           {
@@ -81,6 +84,7 @@ const config: ForgeConfig = {
             name: 'settings_window',
             preload: {
               js: './src/preload.ts',
+              config: preloadConfig,
             },
           },
         ],
