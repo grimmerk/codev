@@ -97,7 +97,7 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
   useEffect(() => {
     fetchSettings();
 
-    (window as any).electronAPI.onIDEDataFolderSelected(
+    window.electronAPI.onIDEDataFolderSelected(
       (_event: any, folderPath: string) => {
         if (folderPath) {
           setIdeDataAccessGranted(true);
@@ -111,7 +111,7 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
   }, [preferredIDE]);
 
   const checkExistingAccess = async (ide: string) => {
-    const hasAccess = await (window as any).electronAPI.checkIDEDataAccess(ide);
+    const hasAccess = await window.electronAPI.checkIDEDataAccess(ide);
     setIdeDataAccessGranted(hasAccess);
   };
 
@@ -142,7 +142,7 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
   };
 
   const handleGrantAccess = () => {
-    (window as any).electronAPI.openIDEDataSelector(preferredIDE);
+    window.electronAPI.openIDEDataSelector(preferredIDE);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -163,7 +163,7 @@ const IDESettingsForm: React.FC<IDESettingsFormProps> = ({ onClose }) => {
 
       if (response.ok) {
         // Notify main process to apply IDE preference immediately
-        (window as any).electronAPI.notifyIDEPreferenceChanged(preferredIDE);
+        window.electronAPI.notifyIDEPreferenceChanged(preferredIDE);
         setStatus({
           message: 'Settings saved successfully!',
           type: 'success',

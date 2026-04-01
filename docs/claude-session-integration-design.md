@@ -538,6 +538,21 @@ TypeScript is sufficient for MVP. `history.jsonl` reading (~40ms) and session li
 
 `session-metadata.db` has richer data but is a stale cache. `history.jsonl` is always up to date. Same approach used by c9watch's history page.
 
+### VS Code Claude Code sessions — data gap
+
+VS Code sessions (`entrypoint: "claude-vscode"`) have a fundamental data gap:
+
+| State | Detectable? | How |
+|---|---|---|
+| **Active** | ✓ | `sessions/<PID>.json` with `entrypoint: "claude-vscode"` |
+| **Closed** | ❌ | Not in `history.jsonl` ([#24579](https://github.com/anthropics/claude-code/issues/24579)), PID file deleted on exit, session JSONL has no entrypoint field |
+
+c9watch has the same limitation — its history list also reads `history.jsonl` and cannot show closed VS Code sessions. c9watch's deep search scans all `projects/*/*.jsonl` files (multi-threaded Rust), but that is a full-text search feature, not a session list. Neither CodeV nor c9watch uses `session-metadata.db`.
+
+To show closed VS Code sessions, one approach is to find sessions present in JSONL files but absent from `history.jsonl` — these are likely VS Code sessions. However, this requires scanning all JSONL files (~170 files, ~771MB total).
+
+Current fix (PR #78): skip non-cli sessions in `detectActiveSessions()` to prevent false purple dots on terminal sessions.
+
 ### grep vs full JSONL parsing for custom titles
 
 `grep '"type":"custom-title"' <file> | tail -1` avoids parsing multi-MB JSON files. Must use precise pattern (not just `"custom-title"`) to avoid false positives from assistant messages. Async parallel `exec` keeps it non-blocking. ~2s for 100 files (I/O bound on 771MB total).

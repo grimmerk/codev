@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
   root.render(<SettingsWindow initialSettingsType={settingsType} />);
 
   // Listen for IPC events to switch between settings types
-  (window as any).electronAPI.onOpenAIAssistantSettings(() => {
+  window.electronAPI.onOpenAIAssistantSettings(() => {
     const root = ReactDOM.createRoot(document.getElementById('settings-root'));
     root.render(
       <SettingsWindow
@@ -80,19 +80,19 @@ document.addEventListener('DOMContentLoaded', () => {
     );
   });
 
-  (window as any).electronAPI.onOpenApiKeySettings(() => {
+  window.electronAPI.onOpenApiKeySettings(() => {
     const root = ReactDOM.createRoot(document.getElementById('settings-root'));
     root.render(<SettingsWindow initialSettingsType={SettingsType.API_KEY} />);
   });
 
-  (window as any).electronAPI.onOpenLeftClickSettings(() => {
+  window.electronAPI.onOpenLeftClickSettings(() => {
     const root = ReactDOM.createRoot(document.getElementById('settings-root'));
     root.render(
       <SettingsWindow initialSettingsType={SettingsType.LEFT_CLICK} />,
     );
   });
   
-  (window as any).electronAPI.onOpenIDESettings(() => {
+  window.electronAPI.onOpenIDESettings(() => {
     const root = ReactDOM.createRoot(document.getElementById('settings-root'));
     root.render(
       <SettingsWindow initialSettingsType={SettingsType.IDE_PREFERENCE} />,

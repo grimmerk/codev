@@ -76,47 +76,47 @@ const PopupDefaultExample = ({
   const [updateTimer, setUpdateTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    (window as any).electronAPI.getAppVersion().then((version: string) => {
+    window.electronAPI.getAppVersion().then((version: string) => {
       setAppVersion(version);
     });
-    (window as any).electronAPI.getSessionTerminalApp().then((app: string) => {
+    window.electronAPI.getSessionTerminalApp().then((app: string) => {
       setSessionTerminalApp(app || 'iterm2');
     });
-    (window as any).electronAPI.getSessionTerminalMode().then((mode: string) => {
+    window.electronAPI.getSessionTerminalMode().then((mode: string) => {
       setSessionTerminalMode(mode || 'tab');
     });
-    (window as any).electronAPI.getSessionDisplayMode().then((mode: string) => {
+    window.electronAPI.getSessionDisplayMode().then((mode: string) => {
       setSessionDisplayMode(mode || 'first');
     });
-    (window as any).electronAPI.getDefaultSwitcherMode().then((mode: string) => {
+    window.electronAPI.getDefaultSwitcherMode().then((mode: string) => {
       setDefaultSwitcherMode(mode || 'projects');
     });
-    (window as any).electronAPI.getIDEPreference().then((ide: string) => {
+    window.electronAPI.getIDEPreference().then((ide: string) => {
       setIdePreference(ide || 'VSCode');
     });
-    (window as any).electronAPI
+    window.electronAPI
       .getLeftClickBehavior()
       .then((behavior: string) => {
         setLeftClickBehavior(behavior || 'switcher_window');
       });
-    (window as any).electronAPI.getIsMAS().then((mas: boolean) => {
+    window.electronAPI.getIsMAS().then((mas: boolean) => {
       setIsMASBuild(mas);
       if (mas) {
-        (window as any).electronAPI.checkIDEDataAccess(idePreference || 'VSCode').then((granted: boolean) => {
+        window.electronAPI.checkIDEDataAccess(idePreference || 'VSCode').then((granted: boolean) => {
           setIdeDataAccessGranted(granted);
         });
       }
     });
-    (window as any).electronAPI.getShortcuts().then((s: typeof shortcuts) => {
+    window.electronAPI.getShortcuts().then((s: typeof shortcuts) => {
       if (s) setShortcuts(s);
     });
-    (window as any).electronAPI.getUpdateStatus().then((data: any) => {
+    window.electronAPI.getUpdateStatus().then((data: any) => {
       if (data) {
         setUpdateStatus(data.status);
         if (data.releaseName) setUpdateReleaseName(data.releaseName);
       }
     });
-    (window as any).electronAPI.onUpdateStatus((_event: any, data: any) => {
+    window.electronAPI.onUpdateStatus((_event: any, data: any) => {
       setUpdateStatus(data.status);
       if (data.releaseName) setUpdateReleaseName(data.releaseName);
       // Clear timeout when we get a real response
@@ -126,7 +126,7 @@ const PopupDefaultExample = ({
 
   useEffect(() => {
     if (isOpen) {
-      (window as any).electronAPI.getLoginItemSettings().then((settings: any) => {
+      window.electronAPI.getLoginItemSettings().then((settings: any) => {
         setLaunchAtLogin(settings.openAtLogin);
       });
     }
@@ -134,7 +134,7 @@ const PopupDefaultExample = ({
 
   const handleLaunchAtLoginChange = (checked: boolean) => {
     setLaunchAtLogin(checked);
-    (window as any).electronAPI.setLoginItemSettings(checked);
+    window.electronAPI.setLoginItemSettings(checked);
   };
 
   const acceleratorToDisplay = (acc: string): string => {
@@ -172,7 +172,7 @@ const PopupDefaultExample = ({
 
     if (e.key === 'Escape') {
       // Resume the paused shortcut
-      (window as any).electronAPI.resumeShortcut(editingShortcut);
+      window.electronAPI.resumeShortcut(editingShortcut);
       setEditingShortcut(null);
       setShortcutError('');
       return;
@@ -197,7 +197,7 @@ const PopupDefaultExample = ({
     parts.push(key);
     const accelerator = parts.join('+');
 
-    const result = await (window as any).electronAPI.setShortcut(editingShortcut, accelerator);
+    const result = await window.electronAPI.setShortcut(editingShortcut, accelerator);
     if (result.success) {
       setShortcuts((prev) => ({ ...prev, [editingShortcut]: accelerator }));
       setEditingShortcut(null);
@@ -208,7 +208,7 @@ const PopupDefaultExample = ({
   };
 
   const handleResetShortcuts = async () => {
-    const defaults = await (window as any).electronAPI.resetShortcuts();
+    const defaults = await window.electronAPI.resetShortcuts();
     if (defaults) {
       setShortcuts({
         quickSwitcher: defaults.quickSwitcher,
@@ -225,7 +225,7 @@ const PopupDefaultExample = ({
     if (updateTimer) clearTimeout(updateTimer);
     const timer = setTimeout(() => setUpdateStatus('error'), 30000);
     setUpdateTimer(timer);
-    (window as any).electronAPI.checkForUpdate();
+    window.electronAPI.checkForUpdate();
   };
 
   const shortcutRows = [
@@ -272,7 +272,7 @@ const PopupDefaultExample = ({
               )}
               {updateStatus === 'ready' && (
                 <span
-                  onClick={() => (window as any).electronAPI.installUpdate()}
+                  onClick={() => window.electronAPI.installUpdate()}
                   style={{ fontSize: '10px', color: '#4CAF50', cursor: 'pointer', fontWeight: 600 }}
                 >
                   {updateReleaseName ? `${updateReleaseName} ready — ` : ''}Install & Restart
@@ -315,7 +315,7 @@ const PopupDefaultExample = ({
                 onChange={(e) => {
                   const mode = e.target.value;
                   setDefaultSwitcherMode(mode);
-                  (window as any).electronAPI.setDefaultSwitcherMode(mode);
+                  window.electronAPI.setDefaultSwitcherMode(mode);
                 }}
                 style={selectStyle}
               >
@@ -330,7 +330,7 @@ const PopupDefaultExample = ({
                 onChange={(e) => {
                   const behavior = e.target.value;
                   setLeftClickBehavior(behavior);
-                  (window as any).electronAPI.setLeftClickBehavior(behavior);
+                  window.electronAPI.setLeftClickBehavior(behavior);
                 }}
                 style={selectStyle}
               >
@@ -397,9 +397,9 @@ const PopupDefaultExample = ({
                   onChange={(e) => {
                     const ide = e.target.value;
                     setIdePreference(ide);
-                    (window as any).electronAPI.notifyIDEPreferenceChanged(ide);
+                    window.electronAPI.notifyIDEPreferenceChanged(ide);
                     if (isMASBuild) {
-                      (window as any).electronAPI.checkIDEDataAccess(ide).then((granted: boolean) => {
+                      window.electronAPI.checkIDEDataAccess(ide).then((granted: boolean) => {
                         setIdeDataAccessGranted(granted);
                       });
                     }
@@ -411,7 +411,7 @@ const PopupDefaultExample = ({
                 </select>
                 {isMASBuild && (
                   <button
-                    onClick={() => (window as any).electronAPI.openIDEDataSelector(idePreference)}
+                    onClick={() => window.electronAPI.openIDEDataSelector(idePreference)}
                     style={{
                       backgroundColor: ideDataAccessGranted ? '#28a745' : THEME.primary,
                       color: 'white',
@@ -456,7 +456,7 @@ const PopupDefaultExample = ({
                   onChange={(e) => {
                     const app = e.target.value;
                     setSessionTerminalApp(app);
-                    (window as any).electronAPI.setSessionTerminalApp(app);
+                    window.electronAPI.setSessionTerminalApp(app);
                   }}
                   style={selectStyle}
                 >
@@ -473,7 +473,7 @@ const PopupDefaultExample = ({
                     onChange={(e) => {
                       const mode = e.target.value;
                       setSessionTerminalMode(mode);
-                      (window as any).electronAPI.setSessionTerminalMode(mode);
+                      window.electronAPI.setSessionTerminalMode(mode);
                     }}
                     style={selectStyle}
                   >
@@ -489,7 +489,7 @@ const PopupDefaultExample = ({
                   onChange={(e) => {
                     const val = e.target.value;
                     setSessionDisplayMode(val);
-                    (window as any).electronAPI.setSessionDisplayMode(val);
+                    window.electronAPI.setSessionDisplayMode(val);
                     if (saveCallback) saveCallback('sessionDisplayMode', val);
                   }}
                   style={selectStyle}
@@ -594,15 +594,15 @@ const PopupDefaultExample = ({
                   onClick={() => {
                     if (editingShortcut === row.key) {
                       // Cancel editing — resume the shortcut
-                      (window as any).electronAPI.resumeShortcut(row.key);
+                      window.electronAPI.resumeShortcut(row.key);
                       setEditingShortcut(null);
                       setShortcutError('');
                     } else {
                       // Start editing — pause the shortcut so it doesn't trigger
                       if (editingShortcut) {
-                        (window as any).electronAPI.resumeShortcut(editingShortcut);
+                        window.electronAPI.resumeShortcut(editingShortcut);
                       }
-                      (window as any).electronAPI.pauseShortcut(row.key);
+                      window.electronAPI.pauseShortcut(row.key);
                       setEditingShortcut(row.key);
                       setShortcutError('');
                     }
