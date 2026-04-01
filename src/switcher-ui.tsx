@@ -44,32 +44,32 @@ function invokeVSCode(path: string, optionPress = false) {
   // press option for VSCode -r --reuse-window
   // Force to open a file or folder in an already opened window.
   const option = `${optionPress ? '-r ' : ''}`;
-  (window as any).electronAPI.invokeVSCode(`${path}`, option);
+  window.electronAPI.invokeVSCode(`${path}`, option);
 }
 
 function hideApp() {
-  (window as any).electronAPI.hideApp();
+  window.electronAPI.hideApp();
 }
 
 function searchWorkingFolder(path: string) {
-  (window as any).electronAPI.searchWorkingFolder(path);
+  window.electronAPI.searchWorkingFolder(path);
 }
 
 export function openFolderSelector() {
-  (window as any).electronAPI.openFolderSelector();
+  window.electronAPI.openFolderSelector();
 }
 
 export function closeAppClick() {
-  (window as any).electronAPI.closeAppClick();
+  window.electronAPI.closeAppClick();
 }
 
 export function fetchVSCodeBasedIDESqlite() {
-  (window as any).electronAPI.fetchVSCodeBasedIDESqlite();
+  window.electronAPI.fetchVSCodeBasedIDESqlite();
 }
 export function deleteVSCodeBasedIDESqliteRecord(path: string) {
   console.log('ui deleteVSCodeBasedIDESqliteRecord:');
 
-  (window as any).electronAPI.deleteVSCodeBasedIDESqliteRecord(path);
+  window.electronAPI.deleteVSCodeBasedIDESqliteRecord(path);
 }
 
 function sleep(ms: number) {
@@ -355,7 +355,7 @@ function SwitcherApp() {
 
   const fetchClaudeSessions = async () => {
     // Step 1: Show sessions immediately, preserve old active states (SWR via ref)
-    const result = await (window as any).electronAPI.getClaudeSessions(100);
+    const result = await window.electronAPI.getClaudeSessions(100);
     const cachedActive = activeStateRef.current;
     const newSessions = (result || []).map((s: any) => {
       if (s.sessionId in cachedActive) {
@@ -367,7 +367,7 @@ function SwitcherApp() {
     setSessions(sessionSearchValue.trim() ? filterSessionsLocally(newSessions, sessionSearchValue) : newSessions);
 
     // Step 2: Detect active sessions in background (slow, spawns processes)
-    (window as any).electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
+    window.electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
       // Save to ref for SWR on next refresh
       activeStateRef.current = activeMap || {};
 
@@ -385,7 +385,7 @@ function SwitcherApp() {
 
         // Step 2b: Load last assistant responses for active sessions only
         if (activeSessions.length > 0) {
-          (window as any).electronAPI.loadLastAssistantResponses(activeSessions).then((responses: Record<string, string>) => {
+          window.electronAPI.loadLastAssistantResponses(activeSessions).then((responses: Record<string, string>) => {
             if (responses && Object.keys(responses).length > 0) {
               setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
             }
@@ -394,7 +394,7 @@ function SwitcherApp() {
 
         // Step 2c: Detect terminal apps for active sessions
         if (Object.keys(activeMap).length > 0) {
-          (window as any).electronAPI.detectTerminalApps(activeMap).then((apps: Record<string, string>) => {
+          window.electronAPI.detectTerminalApps(activeMap).then((apps: Record<string, string>) => {
             if (apps && Object.keys(apps).length > 0) {
               setTerminalApps((prev: Record<string, string>) => ({ ...prev, ...apps }));
             }
@@ -405,7 +405,7 @@ function SwitcherApp() {
 
     // Step 3: Load custom titles + branches in background
     if (result && result.length > 0) {
-      (window as any).electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment: { titles: Record<string, string>; branches: Record<string, string> }) => {
+      window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment: { titles: Record<string, string>; branches: Record<string, string> }) => {
         if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
           setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
         }
@@ -458,14 +458,14 @@ function SwitcherApp() {
       forceFocusOnInput();
     });
 
-    (window as any).electronAPI.onFocusWindow((_event: any) => {
+    window.electronAPI.onFocusWindow((_event: any) => {
       fetchRecentProjectRecord();
       fetchWorkingFolderAndUpdate();
       if (modeRef.current === 'sessions') {
         fetchClaudeSessions();
       }
       // Refresh display mode setting
-      (window as any).electronAPI.getSessionDisplayMode().then((mode: string) => {
+      window.electronAPI.getSessionDisplayMode().then((mode: string) => {
         setSessionDisplayMode(mode || 'first');
       });
       // Ignore mouse hover briefly to prevent selected item jumping to mouse position
@@ -481,17 +481,17 @@ function SwitcherApp() {
       }, 50);
     });
 
-    (window as any).electronAPI.onWorkingFolderIterated(
+    window.electronAPI.onWorkingFolderIterated(
       async (_event: any, paths: string[]) => {
         setWorkingPathInfoArray(paths);
       },
     );
 
-    (window as any).electronAPI.onXWinNotFound((_event: any) => {
+    window.electronAPI.onXWinNotFound((_event: any) => {
       /** currently the popup message is done by electron native UI */
     });
 
-    (window as any).electronAPI.onFolderSelected(
+    window.electronAPI.onFolderSelected(
       async (_event: any, folderPath: string) => {
         if (!folderPath) {
           return;
@@ -505,18 +505,18 @@ function SwitcherApp() {
            * roll back to old path
            * NOTE: show some alert
            */
-          (window as any).electronAPI.popupAlert('failed to save');
+          window.electronAPI.popupAlert('failed to save');
         }
       },
     );
 
-    (window as any).electronAPI.onVSCodeBasedSqliteRead(
+    window.electronAPI.onVSCodeBasedSqliteRead(
       async (_event: any, recentProject: VSWindowModel[]) => {
         setPathInfoArray(recentProject);
         // Load git branches in background (SWR pattern - don't block rendering)
         const paths = recentProject.map((p) => p.path);
         if (paths.length > 0) {
-          (window as any).electronAPI.loadProjectBranches(paths).then((branches: Record<string, string>) => {
+          window.electronAPI.loadProjectBranches(paths).then((branches: Record<string, string>) => {
             if (branches && Object.keys(branches).length > 0) {
               setProjectBranches(branches);
             }
@@ -524,7 +524,7 @@ function SwitcherApp() {
         }
       },
     );
-    (window as any).electronAPI.onVSCodeBasedSqliteRecordDeleted(
+    window.electronAPI.onVSCodeBasedSqliteRecordDeleted(
       async (_event: any) => {
         fetchRecentProjectRecord();
       },
@@ -542,7 +542,7 @@ function SwitcherApp() {
     fetchWorkingFolderAndUpdate();
 
     // Load default switcher mode
-    (window as any).electronAPI.getDefaultSwitcherMode().then((defaultMode: string) => {
+    window.electronAPI.getDefaultSwitcherMode().then((defaultMode: string) => {
       if (defaultMode === 'sessions') {
         modeRef.current = 'sessions';
         setMode('sessions');
@@ -789,7 +789,7 @@ function SwitcherApp() {
                 const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
                 const s = sessions[idx];
                 if (s) {
-                  (window as any).electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
+                  window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
                 }
               }
             }}
@@ -821,7 +821,7 @@ function SwitcherApp() {
                   key={session.sessionId}
                   data-session-index={index}
                   onClick={() => {
-                    (window as any).electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId]);
+                    window.electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId]);
                   }}
                   style={{
                     display: 'flex',

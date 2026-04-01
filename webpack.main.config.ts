@@ -5,6 +5,9 @@ import { rules } from './webpack.rules';
 export const mainConfig: Configuration = {
   // Add this for production builds
   mode: process.env.BUILD_TYPE === 'prod' ? 'production' : 'development',
+  watchOptions: {
+    ignored: /node_modules|\.claude/,
+  },
   stats: {
     errorDetails: true,
   },

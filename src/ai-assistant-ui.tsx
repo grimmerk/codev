@@ -484,9 +484,7 @@ const AIAssistantApp: React.FC = () => {
       }
 
       console.log(`Loading latest conversation (isFromCode: ${isFromCode})`);
-      const latestConversation = await (
-        window as any
-      ).electronAPI.getLatestConversation(isFromCode);
+      const latestConversation = await window.electronAPI.getLatestConversation(isFromCode);
 
       if (
         latestConversation &&
@@ -711,8 +709,8 @@ const AIAssistantApp: React.FC = () => {
   const syncConversationWithTitle = async (conversationId: string) => {
     if (
       !conversationId ||
-      !(window as any).electronAPI ||
-      !(window as any).electronAPI.getConversation
+      !window.electronAPI ||
+      !window.electronAPI.getConversation
     ) {
       console.warn(
         `Cannot sync conversation: invalid ID or API not available. ID: ${conversationId}`,
@@ -724,7 +722,7 @@ const AIAssistantApp: React.FC = () => {
       console.log(
         `[SYNC] Fetching details for conversation: ${conversationId}`,
       );
-      const conversation = await (window as any).electronAPI.getConversation(
+      const conversation = await window.electronAPI.getConversation(
         conversationId,
       );
 
@@ -839,10 +837,10 @@ const AIAssistantApp: React.FC = () => {
 
     // Notify main process that insight is complete
     if (
-      (window as any).electronAPI &&
-      (window as any).electronAPI.notifyInsightCompleted
+      window.electronAPI &&
+      window.electronAPI.notifyInsightCompleted
     ) {
-      (window as any).electronAPI.notifyInsightCompleted(true);
+      window.electronAPI.notifyInsightCompleted(true);
     } else {
       // Fallback if API not available
       try {
@@ -982,10 +980,10 @@ const AIAssistantApp: React.FC = () => {
 
       // Notify main process of mode change
       if (
-        (window as any).electronAPI &&
-        (window as any).electronAPI.notifyUIMode
+        window.electronAPI &&
+        window.electronAPI.notifyUIMode
       ) {
-        (window as any).electronAPI.notifyUIMode(aiAssistantMode);
+        window.electronAPI.notifyUIMode(aiAssistantMode);
       } else {
         // Fallback if API not available
         try {
@@ -1164,13 +1162,11 @@ const AIAssistantApp: React.FC = () => {
       // Instead of using searchConversations, we'll use a different approach
       // First load recent conversations and then filter them locally
       if (
-        (window as any).electronAPI &&
-        (window as any).electronAPI.getConversations
+        window.electronAPI &&
+        window.electronAPI.getConversations
       ) {
         // Get most recent code-based conversations
-        const recentConversations = await (
-          window as any
-        ).electronAPI.getConversations({
+        const recentConversations = await window.electronAPI.getConversations({
           isFromCode: true,
           limit: 20,
         });
@@ -1188,10 +1184,8 @@ const AIAssistantApp: React.FC = () => {
           );
 
           // Get full conversation with messages
-          if ((window as any).electronAPI.getConversation) {
-            const fullConversation = await (
-              window as any
-            ).electronAPI.getConversation(matchingConversation.id);
+          if (window.electronAPI.getConversation) {
+            const fullConversation = await window.electronAPI.getConversation(matchingConversation.id);
 
             if (fullConversation) {
               console.log(
@@ -1331,7 +1325,7 @@ const AIAssistantApp: React.FC = () => {
   const switchToConversation = async (conversationId: string) => {
     try {
       setIsLoadingConversations(true);
-      const conversation = await (window as any).electronAPI.getConversation(
+      const conversation = await window.electronAPI.getConversation(
         conversationId,
       );
 
@@ -1581,9 +1575,7 @@ const AIAssistantApp: React.FC = () => {
             return;
           }
 
-          const conversation = await (
-            window as any
-          ).electronAPI.getConversation(currentConversationId);
+          const conversation = await window.electronAPI.getConversation(currentConversationId);
 
           if (conversation && !isCreatingNewConversationRef.current) {
             console.log(
@@ -1626,9 +1618,7 @@ const AIAssistantApp: React.FC = () => {
   const loadRecentConversations = async () => {
     try {
       setIsLoadingConversations(true);
-      const recentConversations = await (
-        window as any
-      ).electronAPI.getConversations({
+      const recentConversations = await window.electronAPI.getConversations({
         take: 10,
         orderBy: { updatedAt: 'desc' },
       });
@@ -1680,62 +1670,62 @@ const AIAssistantApp: React.FC = () => {
     };
 
     // Register all listeners if API is available
-    if ((window as any).electronAPI) {
+    if (window.electronAPI) {
       // New event names
-      if ((window as any).electronAPI.onCodeToGenerateInsight) {
-        (window as any).electronAPI.onCodeToGenerateInsight(
+      if (window.electronAPI.onCodeToGenerateInsight) {
+        window.electronAPI.onCodeToGenerateInsight(
           handleCodeToGenerateInsight,
         );
       }
-      if ((window as any).electronAPI.onInsightStart) {
-        (window as any).electronAPI.onInsightStart(handleInsightStart);
+      if (window.electronAPI.onInsightStart) {
+        window.electronAPI.onInsightStart(handleInsightStart);
       }
-      if ((window as any).electronAPI.onInsightChunk) {
-        (window as any).electronAPI.onInsightChunk(handleInsightChunk);
+      if (window.electronAPI.onInsightChunk) {
+        window.electronAPI.onInsightChunk(handleInsightChunk);
       }
-      if ((window as any).electronAPI.onInsightComplete) {
-        (window as any).electronAPI.onInsightComplete(handleInsightComplete);
+      if (window.electronAPI.onInsightComplete) {
+        window.electronAPI.onInsightComplete(handleInsightComplete);
       }
-      if ((window as any).electronAPI.onInsightError) {
-        (window as any).electronAPI.onInsightError(handleInsightError);
+      if (window.electronAPI.onInsightError) {
+        window.electronAPI.onInsightError(handleInsightError);
       }
-      if ((window as any).electronAPI.onSkipInsight) {
-        (window as any).electronAPI.onSkipInsight(handleSkipInsight);
+      if (window.electronAPI.onSkipInsight) {
+        window.electronAPI.onSkipInsight(handleSkipInsight);
       }
 
       // Legacy event names - for backward compatibility
-      (window as any).electronAPI.onCodeToGenerateInsight(
+      window.electronAPI.onCodeToGenerateInsight(
         handleCodeToGenerateInsight,
       );
-      (window as any).electronAPI.onAIAssistantInsightStart(handleInsightStart);
-      (window as any).electronAPI.onAIAssistantInsightChunk(handleInsightChunk);
-      (window as any).electronAPI.onAIAssistantInsightComplete(
+      window.electronAPI.onAIAssistantInsightStart(handleInsightStart);
+      window.electronAPI.onAIAssistantInsightChunk(handleInsightChunk);
+      window.electronAPI.onAIAssistantInsightComplete(
         handleInsightComplete,
       );
-      (window as any).electronAPI.onAIAssistantInsightError(handleInsightError);
-      (window as any).electronAPI.onSkipInsight(handleSkipInsight);
-      (window as any).electronAPI.onDetectedLanguage(handleDetectedLanguage);
+      window.electronAPI.onAIAssistantInsightError(handleInsightError);
+      window.electronAPI.onSkipInsight(handleSkipInsight);
+      window.electronAPI.onDetectedLanguage(handleDetectedLanguage);
 
       // Chat-related event listeners
-      if ((window as any).electronAPI.onChatResponse) {
-        (window as any).electronAPI.onChatResponse(handleChatResponse);
+      if (window.electronAPI.onChatResponse) {
+        window.electronAPI.onChatResponse(handleChatResponse);
       }
 
       // Handle conversation saved notifications
-      if ((window as any).electronAPI.onChatConversationSaved) {
-        (window as any).electronAPI.onChatConversationSaved(
+      if (window.electronAPI.onChatConversationSaved) {
+        window.electronAPI.onChatConversationSaved(
           handleConversationSaved,
         );
       }
 
       // UI mode control
-      if ((window as any).electronAPI.onSetUIMode) {
-        (window as any).electronAPI.onSetUIMode(handleSetUIMode);
+      if (window.electronAPI.onSetUIMode) {
+        window.electronAPI.onSetUIMode(handleSetUIMode);
       }
 
       // Add listener for loading latest conversation
-      if ((window as any).electronAPI.onLoadLatestConversation) {
-        (window as any).electronAPI.onLoadLatestConversation(() => {
+      if (window.electronAPI.onLoadLatestConversation) {
+        window.electronAPI.onLoadLatestConversation(() => {
           // When this event is received, load the most recent conversation
           // This ensures we continue where we left off when reopening chat
           loadLatestConversation(false);
@@ -1743,8 +1733,8 @@ const AIAssistantApp: React.FC = () => {
       }
 
       // Register handler for finding conversation by code
-      if ((window as any).electronAPI.onFindConversationByCode) {
-        (window as any).electronAPI.onFindConversationByCode(
+      if (window.electronAPI.onFindConversationByCode) {
+        window.electronAPI.onFindConversationByCode(
           handleFindConversationByCode,
         );
       }
@@ -1754,7 +1744,7 @@ const AIAssistantApp: React.FC = () => {
 
     // Cleanup function to remove all event listeners
     return () => {
-      if ((window as any).electronAPI) {
+      if (window.electronAPI) {
         const ipcRenderer = require('electron').ipcRenderer;
 
         // Remove all listeners
@@ -1799,8 +1789,8 @@ const AIAssistantApp: React.FC = () => {
 
     // Send message to main process
     if (
-      (window as any).electronAPI &&
-      (window as any).electronAPI.sendChatMessage
+      window.electronAPI &&
+      window.electronAPI.sendChatMessage
     ) {
       // Prepare full message history with proper metadata
       let messageHistory = [...messages];
@@ -1829,7 +1819,7 @@ const AIAssistantApp: React.FC = () => {
             : undefined,
       };
 
-      (window as any).electronAPI.sendChatMessage(
+      window.electronAPI.sendChatMessage(
         inputValue,
         messageHistory,
         additionalContext,
