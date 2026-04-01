@@ -1,12 +1,24 @@
 import type { Configuration } from 'webpack';
 
 import { plugins } from './webpack.plugins';
-import { rules } from './webpack.rules';
 
-rules.push({
-  test: /\.css$/,
-  use: [{ loader: 'style-loader' }, { loader: 'css-loader' }],
-});
+const rendererRules = [
+  {
+    test: /\.tsx?$/,
+    exclude: /(node_modules|\.webpack)/,
+    use: {
+      loader: 'ts-loader',
+      options: {
+        transpileOnly: true,
+        configFile: process.env.BUILD_TYPE === 'prod' ? 'tsconfig.prod.json' : 'tsconfig.json',
+      },
+    },
+  },
+  {
+    test: /\.css$/,
+    use: [{ loader: 'style-loader' }, { loader: 'css-loader' }],
+  },
+];
 
 export const rendererConfig: Configuration = {
   // Add this for production builds
@@ -15,7 +27,7 @@ export const rendererConfig: Configuration = {
     ignored: /node_modules|\.claude/,
   },
   module: {
-    rules,
+    rules: rendererRules,
   },
   plugins,
   resolve: {
@@ -25,10 +37,7 @@ export const rendererConfig: Configuration = {
       fs: false,
     },
   },
-  // For Electron 28+, we need to use web instead of electron-renderer for security reasons
-  // but need to provide node integration for compatibility
   target: 'web',
-  // These are needed for webpack hot reloading to work with Electron's contextIsolation
   output: {
     globalObject: 'globalThis',
   },
