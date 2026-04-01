@@ -461,11 +461,12 @@ const PopupDefaultExample = ({
                   style={selectStyle}
                 >
                   <option value="iterm2">iTerm2</option>
+                  <option value="terminal">Terminal</option>
                   <option value="ghostty">Ghostty</option>
                   <option value="cmux">cmux</option>
                 </select>
               </div>
-              {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'ghostty') && (
+              {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'terminal' || sessionTerminalApp === 'ghostty') && (
                 <div style={rowStyle}>
                   <span style={labelStyle}>Launch Mode</span>
                   <select
