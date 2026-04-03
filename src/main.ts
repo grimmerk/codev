@@ -635,7 +635,7 @@ const API_URL = 'http://localhost:55688';
 
 // Import the function to update IDE mode and IDE enum
 import { IDEMode } from './ide-enum';
-import { updateCurrentIDEMode } from './vscode-based-ide-utility';
+import { detectActiveIDEProjects, updateCurrentIDEMode } from './vscode-based-ide-utility';
 
 // Track user settings
 let userSettings = {
@@ -1846,6 +1846,11 @@ ipcMain.handle('load-project-branches', async (_event, paths: string[]) => {
     }),
   );
   return results;
+});
+
+ipcMain.handle('detect-active-ide-projects', async () => {
+  const folderNames = await detectActiveIDEProjects();
+  return Array.from(folderNames);
 });
 
 app.dock.hide();

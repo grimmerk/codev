@@ -323,6 +323,7 @@ function SwitcherApp() {
     [],
   );
   const [projectBranches, setProjectBranches] = useState<Record<string, string>>({});
+  const [activeIDEFolders, setActiveIDEFolders] = useState<Set<string>>(new Set());
   const [allSessions, setAllSessions] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(-1);
@@ -492,6 +493,9 @@ function SwitcherApp() {
       if (modeRef.current !== 'terminal') {
         fetchRecentProjectRecord();
         fetchWorkingFolderAndUpdate();
+        window.electronAPI.detectActiveIDEProjects().then((folders: string[]) => {
+          setActiveIDEFolders(new Set(folders));
+        });
       }
       if (modeRef.current === 'sessions') {
         fetchClaudeSessions();
@@ -553,6 +557,9 @@ function SwitcherApp() {
             if (branches && Object.keys(branches).length > 0) {
               setProjectBranches(branches);
             }
+          });
+          window.electronAPI.detectActiveIDEProjects().then((folders: string[]) => {
+            setActiveIDEFolders(new Set(folders));
           });
         }
       },
@@ -1128,6 +1135,8 @@ function SwitcherApp() {
           let name = label?.slice(label.lastIndexOf('/') + 1);
           name = name?.replace(/\.code-workspace/, ' (Workspace)');
           const branch = projectBranches[value];
+          const folderName = value?.split('/').pop() || '';
+          const isActiveInIDE = activeIDEFolders.has(folderName);
 
           const nameStyle: any = {
             fontWeight: '500',
@@ -1147,6 +1156,11 @@ function SwitcherApp() {
                 height: '30px',
               }}
             >
+              <div style={{ width: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {isActiveInIDE && (
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#CE93D8', display: 'inline-block' }} />
+                )}
+              </div>
               <div style={nameStyle}>
                 <Highlighter
                   searchWords={searchWords}

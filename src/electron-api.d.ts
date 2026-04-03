@@ -50,6 +50,7 @@ interface IElectronAPI {
   loadSessionEnrichment: (sessions: any[]) => Promise<{ titles: Record<string, string>; branches: Record<string, string>; prLinks: Record<string, { prNumber: number; prUrl: string }> }>;
   loadLastAssistantResponses: (sessions: any[]) => Promise<Record<string, string>>;
   loadProjectBranches: (paths: string[]) => Promise<Record<string, string>>;
+  detectActiveIDEProjects: () => Promise<string[]>;
 
   // VS Code SQLite
   fetchVSCodeBasedIDESqlite: () => void;
