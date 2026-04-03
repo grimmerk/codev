@@ -353,7 +353,7 @@ function SwitcherApp() {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return allItems.filter((s) => {
       const prInfo = prLinks[s.sessionId];
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber}` : ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
       return words.every((w: string) => searchTarget.includes(w));
     });
   };
