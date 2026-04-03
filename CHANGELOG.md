@@ -1,13 +1,16 @@
 # Changelog
 
+## 1.0.58
+
+- Feat: ⌃+⌘+T global shortcut for Terminal tab (customizable in Settings)
+- Fix: Cmd+←/→ in xterm (beginning/end of line)
+
 ## 1.0.57
 
 - Fix: menubar Keyboard Shortcuts submenu now reflects custom shortcuts
 - Fix: GitHub release notes now aggregate all unreleased changelog entries
 - Feat: PR link badge in session list items (clickable, opens browser, searchable by URL)
 - Feat: purple dot on projects currently open in VS Code/Cursor
-- Feat: ⌃+⌘+T global shortcut for Terminal tab (customizable in Settings)
-- Fix: Cmd+←/→ in xterm (beginning/end of line)
 - Pin axios to 1.14.0 (avoid compromised 1.14.1)
 
 ## 1.0.56
