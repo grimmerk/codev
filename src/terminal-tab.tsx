@@ -88,8 +88,8 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
             rows: term.rows,
           });
         } else {
-          // Pre-spawned PTY exists — resize to match terminal dimensions
-          window.electronAPI.terminalResize(term.cols, term.rows);
+          // Pre-spawned PTY — attach with correct dimensions (discards buffered output, redraws)
+          window.electronAPI.terminalAttach(term.cols, term.rows);
         }
       }
     }, 50);

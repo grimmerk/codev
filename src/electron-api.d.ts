@@ -114,6 +114,7 @@ interface IElectronAPI {
 
   // Terminal (node-pty + xterm.js)
   terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => void;
+  terminalAttach: (cols: number, rows: number) => void;
   terminalInput: (data: string) => void;
   terminalResize: (cols: number, rows: number) => void;
   terminalIsSpawned: () => Promise<boolean>;

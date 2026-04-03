@@ -149,6 +149,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Terminal (node-pty + xterm.js)
   terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => ipcRenderer.send('terminal-spawn', options),
+  terminalAttach: (cols: number, rows: number) => ipcRenderer.send('terminal-attach', cols, rows),
   terminalInput: (data: string) => ipcRenderer.send('terminal-input', data),
   terminalResize: (cols: number, rows: number) => ipcRenderer.send('terminal-resize', cols, rows),
   terminalIsSpawned: () => ipcRenderer.invoke('terminal-is-spawned'),

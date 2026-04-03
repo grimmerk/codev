@@ -1620,12 +1620,15 @@ ipcMain.handle('get-update-status', () => {
 
 // Terminal (node-pty) IPC handlers
 let ptyProcess: any = null;
+let ptyBuffer: string[] = []; // Buffer output until renderer connects
+let ptyRendererReady = false;
 
 const spawnTerminal = (options: { cwd?: string; cols?: number; rows?: number } = {}) => {
   if (ptyProcess) {
     ptyProcess.kill();
     ptyProcess = null;
   }
+  ptyBuffer = [];
   try {
     const pty = require('node-pty');
     const shell = process.env.SHELL || '/bin/zsh';
@@ -1639,7 +1642,11 @@ const spawnTerminal = (options: { cwd?: string; cols?: number; rows?: number } =
       env: { ...process.env, TERM: 'xterm-256color' },
     });
     ptyProcess.onData((data: string) => {
-      switcherWindow?.webContents.send('terminal-data', data);
+      if (ptyRendererReady) {
+        switcherWindow?.webContents.send('terminal-data', data);
+      } else {
+        ptyBuffer.push(data);
+      }
     });
     ptyProcess.onExit(() => {
       switcherWindow?.webContents.send('terminal-exit');
@@ -1653,7 +1660,23 @@ const spawnTerminal = (options: { cwd?: string; cols?: number; rows?: number } =
 };
 
 ipcMain.on('terminal-spawn', (_event, options: { cwd?: string; cols?: number; rows?: number }) => {
+  ptyRendererReady = true;
   spawnTerminal(options);
+});
+
+ipcMain.on('terminal-attach', (_event, cols: number, rows: number) => {
+  // Renderer is ready — resize to actual dimensions, then flush buffered output
+  ptyRendererReady = true;
+  if (ptyProcess) {
+    ptyProcess.resize(cols, rows);
+    // Small delay to let resize take effect, then clear and redraw prompt
+    setTimeout(() => {
+      // Send buffered data (discard — it was rendered at wrong size)
+      ptyBuffer = [];
+      // Send Ctrl+L to clear and redraw at correct size
+      ptyProcess?.write('\x0c');
+    }, 50);
+  }
 });
 
 ipcMain.on('terminal-input', (_event, data: string) => {
