@@ -1037,6 +1037,13 @@ const trayToggleEvtHandler = async () => {
     }
   }, 1000); // Delay by 1 second to not interfere with main window initialization
 
+  // Pre-spawn terminal for faster first Terminal tab switch
+  setTimeout(() => {
+    if (!ptyProcess) {
+      spawnTerminal();
+    }
+  }, 2000);
+
   // Add window closed event handler to AI Assistant window to recreate it when closed
   // This ensures the next opening will still be fast
   const setupaiAssistantWindowRebuild = () => {
@@ -1614,7 +1621,7 @@ ipcMain.handle('get-update-status', () => {
 // Terminal (node-pty) IPC handlers
 let ptyProcess: any = null;
 
-ipcMain.on('terminal-spawn', (_event, options: { cwd?: string; cols?: number; rows?: number }) => {
+const spawnTerminal = (options: { cwd?: string; cols?: number; rows?: number } = {}) => {
   if (ptyProcess) {
     ptyProcess.kill();
     ptyProcess = null;
@@ -1643,6 +1650,10 @@ ipcMain.on('terminal-spawn', (_event, options: { cwd?: string; cols?: number; ro
       console.error('Failed to spawn terminal:', e);
     }
   }
+};
+
+ipcMain.on('terminal-spawn', (_event, options: { cwd?: string; cols?: number; rows?: number }) => {
+  spawnTerminal(options);
 });
 
 ipcMain.on('terminal-input', (_event, data: string) => {
@@ -1651,6 +1662,10 @@ ipcMain.on('terminal-input', (_event, data: string) => {
 
 ipcMain.on('terminal-resize', (_event, cols: number, rows: number) => {
   ptyProcess?.resize(cols, rows);
+});
+
+ipcMain.handle('terminal-is-spawned', () => {
+  return ptyProcess !== null;
 });
 
 ipcMain.on('terminal-kill', () => {

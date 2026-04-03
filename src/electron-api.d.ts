@@ -116,6 +116,7 @@ interface IElectronAPI {
   terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => void;
   terminalInput: (data: string) => void;
   terminalResize: (cols: number, rows: number) => void;
+  terminalIsSpawned: () => Promise<boolean>;
   terminalKill: () => void;
   onTerminalData: (callback: IpcCallback) => void;
   onTerminalExit: (callback: IpcCallback) => void;

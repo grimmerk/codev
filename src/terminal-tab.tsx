@@ -70,7 +70,7 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
     if (!visible || !xtermRef.current || !fitAddonRef.current) return;
 
     // Re-fit and focus after tab switch (container may have been display:none)
-    setTimeout(() => {
+    setTimeout(async () => {
       fitAddonRef.current?.fit();
       const term = xtermRef.current;
       if (term) {
@@ -78,13 +78,19 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
         term.focus();
       }
 
-      // Spawn if not already running
+      // Check if PTY already pre-spawned, or spawn now
       if (!spawnedRef.current && term) {
+        const alreadySpawned = await window.electronAPI.terminalIsSpawned();
         spawnedRef.current = true;
-        window.electronAPI.terminalSpawn({
-          cols: term.cols,
-          rows: term.rows,
-        });
+        if (!alreadySpawned) {
+          window.electronAPI.terminalSpawn({
+            cols: term.cols,
+            rows: term.rows,
+          });
+        } else {
+          // Pre-spawned PTY exists — resize to match terminal dimensions
+          window.electronAPI.terminalResize(term.cols, term.rows);
+        }
       }
     }, 50);
   }, [visible]);

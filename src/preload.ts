@@ -151,6 +151,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => ipcRenderer.send('terminal-spawn', options),
   terminalInput: (data: string) => ipcRenderer.send('terminal-input', data),
   terminalResize: (cols: number, rows: number) => ipcRenderer.send('terminal-resize', cols, rows),
+  terminalIsSpawned: () => ipcRenderer.invoke('terminal-is-spawned'),
   terminalKill: () => ipcRenderer.send('terminal-kill'),
   onTerminalData: (callback: any) => ipcRenderer.on('terminal-data', callback),
   onTerminalExit: (callback: any) => ipcRenderer.on('terminal-exit', callback),
