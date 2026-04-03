@@ -41,4 +41,9 @@ export const rendererConfig: Configuration = {
   output: {
     globalObject: 'globalThis',
   },
+  // Disable innerGraph to prevent webpack from incorrectly tree-shaking
+  // xterm.js class hierarchy (webpack#17711, fixed in 5.90+)
+  optimization: {
+    innerGraph: false,
+  },
 };

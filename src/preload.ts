@@ -146,6 +146,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resetShortcuts: () => ipcRenderer.invoke('reset-shortcuts'),
   pauseShortcut: (key: string) => ipcRenderer.invoke('pause-shortcut', key),
   resumeShortcut: (key: string) => ipcRenderer.invoke('resume-shortcut', key),
+
+  // Terminal (node-pty + xterm.js)
+  terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => ipcRenderer.send('terminal-spawn', options),
+  terminalAttach: (cols: number, rows: number) => ipcRenderer.send('terminal-attach', cols, rows),
+  terminalInput: (data: string) => ipcRenderer.send('terminal-input', data),
+  terminalResize: (cols: number, rows: number) => ipcRenderer.send('terminal-resize', cols, rows),
+  terminalIsSpawned: () => ipcRenderer.invoke('terminal-is-spawned'),
+  terminalKill: () => ipcRenderer.send('terminal-kill'),
+  onTerminalData: (callback: any) => ipcRenderer.on('terminal-data', callback),
+  onTerminalExit: (callback: any) => ipcRenderer.on('terminal-exit', callback),
 });
 
 // All of the Node.js APIs are available in the preload process.

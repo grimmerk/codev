@@ -255,7 +255,13 @@ const PopupDefaultExample = ({
           {/* Version + Update + Quit — compact top bar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid #333' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '11px', color: '#666' }}>v{appVersion}</span>
+              <a
+                href="https://github.com/grimmerk/codev/releases"
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: '11px', color: '#666', textDecorationColor: '#444' }}
+                title="View release notes"
+              >v{appVersion}</a>
               {updateStatus === 'idle' && (
                 <span
                   onClick={triggerUpdateCheck}
@@ -321,6 +327,7 @@ const PopupDefaultExample = ({
               >
                 <option value="projects">Projects</option>
                 <option value="sessions">Sessions</option>
+                <option value="terminal">Terminal</option>
               </select>
             </div>
             <div style={rowStyle}>
@@ -619,6 +626,20 @@ const PopupDefaultExample = ({
                 </span>
               </div>
             ))}
+            <div style={{ borderTop: '1px solid #333', marginTop: '6px', paddingTop: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#666' }}>Tab Switching</span>
+              {[
+                { keys: 'Tab', label: 'Projects \u2194 Sessions' },
+                { keys: '\u2303+Tab', label: 'Cycle All Tabs' },
+                { keys: '\u2318+[ / ]', label: 'Prev / Next Tab' },
+                { keys: '\u2318+1/2/3', label: 'Jump to Tab' },
+              ].map((row) => (
+                <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
+                  <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
         </div>

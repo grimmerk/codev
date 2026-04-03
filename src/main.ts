@@ -1,3 +1,5 @@
+import './epipe-fix'; // Must be first — wraps stdout/stderr before any module writes
+
 import {
   app,
   autoUpdater,
@@ -399,10 +401,27 @@ const createSwitcherWindow = (): BrowserWindow => {
     frame: false,
     fullscreenable: false,
     resizable: false,
+    backgroundColor: '#1e1e1e',
   });
 
   // and load the index.html of the app.
   window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY);
+
+  // Open external links in default browser
+  const { shell } = require('electron');
+  window.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' as const };
+  });
+
+  // Disable Cmd+R reload (not useful for menu bar app)
+  window.webContents.on('before-input-event', (_event: any, input: any) => {
+    if (input.meta && input.key === 'r' && !input.control) {
+      _event.preventDefault();
+    }
+  });
 
   // if (isDebug) {
   //   window.webContents.openDevTools({ mode: 'detach' });
@@ -574,6 +593,9 @@ ipcMain.on('hide-app', (event) => {
 });
 
 ipcMain.on('close-app-click', async (event) => {
+  // Hide windows before quit to prevent white flash from xterm container
+  switcherWindow?.hide();
+  aiAssistantWindow?.hide();
   app.quit();
 });
 
@@ -1034,6 +1056,13 @@ const trayToggleEvtHandler = async () => {
       );
     }
   }, 1000); // Delay by 1 second to not interfere with main window initialization
+
+  // Pre-spawn terminal for faster first Terminal tab switch
+  setTimeout(() => {
+    if (!ptyProcess) {
+      spawnTerminal();
+    }
+  }, 2000);
 
   // Add window closed event handler to AI Assistant window to recreate it when closed
   // This ensures the next opening will still be fast
@@ -1607,6 +1636,94 @@ ipcMain.on('install-update', () => {
 
 ipcMain.handle('get-update-status', () => {
   return lastUpdateStatus;
+});
+
+// Terminal (node-pty) IPC handlers
+let ptyProcess: any = null;
+let ptyBuffer: string[] = []; // Buffer output until renderer connects
+let ptyRendererReady = false;
+
+const spawnTerminal = async (options: { cwd?: string; cols?: number; rows?: number } = {}) => {
+  if (ptyProcess) {
+    ptyProcess.kill();
+    ptyProcess = null;
+  }
+  ptyBuffer = [];
+  try {
+    const pty = require('node-pty');
+    const shell = process.env.SHELL || '/bin/zsh';
+    const homePath = require('os').homedir();
+    let cwd = options.cwd || homePath;
+    // Try to read working folder from NestJS server
+    if (!options.cwd) {
+      try {
+        const resp = await fetch('http://localhost:55688/user');
+        const json = await resp.json();
+        if (json?.workingFolder) cwd = json.workingFolder;
+      } catch {}
+    }
+    ptyProcess = pty.spawn(shell, [], {
+      name: 'xterm-256color',
+      cols: options.cols || 80,
+      rows: options.rows || 24,
+      cwd,
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+    ptyProcess.onData((data: string) => {
+      if (ptyRendererReady) {
+        switcherWindow?.webContents.send('terminal-data', data);
+      } else {
+        ptyBuffer.push(data);
+      }
+    });
+    ptyProcess.onExit(() => {
+      switcherWindow?.webContents.send('terminal-exit');
+      ptyProcess = null;
+    });
+  } catch (e) {
+    if (isDebug) {
+      console.error('Failed to spawn terminal:', e);
+    }
+  }
+};
+
+ipcMain.on('terminal-spawn', (_event, options: { cwd?: string; cols?: number; rows?: number }) => {
+  ptyRendererReady = true;
+  spawnTerminal(options);
+});
+
+ipcMain.on('terminal-attach', (_event, cols: number, rows: number) => {
+  // Renderer is ready — resize to actual dimensions, then flush buffered output
+  ptyRendererReady = true;
+  if (ptyProcess) {
+    ptyProcess.resize(cols, rows);
+    // Small delay to let resize take effect, then clear and redraw prompt
+    setTimeout(() => {
+      // Send buffered data (discard — it was rendered at wrong size)
+      ptyBuffer = [];
+      // Send Ctrl+L to clear and redraw at correct size
+      ptyProcess?.write('\x0c');
+    }, 50);
+  }
+});
+
+ipcMain.on('terminal-input', (_event, data: string) => {
+  ptyProcess?.write(data);
+});
+
+ipcMain.on('terminal-resize', (_event, cols: number, rows: number) => {
+  ptyProcess?.resize(cols, rows);
+});
+
+ipcMain.handle('terminal-is-spawned', () => {
+  return ptyProcess !== null;
+});
+
+ipcMain.on('terminal-kill', () => {
+  if (ptyProcess) {
+    ptyProcess.kill();
+    ptyProcess = null;
+  }
 });
 
 // Login item settings are now controlled by the user via Settings UI toggle

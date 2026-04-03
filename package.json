@@ -1,7 +1,7 @@
 {
   "name": "CodeV",
   "productName": "CodeV",
-  "version": "1.0.55",
+  "version": "1.0.56",
   "description": "Quick switcher for VS Code, Cursor, and Claude Code sessions",
   "repository": {
     "type": "git",
@@ -72,6 +72,8 @@
     "@nestjs/core": "^10.0.3",
     "@nestjs/platform-express": "^10.0.3",
     "@prisma/client": "^4.16.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "axios": "^1.14.0",
     "better-sqlite3": "^12.8.0",
     "class-transformer": "0.5.1",
@@ -79,6 +81,7 @@
     "dotenv": "^16.4.5",
     "electron-settings": "^4.0.4",
     "electron-squirrel-startup": "^1.0.1",
+    "node-pty": "^1.1.0",
     "prisma": "^4.16.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -92,7 +95,8 @@
     "update-electron-app": "^3.1.2"
   },
   "resolutions": {
-    "node-abi": "^4.28.0"
+    "node-abi": "^4.28.0",
+    "webpack": "^5.97.0"
   },
   "packageManager": "yarn@1.22.22"
 }
