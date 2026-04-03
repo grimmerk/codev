@@ -69,12 +69,13 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
   useEffect(() => {
     if (!visible || !xtermRef.current || !fitAddonRef.current) return;
 
-    // Re-fit after tab switch (container may have been display:none)
+    // Re-fit and focus after tab switch (container may have been display:none)
     setTimeout(() => {
       fitAddonRef.current?.fit();
       const term = xtermRef.current;
       if (term) {
         window.electronAPI.terminalResize(term.cols, term.rows);
+        term.focus();
       }
 
       // Spawn if not already running
