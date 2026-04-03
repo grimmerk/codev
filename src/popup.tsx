@@ -255,7 +255,13 @@ const PopupDefaultExample = ({
           {/* Version + Update + Quit — compact top bar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid #333' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontSize: '11px', color: '#666' }}>v{appVersion}</span>
+              <a
+                href="https://github.com/grimmerk/codev/releases"
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: '11px', color: '#666', textDecorationColor: '#444' }}
+                title="View release notes"
+              >v{appVersion}</a>
               {updateStatus === 'idle' && (
                 <span
                   onClick={triggerUpdateCheck}
