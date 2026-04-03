@@ -14,6 +14,7 @@ export interface ShortcutSettings {
   quickSwitcher: string;
   aiInsight: string;
   aiChat: string;
+  terminal: string;
 }
 
 export class TrayGenerator {
@@ -25,6 +26,7 @@ export class TrayGenerator {
     quickSwitcher: 'Command+Control+R',
     aiInsight: 'Command+Control+E',
     aiChat: 'Command+Control+C',
+    terminal: 'Command+Control+T',
   };
 
   constructor(
@@ -91,6 +93,7 @@ export class TrayGenerator {
         label: 'Keyboard Shortcuts',
         submenu: [
           { label: `${this.acceleratorToMenuLabel(this.shortcuts.quickSwitcher)}: Open CodeV Quick Switcher`, enabled: false },
+          { label: `${this.acceleratorToMenuLabel(this.shortcuts.terminal)}: Terminal`, enabled: false },
           { label: 'Tab: Switch Projects / Sessions', enabled: false },
           { label: `${this.acceleratorToMenuLabel(this.shortcuts.aiInsight)}: AI Assistant Insight`, enabled: false },
           { label: `${this.acceleratorToMenuLabel(this.shortcuts.aiChat)}: AI Assistant Smart Chat`, enabled: false },

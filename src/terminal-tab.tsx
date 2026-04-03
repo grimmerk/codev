@@ -36,6 +36,9 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
     term.attachCustomKeyEventHandler((e) => {
       if (e.metaKey && ['1', '2', '3', '[', ']'].includes(e.key)) return false;
       if (e.ctrlKey && e.key === 'Tab') return false;
+      // Cmd+←/→ → beginning/end of line
+      if (e.type === 'keydown' && e.metaKey && e.key === 'ArrowLeft') { term.input('\x01'); return false; }
+      if (e.type === 'keydown' && e.metaKey && e.key === 'ArrowRight') { term.input('\x05'); return false; }
       return true;
     });
 

@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('working-folder-iterated', callback),
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
   onFocusWindow: (callback: any) => ipcRenderer.on('window-focus', callback),
+  onSwitchToTerminal: (callback: any) => ipcRenderer.on('switch-to-terminal', callback),
+  onCheckTerminalAndHide: (callback: any) => ipcRenderer.on('check-terminal-and-hide', callback),
   onXWinNotFound: (callback: any) => ipcRenderer.on('xwin-not-found', callback),
 
   // Listen for code to explain in the ai assistant window

@@ -94,3 +94,6 @@ typings/
 # Electron-Forge
 out/
 src/build.json
+
+# Claude Code worktrees
+.claude/worktrees/

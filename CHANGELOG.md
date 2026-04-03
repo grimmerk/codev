@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.58
+
+- Feat: ⌃+⌘+T global shortcut for Terminal tab (customizable in Settings)
+- Fix: Cmd+←/→ in xterm (beginning/end of line)
+
 ## 1.0.57
 
 - Fix: menubar Keyboard Shortcuts submenu now reflects custom shortcuts

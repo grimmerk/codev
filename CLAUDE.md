@@ -1,5 +1,10 @@
 # CodeV Development Guide
 
+## Git
+
+- **Default branch: `main`** (changed from `develop` — PRs should target `main`)
+- `develop` branch is legacy and no longer used
+
 ## Build Commands
 
 - Electron: `yarn start` (dev), `yarn make` (build), `yarn dev` (with server)
