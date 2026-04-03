@@ -406,13 +406,7 @@ export const detectActiveIDEProjects = async (): Promise<Set<string>> => {
 
   const script = `tell application "System Events"
   if exists (process "${processName}") then
-    tell process "${processName}"
-      set windowNames to {}
-      repeat with w in (every window)
-        set end of windowNames to name of w
-      end repeat
-      return windowNames
-    end tell
+    return name of every window of process "${processName}"
   end if
 end tell`;
 
