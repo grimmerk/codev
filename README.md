@@ -41,7 +41,7 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 
 ### Embedded Terminal
 
-CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same technology as VS Code's integrated terminal). Press `⌘+3` or click the **Term** tab to open it.
+CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same technology as VS Code's integrated terminal). Press `⌃+⌘+T` or click the **Term** tab to open it.
 
 - Pre-spawned on app start for instant access
 - Default working directory: Settings → Working Directory (fallback to home)
