@@ -1623,7 +1623,7 @@ let ptyProcess: any = null;
 let ptyBuffer: string[] = []; // Buffer output until renderer connects
 let ptyRendererReady = false;
 
-const spawnTerminal = (options: { cwd?: string; cols?: number; rows?: number } = {}) => {
+const spawnTerminal = async (options: { cwd?: string; cols?: number; rows?: number } = {}) => {
   if (ptyProcess) {
     ptyProcess.kill();
     ptyProcess = null;
@@ -1633,7 +1633,15 @@ const spawnTerminal = (options: { cwd?: string; cols?: number; rows?: number } =
     const pty = require('node-pty');
     const shell = process.env.SHELL || '/bin/zsh';
     const homePath = require('os').homedir();
-    const cwd = options.cwd || (settings.getSync('workingFolderPath') as string) || homePath;
+    let cwd = options.cwd || homePath;
+    // Try to read working folder from NestJS server
+    if (!options.cwd) {
+      try {
+        const resp = await fetch('http://localhost:55688/user');
+        const json = await resp.json();
+        if (json?.workingFolder) cwd = json.workingFolder;
+      } catch {}
+    }
     ptyProcess = pty.spawn(shell, [], {
       name: 'xterm-256color',
       cols: options.cols || 80,
