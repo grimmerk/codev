@@ -34,9 +34,8 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
 
     // Let tab-switching shortcuts pass through to parent
     term.attachCustomKeyEventHandler((e) => {
-      if (e.metaKey && ['1', '2', '3', '[', ']'].includes(e.key)) {
-        return false; // don't handle in terminal
-      }
+      if (e.metaKey && ['1', '2', '3', '[', ']'].includes(e.key)) return false;
+      if (e.ctrlKey && e.key === 'Tab') return false;
       return true;
     });
 

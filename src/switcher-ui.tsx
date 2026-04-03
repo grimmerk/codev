@@ -444,12 +444,14 @@ function SwitcherApp() {
           fetchClaudeSessions();
         }
       }
-      // Cmd+[ / Cmd+] to cycle all tabs (including Terminal)
-      if (e.metaKey && !e.ctrlKey && !e.altKey && (e.key === '[' || e.key === ']')) {
+      // Ctrl+Tab or Cmd+] to cycle forward, Cmd+[ to cycle backward
+      const isCycleForward = (e.ctrlKey && !e.metaKey && e.key === 'Tab') || (e.metaKey && !e.ctrlKey && e.key === ']');
+      const isCycleBackward = e.metaKey && !e.ctrlKey && e.key === '[';
+      if (isCycleForward || isCycleBackward) {
         e.preventDefault();
         const cycle: SwitcherMode[] = ['projects', 'sessions', 'terminal'];
         const idx = cycle.indexOf(modeRef.current);
-        const newMode = cycle[(idx + (e.key === ']' ? 1 : cycle.length - 1)) % cycle.length];
+        const newMode = cycle[(idx + (isCycleForward ? 1 : cycle.length - 1)) % cycle.length];
         modeRef.current = newMode;
         setMode(newMode);
         if (newMode === 'sessions') fetchClaudeSessions();

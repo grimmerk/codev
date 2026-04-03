@@ -4,7 +4,7 @@
 
 - Feat: embedded Terminal tab (xterm.js + node-pty)
 - Pre-spawn PTY on app start for instant terminal access
-- Tab switching: Tab (Projects↔Sessions), ⌘+[/] (cycle all), ⌘+1/2/3 (jump)
+- Tab switching: Tab (Projects↔Sessions), ⌃+Tab (cycle all), ⌘+1/2/3 (jump)
 - Default Tab setting now supports Terminal
 - Fix: white flash on window show/hide/quit
 - Upgrade webpack 5.73 → 5.105 (fix xterm.js production tree-shaking)
