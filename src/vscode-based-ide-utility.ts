@@ -387,7 +387,15 @@ export const deleteRecentProjectRecord = async (path: string) => {
  * Uses AppleScript to get window titles from the IDE process.
  * Returns a Set of folder names (last path component) that have open windows.
  */
+let cachedActiveIDEFolders: Set<string> | null = null;
+let activeIDECacheTimestamp = 0;
+const ACTIVE_IDE_CACHE_TTL_MS = 5000;
+
 export const detectActiveIDEProjects = async (): Promise<Set<string>> => {
+  const now = Date.now();
+  if (cachedActiveIDEFolders && (now - activeIDECacheTimestamp) < ACTIVE_IDE_CACHE_TTL_MS) {
+    return cachedActiveIDEFolders;
+  }
   const processName = currentIDEMode === IDEMode.Cursor ? 'Cursor' : 'Code';
   const execPromise = (cmd: string): Promise<string> =>
     new Promise((resolve) => {
@@ -427,5 +435,7 @@ end tell`;
     }
   }
 
+  cachedActiveIDEFolders = folderNames;
+  activeIDECacheTimestamp = now;
   return folderNames;
 };
