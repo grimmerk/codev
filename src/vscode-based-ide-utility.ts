@@ -381,3 +381,55 @@ export const deleteRecentProjectRecord = async (path: string) => {
   const fullPath = 'file://' + path;
   await deleteVSCodeBasedIDEEntry(fullPath, isWorkspace);
 };
+
+/**
+ * Detect which project folders are currently open in VS Code or Cursor.
+ * Uses AppleScript to get window titles from the IDE process.
+ * Returns a Set of folder names (last path component) that have open windows.
+ */
+let cachedActiveIDEFolders: Set<string> | null = null;
+let activeIDECacheTimestamp = 0;
+const ACTIVE_IDE_CACHE_TTL_MS = 5000;
+
+export const detectActiveIDEProjects = async (): Promise<Set<string>> => {
+  const now = Date.now();
+  if (cachedActiveIDEFolders && (now - activeIDECacheTimestamp) < ACTIVE_IDE_CACHE_TTL_MS) {
+    return cachedActiveIDEFolders;
+  }
+  const processName = currentIDEMode === IDEMode.Cursor ? 'Cursor' : 'Code';
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 3000 }, (err, stdout) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
+  const script = `tell application "System Events"
+  if exists (process "${processName}") then
+    return name of every window of process "${processName}"
+  end if
+end tell`;
+
+  const output = await execPromise(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
+  if (!output.trim()) return new Set();
+
+  const folderNames = new Set<string>();
+  // Window titles can be: "folderName", "file — folderName", "file — folderName — IDE"
+  // The " — " (em dash) is VS Code/Cursor's separator
+  const titles = output.trim().split(', ');
+  for (const title of titles) {
+    const parts = title.split(' \u2014 ');
+    if (parts.length >= 2) {
+      // "file — folder" or "file — folder — IDE": folder is second-to-last
+      const folderPart = parts.length >= 3 ? parts[parts.length - 2] : parts[parts.length - 1];
+      if (folderPart) folderNames.add(folderPart.trim());
+    } else if (parts.length === 1 && title.trim() && title.trim() !== 'Welcome') {
+      // Single-part title could be just the folder name
+      folderNames.add(title.trim());
+    }
+  }
+
+  cachedActiveIDEFolders = folderNames;
+  activeIDECacheTimestamp = now;
+  return folderNames;
+};

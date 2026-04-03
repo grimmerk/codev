@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadSessionEnrichment: (sessions: any[]) => ipcRenderer.invoke('load-session-enrichment', sessions),
   loadLastAssistantResponses: (sessions: any[]) => ipcRenderer.invoke('load-last-assistant-responses', sessions),
   loadProjectBranches: (paths: string[]) => ipcRenderer.invoke('load-project-branches', paths),
+  detectActiveIDEProjects: () => ipcRenderer.invoke('detect-active-ide-projects'),
 
   /** for reading VS Code built-in sqlite */
   fetchVSCodeBasedIDESqlite: () => ipcRenderer.send('fetch-vscode-based-sqlite'),
@@ -68,6 +69,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   onWorkingFolderIterated: (callback: any) =>
     ipcRenderer.on('working-folder-iterated', callback),
+  openExternal: (url: string) => ipcRenderer.send('open-external', url),
   onFocusWindow: (callback: any) => ipcRenderer.on('window-focus', callback),
   onXWinNotFound: (callback: any) => ipcRenderer.on('xwin-not-found', callback),
 

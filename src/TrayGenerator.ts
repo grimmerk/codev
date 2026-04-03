@@ -10,11 +10,22 @@ export const isMasStr = isMAS() ? 'mas' : 'nonMas';
 
 // ref:
 // https://blog.logrocket.com/building-a-menu-bar-application-with-electron-and-react/
+export interface ShortcutSettings {
+  quickSwitcher: string;
+  aiInsight: string;
+  aiChat: string;
+}
+
 export class TrayGenerator {
   tray: Tray;
   attachedWindow: BrowserWindow;
   onTrayClickCallback: any;
   title: string;
+  shortcuts: ShortcutSettings = {
+    quickSwitcher: 'Command+Control+R',
+    aiInsight: 'Command+Control+E',
+    aiChat: 'Command+Control+C',
+  };
 
   constructor(
     attachedWindow: BrowserWindow,
@@ -27,6 +38,14 @@ export class TrayGenerator {
 
     this.createTray(title);
   }
+
+  updateShortcuts = (shortcuts: ShortcutSettings) => {
+    this.shortcuts = shortcuts;
+  };
+
+  private acceleratorToMenuLabel = (acc: string): string => {
+    return acc.replace(/Command/g, 'Cmd').replace(/Control/g, 'Ctrl');
+  };
 
   onTrayClick = () => {
     if (this.onTrayClickCallback) {
@@ -71,10 +90,10 @@ export class TrayGenerator {
       {
         label: 'Keyboard Shortcuts',
         submenu: [
-          { label: 'Cmd+Ctrl+R: Open CodeV Quick Switcher', enabled: false },
+          { label: `${this.acceleratorToMenuLabel(this.shortcuts.quickSwitcher)}: Open CodeV Quick Switcher`, enabled: false },
           { label: 'Tab: Switch Projects / Sessions', enabled: false },
-          { label: 'Cmd+Ctrl+E: AI Assistant Insight', enabled: false },
-          { label: 'Cmd+Ctrl+C: AI Assistant Smart Chat', enabled: false },
+          { label: `${this.acceleratorToMenuLabel(this.shortcuts.aiInsight)}: AI Assistant Insight`, enabled: false },
+          { label: `${this.acceleratorToMenuLabel(this.shortcuts.aiChat)}: AI Assistant Smart Chat`, enabled: false },
         ],
       },
       { type: 'separator' },

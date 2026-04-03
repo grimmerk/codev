@@ -323,12 +323,14 @@ function SwitcherApp() {
     [],
   );
   const [projectBranches, setProjectBranches] = useState<Record<string, string>>({});
+  const [activeIDEFolders, setActiveIDEFolders] = useState<Set<string>>(new Set());
   const [allSessions, setAllSessions] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(-1);
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<Record<string, string>>({});
+  const [prLinks, setPrLinks] = useState<Record<string, { prNumber: number; prUrl: string }>>({});
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
@@ -350,7 +352,8 @@ function SwitcherApp() {
     if (!query.trim()) return allItems;
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return allItems.filter((s) => {
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
+      const prInfo = prLinks[s.sessionId];
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber}` : ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
       return words.every((w: string) => searchTarget.includes(w));
     });
   };
@@ -407,12 +410,15 @@ function SwitcherApp() {
 
     // Step 3: Load custom titles + branches in background
     if (result && result.length > 0) {
-      window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment: { titles: Record<string, string>; branches: Record<string, string> }) => {
+      window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment) => {
         if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
           setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
         }
         if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
           setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+        }
+        if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+          setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
         }
       });
     }
@@ -435,6 +441,8 @@ function SwitcherApp() {
         optionPress.current = true;
       }
       // Tab (without modifiers) to toggle between Projects and Sessions
+      // - Switching to sessions: refetch sessions (projects rely on window-focus refresh)
+      // - Switching to projects: no refetch (projects already refreshed on window focus)
       if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && modeRef.current !== 'terminal') {
         e.preventDefault();
         const newMode = modeRef.current === 'projects' ? 'sessions' : 'projects';
@@ -483,10 +491,16 @@ function SwitcherApp() {
       forceFocusOnInput();
     });
 
+    // Data refresh on window focus:
+    // - Projects: always refetch (complements tab-switch which doesn't refetch projects)
+    // - Sessions: only refetch if sessions tab is active (tab-switch already fetches on entry)
     window.electronAPI.onFocusWindow((_event: any) => {
       if (modeRef.current !== 'terminal') {
         fetchRecentProjectRecord();
         fetchWorkingFolderAndUpdate();
+        window.electronAPI.detectActiveIDEProjects().then((folders: string[]) => {
+          setActiveIDEFolders(new Set(folders));
+        });
       }
       if (modeRef.current === 'sessions') {
         fetchClaudeSessions();
@@ -548,6 +562,9 @@ function SwitcherApp() {
             if (branches && Object.keys(branches).length > 0) {
               setProjectBranches(branches);
             }
+          });
+          window.electronAPI.detectActiveIDEProjects().then((folders: string[]) => {
+            setActiveIDEFolders(new Set(folders));
           });
         }
       },
@@ -956,6 +973,25 @@ function SwitcherApp() {
                             {terminalApps[session.sessionId]}
                           </span>
                         )}
+                        {prLinks[session.sessionId] && (
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              color: '#7ec8e3',
+                              border: '1px solid #4a8a9e',
+                              borderRadius: '3px',
+                              padding: '1px 5px',
+                              cursor: 'pointer',
+                            }}
+                            title={prLinks[session.sessionId].prUrl}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.electronAPI.openExternal(prLinks[session.sessionId].prUrl);
+                            }}
+                          >
+                            PR #{prLinks[session.sessionId].prNumber}
+                          </span>
+                        )}
                         <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
                           {session.messageCount} msgs
                         </span>
@@ -1104,6 +1140,8 @@ function SwitcherApp() {
           let name = label?.slice(label.lastIndexOf('/') + 1);
           name = name?.replace(/\.code-workspace/, ' (Workspace)');
           const branch = projectBranches[value];
+          const folderName = value?.split('/').pop() || '';
+          const isActiveInIDE = activeIDEFolders.has(folderName);
 
           const nameStyle: any = {
             fontWeight: '500',
@@ -1123,6 +1161,11 @@ function SwitcherApp() {
                 height: '30px',
               }}
             >
+              <div style={{ width: '14px', marginRight: '4px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {isActiveInIDE && (
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#CE93D8', display: 'inline-block' }} />
+                )}
+              </div>
               <div style={nameStyle}>
                 <Highlighter
                   searchWords={searchWords}

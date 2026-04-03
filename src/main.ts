@@ -12,7 +12,7 @@ import {
 import settings from 'electron-settings';
 import { existsSync, readdirSync } from 'fs';
 import { DBPathMigrationManager } from './DBPathMigrationManager';
-import { isMAS, TrayGenerator } from './TrayGenerator';
+import { isMAS, ShortcutSettings, TrayGenerator } from './TrayGenerator';
 import { bootstrap } from './server/server';
 import { AIAssistantUIMode, isDebug } from './utility';
 import {
@@ -592,6 +592,11 @@ ipcMain.on('hide-app', (event) => {
   hideSwitcherWindow();
 });
 
+ipcMain.on('open-external', (_event, url: string) => {
+  const { shell } = require('electron');
+  shell.openExternal(url);
+});
+
 ipcMain.on('close-app-click', async (event) => {
   // Hide windows before quit to prevent white flash from xterm container
   switcherWindow?.hide();
@@ -630,7 +635,7 @@ const API_URL = 'http://localhost:55688';
 
 // Import the function to update IDE mode and IDE enum
 import { IDEMode } from './ide-enum';
-import { updateCurrentIDEMode } from './vscode-based-ide-utility';
+import { detectActiveIDEProjects, updateCurrentIDEMode } from './vscode-based-ide-utility';
 
 // Track user settings
 let userSettings = {
@@ -1533,15 +1538,22 @@ const trayToggleEvtHandler = async () => {
     }
   };
 
+  const getCurrentShortcuts = async (): Promise<ShortcutSettings> => ({
+    quickSwitcher: ((await settings.get('shortcut-quickSwitcher')) as string) || DEFAULT_SHORTCUTS.quickSwitcher,
+    aiInsight: ((await settings.get('shortcut-aiInsight')) as string) || DEFAULT_SHORTCUTS.aiInsight,
+    aiChat: ((await settings.get('shortcut-aiChat')) as string) || DEFAULT_SHORTCUTS.aiChat,
+  });
+
+  const syncTrayShortcuts = async () => {
+    if (tray) tray.updateShortcuts(await getCurrentShortcuts());
+  };
+
   await registerAllShortcuts();
+  await syncTrayShortcuts();
 
   // IPC handler: get all shortcut accelerators
   ipcMain.handle('get-shortcuts', async () => {
-    return {
-      quickSwitcher: ((await settings.get('shortcut-quickSwitcher')) as string) || DEFAULT_SHORTCUTS.quickSwitcher,
-      aiInsight: ((await settings.get('shortcut-aiInsight')) as string) || DEFAULT_SHORTCUTS.aiInsight,
-      aiChat: ((await settings.get('shortcut-aiChat')) as string) || DEFAULT_SHORTCUTS.aiChat,
-    };
+    return await getCurrentShortcuts();
   });
 
   // IPC handler: temporarily unregister a shortcut (while editing)
@@ -1578,6 +1590,7 @@ const trayToggleEvtHandler = async () => {
     const registered = globalShortcut.register(accelerator, callback);
     if (registered) {
       await settings.set(`shortcut-${key}`, accelerator);
+      await syncTrayShortcuts();
       return { success: true };
     } else {
       // Re-register the old shortcut since the new one failed
@@ -1592,6 +1605,7 @@ const trayToggleEvtHandler = async () => {
       await settings.unset(`shortcut-${key}`);
     }
     await registerAllShortcuts();
+    await syncTrayShortcuts();
     return DEFAULT_SHORTCUTS;
   });
 })();
@@ -1800,10 +1814,11 @@ ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPat
 });
 
 ipcMain.handle('load-session-enrichment', async (_event, sessions: any[]) => {
-  const { titles, branches } = await loadSessionEnrichment(sessions);
+  const { titles, branches, prLinks } = await loadSessionEnrichment(sessions);
   return {
     titles: Object.fromEntries(titles),
     branches: Object.fromEntries(branches),
+    prLinks: Object.fromEntries(prLinks),
   };
 });
 
@@ -1831,6 +1846,11 @@ ipcMain.handle('load-project-branches', async (_event, paths: string[]) => {
     }),
   );
   return results;
+});
+
+ipcMain.handle('detect-active-ide-projects', async () => {
+  const folderNames = await detectActiveIDEProjects();
+  return Array.from(folderNames);
 });
 
 app.dock.hide();

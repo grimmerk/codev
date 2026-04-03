@@ -47,9 +47,10 @@ interface IElectronAPI {
   detectTerminalApps: (pidMap: Record<string, number>) => Promise<Record<string, string>>;
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;
-  loadSessionEnrichment: (sessions: any[]) => Promise<{ titles: Record<string, string>; branches: Record<string, string> }>;
+  loadSessionEnrichment: (sessions: any[]) => Promise<{ titles: Record<string, string>; branches: Record<string, string>; prLinks: Record<string, { prNumber: number; prUrl: string }> }>;
   loadLastAssistantResponses: (sessions: any[]) => Promise<Record<string, string>>;
   loadProjectBranches: (paths: string[]) => Promise<Record<string, string>>;
+  detectActiveIDEProjects: () => Promise<string[]>;
 
   // VS Code SQLite
   fetchVSCodeBasedIDESqlite: () => void;
@@ -58,6 +59,7 @@ interface IElectronAPI {
   onVSCodeBasedSqliteRecordDeleted: (callback: IpcCallback) => void;
 
   // Window events
+  openExternal: (url: string) => void;
   onFolderSelected: (callback: IpcCallback) => void;
   onWorkingFolderIterated: (callback: IpcCallback) => void;
   onFocusWindow: (callback: IpcCallback) => void;

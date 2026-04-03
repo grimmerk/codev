@@ -76,13 +76,20 @@ jobs:
       - name: Extract release notes from CHANGELOG.md
         id: changelog
         if: ${{ inputs.create_release && inputs.release_notes == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          # Extract section for this version from CHANGELOG.md
-          # Note: can't use awk range pattern /start/,/end/ because the start line
-          # "## 1.0.38" also matches the end pattern /^## [0-9]/ (version starts with digit),
-          # causing awk to treat the range as a single line.
-          NOTES=$(awk -v ver="## ${VERSION}" '$0 == ver {found=1; next} found && /^## / {exit} found' CHANGELOG.md | sed '/^$/d')
+          # Find the last published release version to aggregate all unreleased entries
+          LAST_TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
+          LAST_VER=$(echo "$LAST_TAG" | sed 's/^v//')
+          # Extract all changelog sections from current version down to (but not including) last release
+          if [ -n "$LAST_VER" ] && [ "$LAST_VER" != "$VERSION" ]; then
+            NOTES=$(awk -v cur="## ${VERSION}" -v prev="## ${LAST_VER}" \
+              '$0 == cur {found=1} found && $0 == prev {exit} found' CHANGELOG.md | sed '/^$/d')
+          else
+            NOTES=$(awk -v ver="## ${VERSION}" '$0 == ver {found=1; next} found && /^## / {exit} found' CHANGELOG.md | sed '/^$/d')
+          fi
           if [ -z "$NOTES" ]; then
             NOTES="Non-App Store notarized build v${VERSION}"
           fi
