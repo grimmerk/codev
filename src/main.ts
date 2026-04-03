@@ -576,6 +576,9 @@ ipcMain.on('hide-app', (event) => {
 });
 
 ipcMain.on('close-app-click', async (event) => {
+  // Hide windows before quit to prevent white flash from xterm container
+  switcherWindow?.hide();
+  aiAssistantWindow?.hide();
   app.quit();
 });
 
