@@ -1,10 +1,11 @@
-// Must be before all imports — suppress EPIPE before Electron registers its dialog handler
-process.on('uncaughtException', (err) => {
-  if (err?.message?.includes('EPIPE')) return;
-  // Log non-EPIPE errors but don't re-throw (re-throw causes Electron to show dialog again)
-  const { dialog: d } = require('electron');
-  d?.showErrorBox?.('Uncaught Exception', err?.stack || err?.message || String(err));
-});
+// Wrap console methods to prevent EPIPE crashes (Node 24 + Electron dev mode).
+// EPIPE occurs when stdout/stderr pipe is broken (e.g., webpack dev server restarts).
+const _log = console.log;
+const _error = console.error;
+const _warn = console.warn;
+console.log = (...args: any[]) => { try { _log(...args); } catch {} };
+console.error = (...args: any[]) => { try { _error(...args); } catch {} };
+console.warn = (...args: any[]) => { try { _warn(...args); } catch {} };
 process.stdout.on('error', () => {});
 process.stderr.on('error', () => {});
 
