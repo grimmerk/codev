@@ -4,7 +4,7 @@
 
 - Fix: menubar Keyboard Shortcuts submenu now reflects custom shortcuts
 - Fix: GitHub release notes now aggregate all unreleased changelog entries
-- Feat: PR link badge in session list items (clickable, opens browser)
+- Feat: PR link badge in session list items (clickable, opens browser, searchable by URL)
 - Feat: purple dot on projects currently open in VS Code/Cursor
 - Pin axios to 1.14.0 (avoid compromised 1.14.1)
 
