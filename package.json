@@ -95,7 +95,8 @@
     "update-electron-app": "^3.1.2"
   },
   "resolutions": {
-    "node-abi": "^4.28.0"
+    "node-abi": "^4.28.0",
+    "webpack": "^5.97.0"
   },
   "packageManager": "yarn@1.22.22"
 }
