@@ -68,6 +68,7 @@ const PopupDefaultExample = ({
     quickSwitcher: 'Command+Control+R',
     aiInsight: 'Command+Control+E',
     aiChat: 'Command+Control+C',
+    terminal: 'Command+Control+T',
   });
   const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
   const [shortcutError, setShortcutError] = useState('');
@@ -214,6 +215,7 @@ const PopupDefaultExample = ({
         quickSwitcher: defaults.quickSwitcher,
         aiInsight: defaults.aiInsight,
         aiChat: defaults.aiChat,
+        terminal: defaults.terminal,
       });
     }
     setEditingShortcut(null);
@@ -232,6 +234,7 @@ const PopupDefaultExample = ({
     { key: 'quickSwitcher', label: 'Quick Switcher' },
     { key: 'aiInsight', label: 'AI Insight' },
     { key: 'aiChat', label: 'AI Chat' },
+    { key: 'terminal', label: 'Terminal' },
   ];
 
   return (

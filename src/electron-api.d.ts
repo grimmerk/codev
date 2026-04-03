@@ -63,6 +63,8 @@ interface IElectronAPI {
   onFolderSelected: (callback: IpcCallback) => void;
   onWorkingFolderIterated: (callback: IpcCallback) => void;
   onFocusWindow: (callback: IpcCallback) => void;
+  onSwitchToTerminal: (callback: IpcCallback) => void;
+  onCheckTerminalAndHide: (callback: IpcCallback) => void;
   onXWinNotFound: (callback: IpcCallback) => void;
 
   // AI Assistant insight events
@@ -108,9 +110,9 @@ interface IElectronAPI {
   searchConversations: (searchTerm: string) => Promise<any>;
 
   // Keyboard shortcuts
-  getShortcuts: () => Promise<{ quickSwitcher: string; aiInsight: string; aiChat: string }>;
+  getShortcuts: () => Promise<{ quickSwitcher: string; aiInsight: string; aiChat: string; terminal: string }>;
   setShortcut: (key: string, accelerator: string) => Promise<{ success: boolean; error?: string }>;
-  resetShortcuts: () => Promise<{ quickSwitcher: string; aiInsight: string; aiChat: string }>;
+  resetShortcuts: () => Promise<{ quickSwitcher: string; aiInsight: string; aiChat: string; terminal: string }>;
   pauseShortcut: (key: string) => Promise<void>;
   resumeShortcut: (key: string) => Promise<void>;
 

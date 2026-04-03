@@ -491,6 +491,20 @@ function SwitcherApp() {
       forceFocusOnInput();
     });
 
+    window.electronAPI.onSwitchToTerminal(() => {
+      modeRef.current = 'terminal';
+      setMode('terminal');
+    });
+
+    window.electronAPI.onCheckTerminalAndHide(() => {
+      if (modeRef.current === 'terminal') {
+        window.electronAPI.hideApp();
+      } else {
+        modeRef.current = 'terminal';
+        setMode('terminal');
+      }
+    });
+
     // Data refresh on window focus:
     // - Projects: always refetch (complements tab-switch which doesn't refetch projects)
     // - Sessions: only refetch if sessions tab is active (tab-switch already fetches on entry)

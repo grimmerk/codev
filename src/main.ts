@@ -1205,6 +1205,7 @@ const trayToggleEvtHandler = async () => {
     quickSwitcher: 'Command+Control+R',
     aiInsight: 'Command+Control+E',
     aiChat: 'Command+Control+C',
+    terminal: 'Command+Control+T',
   };
 
   // Shortcut callback: Quick Switcher
@@ -1516,11 +1517,27 @@ const trayToggleEvtHandler = async () => {
     // End of the new implementation
   };
 
+  // Shortcut callback: Terminal (Ctrl+Cmd+T) — toggle behavior like Quick Switcher
+  const terminalCallback = () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      switcherWindow = createSwitcherWindow();
+    }
+    const window = getSwitcherWindow();
+    if (window && window.isVisible()) {
+      // If already showing Terminal tab, hide; otherwise switch to Terminal
+      window.webContents.send('check-terminal-and-hide');
+    } else if (window) {
+      window.webContents.send('switch-to-terminal');
+      showSwitcherWindow();
+    }
+  };
+
   // Map shortcut keys to their callbacks
   const shortcutCallbacks: Record<string, () => void> = {
     quickSwitcher: quickSwitcherCallback,
     aiInsight: aiInsightCallback,
     aiChat: aiChatCallback,
+    terminal: terminalCallback,
   };
 
   // Register all shortcuts from settings (or defaults)
@@ -1542,6 +1559,7 @@ const trayToggleEvtHandler = async () => {
     quickSwitcher: ((await settings.get('shortcut-quickSwitcher')) as string) || DEFAULT_SHORTCUTS.quickSwitcher,
     aiInsight: ((await settings.get('shortcut-aiInsight')) as string) || DEFAULT_SHORTCUTS.aiInsight,
     aiChat: ((await settings.get('shortcut-aiChat')) as string) || DEFAULT_SHORTCUTS.aiChat,
+    terminal: ((await settings.get('shortcut-terminal')) as string) || DEFAULT_SHORTCUTS.terminal,
   });
 
   const syncTrayShortcuts = async () => {
