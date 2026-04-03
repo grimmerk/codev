@@ -321,6 +321,7 @@ const PopupDefaultExample = ({
               >
                 <option value="projects">Projects</option>
                 <option value="sessions">Sessions</option>
+                <option value="terminal">Terminal</option>
               </select>
             </div>
             <div style={rowStyle}>

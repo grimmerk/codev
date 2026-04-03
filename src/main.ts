@@ -1,3 +1,12 @@
+// Must be before all imports — suppress EPIPE before Electron registers its dialog handler
+process.on('uncaughtException', (err) => {
+  if (err?.message?.includes('EPIPE')) return;
+  // Re-throw non-EPIPE errors so Electron shows them
+  throw err;
+});
+process.stdout.on('error', () => {});
+process.stderr.on('error', () => {});
+
 import {
   app,
   autoUpdater,
@@ -1607,6 +1616,55 @@ ipcMain.on('install-update', () => {
 
 ipcMain.handle('get-update-status', () => {
   return lastUpdateStatus;
+});
+
+// Terminal (node-pty) IPC handlers
+let ptyProcess: any = null;
+
+ipcMain.on('terminal-spawn', (_event, options: { cwd?: string; cols?: number; rows?: number }) => {
+  if (ptyProcess) {
+    ptyProcess.kill();
+    ptyProcess = null;
+  }
+  try {
+    const pty = require('node-pty');
+    const shell = process.env.SHELL || '/bin/zsh';
+    const homePath = require('os').homedir();
+    const cwd = options.cwd || (settings.getSync('workingFolderPath') as string) || homePath;
+    ptyProcess = pty.spawn(shell, [], {
+      name: 'xterm-256color',
+      cols: options.cols || 80,
+      rows: options.rows || 24,
+      cwd,
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+    ptyProcess.onData((data: string) => {
+      switcherWindow?.webContents.send('terminal-data', data);
+    });
+    ptyProcess.onExit(() => {
+      switcherWindow?.webContents.send('terminal-exit');
+      ptyProcess = null;
+    });
+  } catch (e) {
+    if (isDebug) {
+      console.error('Failed to spawn terminal:', e);
+    }
+  }
+});
+
+ipcMain.on('terminal-input', (_event, data: string) => {
+  ptyProcess?.write(data);
+});
+
+ipcMain.on('terminal-resize', (_event, cols: number, rows: number) => {
+  ptyProcess?.resize(cols, rows);
+});
+
+ipcMain.on('terminal-kill', () => {
+  if (ptyProcess) {
+    ptyProcess.kill();
+    ptyProcess = null;
+  }
 });
 
 // Login item settings are now controlled by the user via Settings UI toggle

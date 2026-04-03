@@ -25,6 +25,7 @@ export const mainConfig: Configuration = {
     '@nestjs/websockets',
     '@nestjs/websockets/socket-module',
     '@nestjs/microservices/microservices-module',
+    'node-pty',
   ],
   resolve: {
     extensions: ['.js', '.ts', '.jsx', '.tsx', '.css', '.json'],

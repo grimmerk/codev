@@ -5,8 +5,9 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
+import TerminalTab from './terminal-tab';
 
-type SwitcherMode = 'projects' | 'sessions';
+type SwitcherMode = 'projects' | 'sessions' | 'terminal';
 // import { fetchVSCodeBasedOpenedWindows, SERVER_URL, deleteRecentProjectRecord } from "./vscode-based-ide-utility"
 export const SERVER_URL = 'http://localhost:55688';
 
@@ -304,6 +305,7 @@ function SwitcherApp() {
   const sessionSearchRef = useRef<HTMLInputElement>(null);
   const ignoreMouseEnterRef = useRef(false);
   const forceFocusOnInput = () => {
+    if (modeRef.current === 'terminal') return; // terminal handles its own focus
     if (modeRef.current === 'sessions') {
       sessionSearchRef.current?.focus();
     } else {
@@ -432,10 +434,12 @@ function SwitcherApp() {
       if (e.keyCode === OPTION_KEY) {
         optionPress.current = true;
       }
-      // Tab to toggle between projects and sessions
+      // Tab to cycle between projects, sessions, and terminal
       if (e.key === 'Tab') {
         e.preventDefault();
-        const newMode = modeRef.current === 'projects' ? 'sessions' : 'projects';
+        const cycle: SwitcherMode[] = ['projects', 'sessions', 'terminal'];
+        const idx = cycle.indexOf(modeRef.current);
+        const newMode = cycle[(idx + 1) % cycle.length];
         modeRef.current = newMode;
         setMode(newMode);
         if (newMode === 'sessions') {
@@ -459,8 +463,10 @@ function SwitcherApp() {
     });
 
     window.electronAPI.onFocusWindow((_event: any) => {
-      fetchRecentProjectRecord();
-      fetchWorkingFolderAndUpdate();
+      if (modeRef.current !== 'terminal') {
+        fetchRecentProjectRecord();
+        fetchWorkingFolderAndUpdate();
+      }
       if (modeRef.current === 'sessions') {
         fetchClaudeSessions();
       }
@@ -473,6 +479,7 @@ function SwitcherApp() {
       setTimeout(() => { ignoreMouseEnterRef.current = false; }, 300);
       // Re-focus search input so arrow keys work (not captured by scroll container)
       setTimeout(() => {
+        if (modeRef.current === 'terminal') return;
         if (modeRef.current === 'sessions') {
           sessionSearchRef.current?.focus();
         } else {
@@ -681,7 +688,7 @@ function SwitcherApp() {
               fontSize: '18px',
             }}
           >
-            {mode === 'projects' ? '📂' : '🤖'}
+            {mode === 'projects' ? '📂' : mode === 'terminal' ? '💻' : '🤖'}
           </span>
           CodeV Quick Switcher
         </div>
@@ -700,10 +707,12 @@ function SwitcherApp() {
                 padding: '4px 10px',
                 fontSize: '12px',
                 border: 'none',
+                outline: 'none',
                 cursor: 'pointer',
                 backgroundColor: mode === 'projects' ? THEME.primary : 'transparent',
                 color: mode === 'projects' ? '#fff' : THEME.text.secondary,
                 transition: 'background-color 0.2s',
+                WebkitAppearance: 'none',
               }}
             >
               Projects
@@ -714,13 +723,31 @@ function SwitcherApp() {
                 padding: '4px 10px',
                 fontSize: '12px',
                 border: 'none',
+                outline: 'none',
                 cursor: 'pointer',
                 backgroundColor: mode === 'sessions' ? THEME.primary : 'transparent',
                 color: mode === 'sessions' ? '#fff' : THEME.text.secondary,
                 transition: 'background-color 0.2s',
+                WebkitAppearance: 'none',
               }}
             >
               Sessions
+            </button>
+            <button
+              onClick={() => { modeRef.current = 'terminal'; setMode('terminal'); }}
+              style={{
+                padding: '4px 10px',
+                fontSize: '12px',
+                border: 'none',
+                outline: 'none',
+                cursor: 'pointer',
+                backgroundColor: mode === 'terminal' ? THEME.primary : 'transparent',
+                color: mode === 'terminal' ? '#fff' : THEME.text.secondary,
+                transition: 'background-color 0.2s',
+                WebkitAppearance: 'none',
+              }}
+            >
+              Term
             </button>
           </div>
           <PopupDefaultExample
@@ -735,7 +762,12 @@ function SwitcherApp() {
         </div>
       </div>
 
-      {mode === 'sessions' ? (
+      {/* Terminal tab: always mounted, toggle visibility to preserve state */}
+      <div style={{ flex: 1, overflow: 'hidden', display: mode === 'terminal' ? 'flex' : 'none' }}>
+        <TerminalTab visible={mode === 'terminal'} />
+      </div>
+
+      {mode !== 'terminal' && (mode === 'sessions' ? (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 15px 0' }}>
             <input
@@ -1165,7 +1197,7 @@ function SwitcherApp() {
         }}
       />
       </div>
-      )}
+      ))}
     </div>
   );
 }

@@ -112,6 +112,14 @@ interface IElectronAPI {
   pauseShortcut: (key: string) => Promise<void>;
   resumeShortcut: (key: string) => Promise<void>;
 
+  // Terminal (node-pty + xterm.js)
+  terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => void;
+  terminalInput: (data: string) => void;
+  terminalResize: (cols: number, rows: number) => void;
+  terminalKill: () => void;
+  onTerminalData: (callback: IpcCallback) => void;
+  onTerminalExit: (callback: IpcCallback) => void;
+
   // Legacy aliases (ai-assistant-ui.tsx compatibility)
   onInsightStart?: (callback: IpcCallback) => void;
   onInsightChunk?: (callback: IpcCallback) => void;
