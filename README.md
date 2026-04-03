@@ -114,6 +114,8 @@ Trigger `⌃+⌘+C` shortcut to launch pure AI chat mode, just like the Claude o
       - `db:migrate` will also automatically do this part, `yarn install` will also include generated types in node_modules/.prisma/index.d.ts)
   - `yarn start`
 
+> **Git worktree note:** Prisma 4.x downloads native engine binaries during postinstall, but `yarn install` in a worktree may not trigger this correctly. If you see `PrismaClientInitializationError: Unable to require libquery_engine-darwin-arm64.dylib.node`, copy the binary from the main repo: `cp <main-repo>/node_modules/@prisma/engines/libquery_engine-darwin-arm64.dylib.node node_modules/@prisma/engines/`
+
 ### SQLite database locations
 
 CodeV uses its own SQLite database (via Prisma) for storing user settings, AI assistant settings, and conversation history. Recent projects data is read directly from VS Code/Cursor's `state.vscdb`.

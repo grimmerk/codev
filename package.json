@@ -1,7 +1,7 @@
 {
   "name": "CodeV",
   "productName": "CodeV",
-  "version": "1.0.56",
+  "version": "1.0.57",
   "description": "Quick switcher for VS Code, Cursor, and Claude Code sessions",
   "repository": {
     "type": "git",
@@ -74,7 +74,7 @@
     "@prisma/client": "^4.16.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "axios": "^1.14.0",
+    "axios": "1.14.0",
     "better-sqlite3": "^12.8.0",
     "class-transformer": "0.5.1",
     "class-validator": "0.14.0",
