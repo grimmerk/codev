@@ -441,6 +441,8 @@ function SwitcherApp() {
         optionPress.current = true;
       }
       // Tab (without modifiers) to toggle between Projects and Sessions
+      // - Switching to sessions: refetch sessions (projects rely on window-focus refresh)
+      // - Switching to projects: no refetch (projects already refreshed on window focus)
       if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && modeRef.current !== 'terminal') {
         e.preventDefault();
         const newMode = modeRef.current === 'projects' ? 'sessions' : 'projects';
@@ -489,6 +491,9 @@ function SwitcherApp() {
       forceFocusOnInput();
     });
 
+    // Data refresh on window focus:
+    // - Projects: always refetch (complements tab-switch which doesn't refetch projects)
+    // - Sessions: only refetch if sessions tab is active (tab-switch already fetches on entry)
     window.electronAPI.onFocusWindow((_event: any) => {
       if (modeRef.current !== 'terminal') {
         fetchRecentProjectRecord();
