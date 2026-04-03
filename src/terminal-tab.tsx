@@ -32,6 +32,14 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
     term.loadAddon(fitAddon);
     term.open(termRef.current);
 
+    // Let tab-switching shortcuts pass through to parent
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.metaKey && ['1', '2', '3', '[', ']'].includes(e.key)) {
+        return false; // don't handle in terminal
+      }
+      return true;
+    });
+
     // Terminal input → main process
     term.onData((data) => {
       window.electronAPI.terminalInput(data);

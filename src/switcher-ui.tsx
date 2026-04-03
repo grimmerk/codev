@@ -434,16 +434,35 @@ function SwitcherApp() {
       if (e.keyCode === OPTION_KEY) {
         optionPress.current = true;
       }
-      // Tab to cycle between projects, sessions, and terminal
-      if (e.key === 'Tab') {
+      // Tab to toggle between Projects and Sessions (not Terminal — Tab needed for shell)
+      if (e.key === 'Tab' && modeRef.current !== 'terminal') {
         e.preventDefault();
-        const cycle: SwitcherMode[] = ['projects', 'sessions', 'terminal'];
-        const idx = cycle.indexOf(modeRef.current);
-        const newMode = cycle[(idx + 1) % cycle.length];
+        const newMode = modeRef.current === 'projects' ? 'sessions' : 'projects';
         modeRef.current = newMode;
         setMode(newMode);
         if (newMode === 'sessions') {
           fetchClaudeSessions();
+        }
+      }
+      // Cmd+[ / Cmd+] to cycle all tabs (including Terminal)
+      if (e.metaKey && !e.ctrlKey && !e.altKey && (e.key === '[' || e.key === ']')) {
+        e.preventDefault();
+        const cycle: SwitcherMode[] = ['projects', 'sessions', 'terminal'];
+        const idx = cycle.indexOf(modeRef.current);
+        const newMode = cycle[(idx + (e.key === ']' ? 1 : cycle.length - 1)) % cycle.length];
+        modeRef.current = newMode;
+        setMode(newMode);
+        if (newMode === 'sessions') fetchClaudeSessions();
+      }
+      // Cmd+1/2/3 to jump to specific tab
+      if (e.metaKey && !e.ctrlKey && !e.altKey) {
+        const tabMap: Record<string, SwitcherMode> = { '1': 'projects', '2': 'sessions', '3': 'terminal' };
+        if (tabMap[e.key]) {
+          e.preventDefault();
+          const newMode = tabMap[e.key];
+          modeRef.current = newMode;
+          setMode(newMode);
+          if (newMode === 'sessions') fetchClaudeSessions();
         }
       }
     }
