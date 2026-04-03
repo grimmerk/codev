@@ -1,10 +1,4 @@
-// Prevent EPIPE crashes by wrapping the lowest-level write functions.
-// Node 24 throws EPIPE synchronously from process.stdout/stderr.write when pipe breaks.
-// Wrapping console.log/error isn't enough — Electron/Node internals call write() directly.
-const _stdoutWrite = process.stdout.write.bind(process.stdout);
-const _stderrWrite = process.stderr.write.bind(process.stderr);
-(process.stdout as any).write = (...args: any[]) => { try { return _stdoutWrite(...args); } catch { return true; } };
-(process.stderr as any).write = (...args: any[]) => { try { return _stderrWrite(...args); } catch { return true; } };
+import './epipe-fix'; // Must be first — wraps stdout/stderr before any module writes
 
 import {
   app,
