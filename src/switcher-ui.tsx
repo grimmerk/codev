@@ -759,7 +759,7 @@ function SwitcherApp() {
                       x1="12" y1="12"
                       x2={12 + Math.cos(rad) * len}
                       y2={12 + Math.sin(rad) * len}
-                      stroke="#CE93D8"
+                      stroke="#E8B830"
                       strokeWidth="1.8"
                       strokeLinecap="round"
                     />
