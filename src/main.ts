@@ -12,7 +12,7 @@ import {
 import settings from 'electron-settings';
 import { existsSync, readdirSync } from 'fs';
 import { DBPathMigrationManager } from './DBPathMigrationManager';
-import { isMAS, TrayGenerator } from './TrayGenerator';
+import { isMAS, ShortcutSettings, TrayGenerator } from './TrayGenerator';
 import { bootstrap } from './server/server';
 import { AIAssistantUIMode, isDebug } from './utility';
 import {
@@ -1533,15 +1533,22 @@ const trayToggleEvtHandler = async () => {
     }
   };
 
+  const getCurrentShortcuts = async (): Promise<ShortcutSettings> => ({
+    quickSwitcher: ((await settings.get('shortcut-quickSwitcher')) as string) || DEFAULT_SHORTCUTS.quickSwitcher,
+    aiInsight: ((await settings.get('shortcut-aiInsight')) as string) || DEFAULT_SHORTCUTS.aiInsight,
+    aiChat: ((await settings.get('shortcut-aiChat')) as string) || DEFAULT_SHORTCUTS.aiChat,
+  });
+
+  const syncTrayShortcuts = async () => {
+    if (tray) tray.updateShortcuts(await getCurrentShortcuts());
+  };
+
   await registerAllShortcuts();
+  await syncTrayShortcuts();
 
   // IPC handler: get all shortcut accelerators
   ipcMain.handle('get-shortcuts', async () => {
-    return {
-      quickSwitcher: ((await settings.get('shortcut-quickSwitcher')) as string) || DEFAULT_SHORTCUTS.quickSwitcher,
-      aiInsight: ((await settings.get('shortcut-aiInsight')) as string) || DEFAULT_SHORTCUTS.aiInsight,
-      aiChat: ((await settings.get('shortcut-aiChat')) as string) || DEFAULT_SHORTCUTS.aiChat,
-    };
+    return await getCurrentShortcuts();
   });
 
   // IPC handler: temporarily unregister a shortcut (while editing)
@@ -1578,6 +1585,7 @@ const trayToggleEvtHandler = async () => {
     const registered = globalShortcut.register(accelerator, callback);
     if (registered) {
       await settings.set(`shortcut-${key}`, accelerator);
+      await syncTrayShortcuts();
       return { success: true };
     } else {
       // Re-register the old shortcut since the new one failed
@@ -1592,6 +1600,7 @@ const trayToggleEvtHandler = async () => {
       await settings.unset(`shortcut-${key}`);
     }
     await registerAllShortcuts();
+    await syncTrayShortcuts();
     return DEFAULT_SHORTCUTS;
   });
 })();
