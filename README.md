@@ -52,7 +52,8 @@ CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same tec
 | Shortcut | Action |
 |----------|--------|
 | `Tab` | Toggle between Projects ↔ Sessions |
-| `⌃+Tab` | Cycle all tabs (Projects → Sessions → Terminal) |
+| `⌃+Tab` | Cycle all tabs forward |
+| `⌘+[` / `⌘+]` | Cycle all tabs backward / forward |
 | `⌘+1` / `⌘+2` / `⌘+3` | Jump to Projects / Sessions / Terminal |
 
 ### AI Assistant feature

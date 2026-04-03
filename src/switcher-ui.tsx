@@ -434,8 +434,8 @@ function SwitcherApp() {
       if (e.keyCode === OPTION_KEY) {
         optionPress.current = true;
       }
-      // Tab to toggle between Projects and Sessions (not Terminal — Tab needed for shell)
-      if (e.key === 'Tab' && modeRef.current !== 'terminal') {
+      // Tab (without modifiers) to toggle between Projects and Sessions
+      if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && modeRef.current !== 'terminal') {
         e.preventDefault();
         const newMode = modeRef.current === 'projects' ? 'sessions' : 'projects';
         modeRef.current = newMode;

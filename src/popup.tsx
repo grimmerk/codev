@@ -631,6 +631,7 @@ const PopupDefaultExample = ({
               {[
                 { keys: 'Tab', label: 'Projects \u2194 Sessions' },
                 { keys: '\u2303+Tab', label: 'Cycle All Tabs' },
+                { keys: '\u2318+[ / ]', label: 'Prev / Next Tab' },
                 { keys: '\u2318+1/2/3', label: 'Jump to Tab' },
               ].map((row) => (
                 <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
