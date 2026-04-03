@@ -1,8 +1,9 @@
 // Must be before all imports — suppress EPIPE before Electron registers its dialog handler
 process.on('uncaughtException', (err) => {
   if (err?.message?.includes('EPIPE')) return;
-  // Re-throw non-EPIPE errors so Electron shows them
-  throw err;
+  // Log non-EPIPE errors but don't re-throw (re-throw causes Electron to show dialog again)
+  const { dialog: d } = require('electron');
+  d?.showErrorBox?.('Uncaught Exception', err?.stack || err?.message || String(err));
 });
 process.stdout.on('error', () => {});
 process.stderr.on('error', () => {});
