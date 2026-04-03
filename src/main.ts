@@ -416,6 +416,13 @@ const createSwitcherWindow = (): BrowserWindow => {
     return { action: 'deny' as const };
   });
 
+  // Disable Cmd+R reload (not useful for menu bar app)
+  window.webContents.on('before-input-event', (_event: any, input: any) => {
+    if (input.meta && input.key === 'r' && !input.control) {
+      _event.preventDefault();
+    }
+  });
+
   // if (isDebug) {
   //   window.webContents.openDevTools({ mode: 'detach' });
   // }
