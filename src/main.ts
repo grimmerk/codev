@@ -592,6 +592,11 @@ ipcMain.on('hide-app', (event) => {
   hideSwitcherWindow();
 });
 
+ipcMain.on('open-external', (_event, url: string) => {
+  const { shell } = require('electron');
+  shell.openExternal(url);
+});
+
 ipcMain.on('close-app-click', async (event) => {
   // Hide windows before quit to prevent white flash from xterm container
   switcherWindow?.hide();
@@ -1809,10 +1814,11 @@ ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPat
 });
 
 ipcMain.handle('load-session-enrichment', async (_event, sessions: any[]) => {
-  const { titles, branches } = await loadSessionEnrichment(sessions);
+  const { titles, branches, prLinks } = await loadSessionEnrichment(sessions);
   return {
     titles: Object.fromEntries(titles),
     branches: Object.fromEntries(branches),
+    prLinks: Object.fromEntries(prLinks),
   };
 });
 

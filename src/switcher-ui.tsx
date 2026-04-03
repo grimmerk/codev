@@ -329,6 +329,7 @@ function SwitcherApp() {
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<Record<string, string>>({});
+  const [prLinks, setPrLinks] = useState<Record<string, { prNumber: number; prUrl: string }>>({});
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
@@ -350,7 +351,8 @@ function SwitcherApp() {
     if (!query.trim()) return allItems;
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return allItems.filter((s) => {
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
+      const prInfo = prLinks[s.sessionId];
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber}` : ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
       return words.every((w: string) => searchTarget.includes(w));
     });
   };
@@ -407,12 +409,15 @@ function SwitcherApp() {
 
     // Step 3: Load custom titles + branches in background
     if (result && result.length > 0) {
-      window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment: { titles: Record<string, string>; branches: Record<string, string> }) => {
+      window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment) => {
         if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
           setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
         }
         if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
           setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+        }
+        if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+          setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
         }
       });
     }
@@ -954,6 +959,25 @@ function SwitcherApp() {
                             textTransform: 'uppercase',
                           }}>
                             {terminalApps[session.sessionId]}
+                          </span>
+                        )}
+                        {prLinks[session.sessionId] && (
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              color: '#7ec8e3',
+                              border: '1px solid #4a8a9e',
+                              borderRadius: '3px',
+                              padding: '1px 5px',
+                              cursor: 'pointer',
+                            }}
+                            title={prLinks[session.sessionId].prUrl}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.electronAPI.openExternal(prLinks[session.sessionId].prUrl);
+                            }}
+                          >
+                            PR #{prLinks[session.sessionId].prNumber}
                           </span>
                         )}
                         <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>

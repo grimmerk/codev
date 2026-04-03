@@ -865,18 +865,25 @@ end tell`;
  * Reads each session's JSONL file and greps for "custom-title" entries.
  * Returns a map of sessionId -> customTitle.
  */
+export interface PRLinkInfo {
+  prNumber: number;
+  prUrl: string;
+}
+
 export interface SessionEnrichment {
   titles: Map<string, string>;
   branches: Map<string, string>;
+  prLinks: Map<string, PRLinkInfo>;
 }
 
-// Cache for branches
+// Cache for branches and PR links
 let cachedBranches: Map<string, string> | null = null;
+let cachedPRLinks: Map<string, PRLinkInfo> | null = null;
 
 export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<SessionEnrichment> => {
   const now = Date.now();
-  if (cachedCustomTitles && cachedBranches && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
-    return { titles: cachedCustomTitles, branches: cachedBranches };
+  if (cachedCustomTitles && cachedBranches && cachedPRLinks && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
+    return { titles: cachedCustomTitles, branches: cachedBranches, prLinks: cachedPRLinks };
   }
 
   const { exec } = require('child_process');
@@ -889,6 +896,7 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
 
   const titles = new Map<string, string>();
   const branches = new Map<string, string>();
+  const prLinks = new Map<string, PRLinkInfo>();
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const promises = sessions.map(async (session) => {
@@ -897,10 +905,11 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
 
     if (!fs.existsSync(jsonlPath)) return;
 
-    // Run title grep and branch tail in parallel for each file
-    const [titleOutput, branchOutput] = await Promise.all([
+    // Run title, branch, and PR link greps in parallel for each file
+    const [titleOutput, branchOutput, prLinkOutput] = await Promise.all([
       execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
       execPromise(`tail -n 5 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
+      execPromise(`grep '"type":"pr-link"' "${jsonlPath}" 2>/dev/null | tail -1`),
     ]);
 
     if (titleOutput.trim()) {
@@ -919,14 +928,24 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
         branches.set(session.sessionId, match[1]);
       }
     }
+
+    if (prLinkOutput.trim()) {
+      try {
+        const parsed = JSON.parse(prLinkOutput.trim());
+        if (parsed.prNumber && parsed.prUrl) {
+          prLinks.set(session.sessionId, { prNumber: parsed.prNumber, prUrl: parsed.prUrl });
+        }
+      } catch {}
+    }
   });
 
   await Promise.all(promises);
 
   cachedCustomTitles = titles;
   cachedBranches = branches;
+  cachedPRLinks = prLinks;
   titlesCacheTimestamp = now;
-  return { titles, branches };
+  return { titles, branches, prLinks };
 };
 
 /**
