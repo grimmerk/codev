@@ -39,6 +39,22 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 | Ghostty | Title match → cwd fallback | AppleScript new tab/window | Needs `/rename` for same-cwd. **Note:** Ghostty may not support `⌘+V` (paste) and `⌘+Z` (undo) in CodeV's search bar by default — add `keybind = super+v=paste_from_clipboard` and `keybind = super+z=undo` to `~/.config/ghostty/config` ([ghostty#10749](https://github.com/ghostty-org/ghostty/issues/10749#issuecomment-4131892831)) |
 | cmux | Title match → TTY fallback | CLI new-workspace | Same as iTerm2 (requires cmux v0.63+); requires socket access in cmux Settings (`automation` or `allowAll`) |
 
+### Embedded Terminal
+
+CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same technology as VS Code's integrated terminal). Press `⌘+3` or click the **Term** tab to open it.
+
+- Pre-spawned on app start for instant access
+- Default working directory: Settings → Working Directory (fallback to home)
+- Terminal state preserved when switching tabs
+
+**Tab switching shortcuts:**
+
+| Shortcut | Action |
+|----------|--------|
+| `Tab` | Toggle between Projects ↔ Sessions |
+| `⌘+[` / `⌘+]` | Cycle all tabs (Projects → Sessions → Terminal) |
+| `⌘+1` / `⌘+2` / `⌘+3` | Jump to Projects / Sessions / Terminal |
+
 ### AI Assistant feature
 
 #### Insight Chat mode
