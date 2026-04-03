@@ -407,6 +407,15 @@ const createSwitcherWindow = (): BrowserWindow => {
   // and load the index.html of the app.
   window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY);
 
+  // Open external links in default browser
+  const { shell } = require('electron');
+  window.webContents.setWindowOpenHandler(({ url }: { url: string }) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' as const };
+  });
+
   // if (isDebug) {
   //   window.webContents.openDevTools({ mode: 'detach' });
   // }
