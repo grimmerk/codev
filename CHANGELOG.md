@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.56
+
+- Feat: embedded Terminal tab (xterm.js + node-pty)
+- Pre-spawn PTY on app start for instant terminal access
+- Default Tab setting now supports Terminal
+- Upgrade webpack 5.73 → 5.105 (fix xterm.js production tree-shaking)
+- EPIPE crash prevention for Node 24 dev mode
+
 ## 1.0.55
 
 - Feat: macOS Terminal.app support — launch, switch (title + TTY matching), cross-ref disambiguation

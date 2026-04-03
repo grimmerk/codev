@@ -554,6 +554,9 @@ function SwitcherApp() {
         modeRef.current = 'sessions';
         setMode('sessions');
         fetchClaudeSessions();
+      } else if (defaultMode === 'terminal') {
+        modeRef.current = 'terminal';
+        setMode('terminal');
       }
     });
 
