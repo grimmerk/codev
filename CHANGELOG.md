@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.59
+
+- Feat: SVG starburst icon for Sessions tab header (sunflower yellow)
+
 ## 1.0.58
 
 - Feat: ⌃+⌘+T global shortcut for Terminal tab (customizable in Settings)
