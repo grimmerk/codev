@@ -743,7 +743,30 @@ function SwitcherApp() {
               fontSize: '18px',
             }}
           >
-            {mode === 'projects' ? '📂' : mode === 'terminal' ? '💻' : '🤖'}
+            {mode === 'sessions' ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ verticalAlign: 'middle' }}>
+                {/* Anthropic-style starburst — organic, varied ray lengths */}
+                {[
+                  { angle: 0, len: 10 }, { angle: 30, len: 5.5 }, { angle: 55, len: 7 },
+                  { angle: 90, len: 9.5 }, { angle: 125, len: 6 }, { angle: 155, len: 8 },
+                  { angle: 180, len: 10 }, { angle: 210, len: 5 }, { angle: 240, len: 7.5 },
+                  { angle: 270, len: 9 }, { angle: 305, len: 6.5 }, { angle: 335, len: 7 },
+                ].map(({ angle, len }) => {
+                  const rad = (angle * Math.PI) / 180;
+                  return (
+                    <line
+                      key={angle}
+                      x1="12" y1="12"
+                      x2={12 + Math.cos(rad) * len}
+                      y2={12 + Math.sin(rad) * len}
+                      stroke="#CE93D8"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  );
+                })}
+              </svg>
+            ) : mode === 'terminal' ? '💻' : '📂'}
           </span>
           CodeV Quick Switcher
         </div>
