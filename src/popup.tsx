@@ -620,6 +620,19 @@ const PopupDefaultExample = ({
                 </span>
               </div>
             ))}
+            <div style={{ borderTop: '1px solid #333', marginTop: '6px', paddingTop: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#666' }}>Tab Switching</span>
+              {[
+                { keys: 'Tab', label: 'Projects \u2194 Sessions' },
+                { keys: '\u2318+[ / ]', label: 'Cycle All Tabs' },
+                { keys: '\u2318+1/2/3', label: 'Jump to Tab' },
+              ].map((row) => (
+                <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
+                  <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
         </div>
