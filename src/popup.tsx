@@ -392,6 +392,21 @@ const PopupDefaultExample = ({
                 />
               </label>
             </div>
+            {switcherMode !== 'sessions' && (
+              <div style={{ ...rowStyle, gap: '8px' }}>
+                <span style={labelStyle}>Working Dir</span>
+                <div style={{ color: '#aaa', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>
+                  {workingFolderPath || 'None'}
+                </div>
+                <button
+                  onClick={() => openFolderSelector()}
+                  style={{ backgroundColor: 'transparent', border: '1px solid #555', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px', color: THEME.text.primary, flexShrink: 0 }}
+                  title="Change Folder"
+                >
+                  📁
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Projects settings (only in Projects tab) */}
@@ -436,19 +451,6 @@ const PopupDefaultExample = ({
                     {ideDataAccessGranted ? '✓' : 'Grant'}
                   </button>
                 )}
-              </div>
-              <div style={{ ...rowStyle, gap: '8px' }}>
-                <span style={labelStyle}>Working Dir</span>
-                <div style={{ color: '#aaa', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>
-                  {workingFolderPath || 'None'}
-                </div>
-                <button
-                  onClick={() => openFolderSelector()}
-                  style={{ backgroundColor: 'transparent', border: '1px solid #555', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px', color: THEME.text.primary, flexShrink: 0 }}
-                  title="Change Folder"
-                >
-                  📁
-                </button>
               </div>
             </div>
           )}
