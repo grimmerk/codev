@@ -382,7 +382,14 @@ function SwitcherApp() {
     setAllSessions(newSessions);
     setSessions(sessionSearchValue.trim() ? filterSessionsLocally(newSessions, sessionSearchValue) : newSessions);
 
-    // Step 2: Detect active sessions in background (slow, spawns processes)
+    // Step 2: Load last assistant responses for all sessions (first 100)
+    window.electronAPI.loadLastAssistantResponses(result.slice(0, 100)).then((responses: Record<string, string>) => {
+      if (responses && Object.keys(responses).length > 0) {
+        setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+      }
+    });
+
+    // Step 3: Detect active sessions in background (slow, spawns processes)
     window.electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
       // Save to ref for SWR on next refresh
       activeStateRef.current = activeMap || {};
@@ -396,17 +403,6 @@ function SwitcherApp() {
       setSessions((prev: any[]) => updateActive(prev));
 
       if (activeMap && Object.keys(activeMap).length > 0) {
-
-        const activeSessions = (result || []).filter((s: any) => s.sessionId in activeMap);
-
-        // Step 2b: Load last assistant responses for active sessions only
-        if (activeSessions.length > 0) {
-          window.electronAPI.loadLastAssistantResponses(activeSessions).then((responses: Record<string, string>) => {
-            if (responses && Object.keys(responses).length > 0) {
-              setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
-            }
-          });
-        }
 
         // Step 2c: Detect terminal apps for active sessions
         if (Object.keys(activeMap).length > 0) {
@@ -1121,8 +1117,8 @@ function SwitcherApp() {
                         )}
                       </div>
                     )}
-                    {/* Line 3: Last assistant response (only for active sessions) */}
-                    {session.isActive && assistantResponses[session.sessionId] && (
+                    {/* Line 3: Last assistant response */}
+                    {assistantResponses[session.sessionId] && (
                       <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
                         <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
                           ◀ <Highlighter
