@@ -296,4 +296,17 @@ export const scanInitialStatuses = async (
   return statuses;
 };
 
+/**
+ * Write a status file for a session (used to persist JSONL-scanned statuses).
+ */
+export const writeStatusFile = (sessionId: string, status: string): void => {
+  try {
+    fs.mkdirSync(STATUS_DIR, { recursive: true });
+    const tmpFile = path.join(STATUS_DIR, `.${sessionId}.tmp`);
+    const targetFile = path.join(STATUS_DIR, `${sessionId}.json`);
+    fs.writeFileSync(tmpFile, JSON.stringify({ status, timestamp: Math.floor(Date.now() / 1000), cwd: '' }));
+    fs.renameSync(tmpFile, targetFile);
+  } catch {}
+};
+
 export { STATUS_DIR, HOOK_SCRIPT_PATH };

@@ -512,8 +512,8 @@ function SwitcherApp() {
       if (statuses) setSessionStatuses(statuses);
     });
     window.electronAPI.onSessionStatusesUpdated((_event: any, statuses: Record<string, string>) => {
-      // Merge instead of replace — preserve JSONL-scanned statuses for sessions without status files
-      setSessionStatuses((prev) => ({ ...prev, ...statuses }));
+      // Use disk snapshot as source of truth — clears removed sessions
+      setSessionStatuses(statuses);
     });
 
     window.electronAPI.onCheckTerminalAndHide(() => {

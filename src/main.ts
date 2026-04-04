@@ -33,6 +33,7 @@ import {
   readAllStatuses,
   watchStatusDir,
   scanInitialStatuses,
+  writeStatusFile,
   SessionStatus,
 } from './session-status-hooks';
 import {
@@ -1836,6 +1837,10 @@ ipcMain.on('set-session-status-hooks-enabled', async (_event, enabled: boolean) 
 });
 
 ipcMain.handle('get-session-statuses', async () => {
+  // Return empty when hooks disabled — all dots revert to purple
+  const enabled = (await settings.get('session-status-hooks')) !== false;
+  if (!enabled) return {};
+
   const fileStatuses = readAllStatuses();
   const obj: Record<string, SessionStatus> = {};
   fileStatuses.forEach((v, k) => { obj[k] = v; });
@@ -1854,7 +1859,11 @@ ipcMain.handle('get-session-statuses', async () => {
 
     if (sessionsWithoutStatus.length > 0) {
       const scanned = await scanInitialStatuses(sessionsWithoutStatus);
-      scanned.forEach((v, k) => { obj[k] = v; });
+      scanned.forEach((v, k) => {
+        obj[k] = v;
+        // Persist scanned status to file so fs.watch treats all statuses uniformly
+        writeStatusFile(k, v as string);
+      });
     }
   } catch {}
 
