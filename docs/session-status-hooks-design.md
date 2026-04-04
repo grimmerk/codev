@@ -136,6 +136,21 @@ In popup.tsx, under General:
   - ON: installs hooks + hook script, starts fs.watch
   - OFF: removes hooks + hook script, stops fs.watch, all dots revert to current behavior (purple = active)
 
+## Relationship with `detectActiveSessions`
+
+Status hooks are an **additional layer** on top of the existing detection system. Detection tells you *which* sessions are running; hooks tell you *what state* those sessions are in.
+
+| Timing | What runs | Purpose |
+|---|---|---|
+| Startup | `fetchClaudeSessions()` → `detectActiveSessions()` | Detect which sessions are alive (PID check) |
+| Tab switch to Sessions | `fetchClaudeSessions()` → `detectActiveSessions()` | Refresh active state |
+| Window focus (from background) | `onFocusWindow` → `fetchClaudeSessions()` | Refresh active state |
+| Startup (once) | `getSessionStatuses()` → JSONL scan | Determine initial status for sessions without hook data |
+| Real-time | `fs.watch` on `codev-status/` | Status updates from hooks (working/idle/needs-attention) |
+| Window focus | `getSessionStatuses()` | Refresh statuses on return from background |
+
+`detectActiveSessions()` has a 5s TTL cache, so overlapping calls (e.g., from `fetchClaudeSessions` and `getSessionStatuses` at startup) typically hit cache.
+
 ## Performance
 
 | Operation | Cost | Frequency |
