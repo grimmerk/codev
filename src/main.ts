@@ -1834,6 +1834,8 @@ ipcMain.on('set-session-status-hooks-enabled', async (_event, enabled: boolean) 
       statusWatcherCleanup();
       statusWatcherCleanup = null;
     }
+    // Clear renderer dots immediately
+    switcherWindow?.webContents.send('session-statuses-updated', {});
   }
 });
 

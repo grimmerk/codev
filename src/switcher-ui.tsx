@@ -541,7 +541,7 @@ function SwitcherApp() {
       }
       // Refresh session statuses on window focus
       window.electronAPI.getSessionStatuses().then((statuses: Record<string, string | null>) => {
-        if (statuses) setSessionStatuses((prev) => ({ ...prev, ...statuses }));
+        if (statuses) setSessionStatuses(statuses);
       });
       // Refresh display mode setting
       window.electronAPI.getSessionDisplayMode().then((mode: string) => {

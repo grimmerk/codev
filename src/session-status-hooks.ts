@@ -63,14 +63,15 @@ export const installHooks = (): void => {
   // Create status directory
   fs.mkdirSync(STATUS_DIR, { recursive: true });
 
-  // Read existing settings
+  // Read existing settings — abort if file exists but can't be parsed (don't overwrite)
   let settings: any = {};
   try {
     if (fs.existsSync(SETTINGS_PATH)) {
       settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
     }
   } catch {
-    settings = {};
+    // Can't parse existing file — don't risk overwriting user's settings
+    return;
   }
 
   if (!settings.hooks) settings.hooks = {};
