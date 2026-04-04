@@ -4,6 +4,7 @@
 
 - Feat: session status hooks — colored dots for working (pulse) / idle / needs-attention (blink)
 - Feat: auto-install Claude Code hooks for session status detection (toggle in Settings → Sessions)
+- Fix: legacy fallback detection now supports npm-installed Claude Code (#95)
 - Known: if hooks are removed externally while CodeV is running, restart CodeV to recover (#93)
 
 ## 1.0.61
