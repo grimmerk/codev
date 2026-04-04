@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.60
+
+- Fix: terminal cd uses ~ shorthand + clear for cleaner output
+- Fix: POSIX-safe shell escaping for cd path
+- Move Working Dir setting to General (visible in Projects + Terminal tabs)
+
 ## 1.0.59
 
 - Feat: SVG starburst icon for Sessions tab header (sunflower yellow)
