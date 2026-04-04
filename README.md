@@ -1,6 +1,6 @@
 # CodeV
 
-Use this to quickly open and switch VS Code/Cursor projects, and use AI assistant to analyze your code and chat with it instantly.
+Quick switcher for VS Code/Cursor projects, Claude Code session manager with live status indicators, and built-in terminal.
 
 ## Features
 
@@ -19,7 +19,7 @@ Spotlight-like quick open: press `⌃+⌘+R` or click the menu bar icon to launc
 
 ### Claude Code Session Switching
 
-CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode.
+CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode. Live status dots show session state: working (orange pulse), idle (green), needs attention (orange blink).
 
 **Simple rule**: when running multiple sessions in the same project directory at the same time, give each running session a name. Closed sessions don't need names — they won't cause issues.
 
@@ -46,6 +46,8 @@ CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same tec
 - Pre-spawned on app start for instant access
 - Default working directory: Settings → Working Directory (fallback to home)
 - Terminal state preserved when switching tabs
+- `⌘+K` clears screen, `Shift+Enter` for multi-line input (Claude Code compatible)
+- `Cmd+←/→` jumps to beginning/end of line
 
 **Tab switching shortcuts:**
 
