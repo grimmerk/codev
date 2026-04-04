@@ -1793,17 +1793,21 @@ ipcMain.on('set-login-item-settings', (_event, openAtLogin: boolean) => {
 let statusWatcherCleanup: (() => void) | null = null;
 
 const initSessionStatusHooks = async () => {
-  const enabled = (await settings.get('session-status-hooks')) !== false; // default: true
-  if (enabled) {
-    installHooks();
-    // Start watching for status changes
-    if (!statusWatcherCleanup) {
-      statusWatcherCleanup = watchStatusDir((statuses) => {
-        const obj: Record<string, SessionStatus> = {};
-        statuses.forEach((v, k) => { obj[k] = v; });
-        switcherWindow?.webContents.send('session-statuses-updated', obj);
-      });
+  try {
+    const enabled = (await settings.get('session-status-hooks')) !== false; // default: true
+    if (enabled) {
+      installHooks();
+      // Start watching for status changes
+      if (!statusWatcherCleanup) {
+        statusWatcherCleanup = watchStatusDir((statuses) => {
+          const obj: Record<string, SessionStatus> = {};
+          statuses.forEach((v, k) => { obj[k] = v; });
+          switcherWindow?.webContents.send('session-statuses-updated', obj);
+        });
+      }
     }
+  } catch (e) {
+    if (isDebug) console.error('Failed to init session status hooks:', e);
   }
 };
 
@@ -1839,11 +1843,11 @@ ipcMain.handle('get-session-statuses', async () => {
   // Scan active sessions that don't have status files yet
   try {
     const activeMap = await detectActiveSessions();
+    const allSessions = readClaudeSessions(500); // hoisted out of loop
     const sessionsWithoutStatus = Array.from(activeMap.entries())
       .filter(([sessionId]) => !obj[sessionId])
       .map(([sessionId]) => {
-        const sessions = readClaudeSessions(500);
-        const session = sessions.find((s: any) => s.sessionId === sessionId);
+        const session = allSessions.find((s: any) => s.sessionId === sessionId);
         return session ? { sessionId, project: session.project } : null;
       })
       .filter(Boolean) as { sessionId: string; project: string }[];

@@ -44,7 +44,12 @@ case "$EVENT" in
   *)                             STATUS="unknown" ;;
 esac
 
-echo "{\\"status\\":\\"$STATUS\\",\\"timestamp\\":$(date +%s),\\"cwd\\":\\"$CWD\\"}" > "$STATUS_DIR/$SESSION_ID.json"
+# Escape CWD for JSON (handle backslashes and double quotes)
+SAFE_CWD=$(echo "$CWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+# Atomic write via temp file + mv
+TMPFILE="$STATUS_DIR/.$SESSION_ID.tmp"
+echo "{\\"status\\":\\"$STATUS\\",\\"timestamp\\":$(date +%s),\\"cwd\\":\\"$SAFE_CWD\\"}" > "$TMPFILE"
+mv -f "$TMPFILE" "$STATUS_DIR/$SESSION_ID.json"
 `;
 
 /**
@@ -160,7 +165,7 @@ export const isHooksInstalled = (): boolean => {
   }
 };
 
-export type SessionStatus = 'working' | 'idle' | 'needs-attention' | 'active' | null;
+export type SessionStatus = 'working' | 'idle' | 'needs-attention' | 'unknown' | null;
 
 /**
  * Read all status files from codev-status directory
@@ -210,10 +215,10 @@ export const watchStatusDir = (
 export const scanInitialStatuses = async (
   activeSessions: { sessionId: string; project: string }[],
 ): Promise<Map<string, SessionStatus>> => {
-  const { exec } = require('child_process');
-  const execPromise = (cmd: string): Promise<string> =>
+  const { execFile } = require('child_process');
+  const tailFile = (filePath: string): Promise<string> =>
     new Promise((resolve) => {
-      exec(cmd, { encoding: 'utf-8', timeout: 3000 }, (err: any, stdout: string) => {
+      execFile('tail', ['-n', '50', filePath], { encoding: 'utf-8', timeout: 3000 }, (err: any, stdout: string) => {
         resolve(err ? '' : stdout);
       });
     });
@@ -234,7 +239,7 @@ export const scanInitialStatuses = async (
     if (!fs.existsSync(jsonlPath)) return;
 
     // Read last 50 lines
-    const tail = await execPromise(`tail -n 50 "${jsonlPath}"`);
+    const tail = await tailFile(jsonlPath);
     if (!tail.trim()) return;
 
     const lines = tail.trim().split('\n');

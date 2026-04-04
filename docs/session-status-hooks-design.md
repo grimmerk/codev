@@ -8,7 +8,7 @@ Show active session status (working / idle / needs-attention) via colored dots i
 
 | Status | Dot Color | Meaning | Trigger |
 |---|---|---|---|
-| **Working** | Purple `#CE93D8` | Claude is processing | `UserPromptSubmit` hook |
+| **Working** | Orange `#E8956A` (pulse animation) | Claude is processing | `UserPromptSubmit` hook |
 | **Idle** | Green `#66BB6A` | Waiting for user input | `Stop` hook |
 | **Needs attention** | Orange `#FFA726` | Permission prompt or question | `PermissionRequest` hook, or pending `AskUserQuestion` |
 | **Active (unknown)** | Purple `#CE93D8` | Running but no hook data yet | Detected via `sessions/*.json` but no status file |
