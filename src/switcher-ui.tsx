@@ -383,7 +383,7 @@ function SwitcherApp() {
     setSessions(sessionSearchValue.trim() ? filterSessionsLocally(newSessions, sessionSearchValue) : newSessions);
 
     // Step 2: Load last assistant responses for all sessions (first 100)
-    window.electronAPI.loadLastAssistantResponses(result.slice(0, 100)).then((responses: Record<string, string>) => {
+    window.electronAPI.loadLastAssistantResponses((result || []).slice(0, 100)).then((responses: Record<string, string>) => {
       if (responses && Object.keys(responses).length > 0) {
         setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
       }

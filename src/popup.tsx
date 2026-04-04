@@ -500,7 +500,7 @@ const PopupDefaultExample = ({
                 </div>
               )}
               <div style={rowStyle}>
-                <span style={labelStyle}>Session Preview</span>
+                <span style={labelStyle} title="User prompt display mode. Assistant response (◀ blue text) always shown.">Session Preview</span>
                 <select
                   value={sessionDisplayMode}
                   onChange={(e) => {
