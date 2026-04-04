@@ -32,6 +32,7 @@ import {
   isHooksInstalled,
   readAllStatuses,
   watchStatusDir,
+  scanInitialStatuses,
   SessionStatus,
 } from './session-status-hooks';
 import {
@@ -1830,10 +1831,29 @@ ipcMain.on('set-session-status-hooks-enabled', async (_event, enabled: boolean) 
   }
 });
 
-ipcMain.handle('get-session-statuses', () => {
-  const statuses = readAllStatuses();
+ipcMain.handle('get-session-statuses', async () => {
+  const fileStatuses = readAllStatuses();
   const obj: Record<string, SessionStatus> = {};
-  statuses.forEach((v, k) => { obj[k] = v; });
+  fileStatuses.forEach((v, k) => { obj[k] = v; });
+
+  // Scan active sessions that don't have status files yet
+  try {
+    const activeMap = await detectActiveSessions();
+    const sessionsWithoutStatus = Array.from(activeMap.entries())
+      .filter(([sessionId]) => !obj[sessionId])
+      .map(([sessionId]) => {
+        const sessions = readClaudeSessions(500);
+        const session = sessions.find((s: any) => s.sessionId === sessionId);
+        return session ? { sessionId, project: session.project } : null;
+      })
+      .filter(Boolean) as { sessionId: string; project: string }[];
+
+    if (sessionsWithoutStatus.length > 0) {
+      const scanned = await scanInitialStatuses(sessionsWithoutStatus);
+      scanned.forEach((v, k) => { obj[k] = v; });
+    }
+  } catch {}
+
   return obj;
 });
 

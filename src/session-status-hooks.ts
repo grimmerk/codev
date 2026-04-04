@@ -199,4 +199,97 @@ export const watchStatusDir = (
   };
 };
 
+/**
+ * Scan active sessions' JSONL files to determine initial status
+ * (for sessions started before CodeV or before hooks were installed).
+ * Reads last ~50 lines of each session's JSONL to check:
+ * - Pending AskUserQuestion tool use → needs-attention
+ * - Last assistant message with stop_reason "end_turn" → idle
+ * - Otherwise → working
+ */
+export const scanInitialStatuses = async (
+  activeSessions: { sessionId: string; project: string }[],
+): Promise<Map<string, SessionStatus>> => {
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 3000 }, (err: any, stdout: string) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
+  const statuses = new Map<string, SessionStatus>();
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+
+  const startTime = Date.now();
+
+  await Promise.all(activeSessions.map(async (session) => {
+    // Already have a status file? Skip.
+    const statusFile = path.join(STATUS_DIR, `${session.sessionId}.json`);
+    if (fs.existsSync(statusFile)) return;
+
+    // Find JSONL file
+    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
+    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    if (!fs.existsSync(jsonlPath)) return;
+
+    // Read last 50 lines
+    const tail = await execPromise(`tail -n 50 "${jsonlPath}"`);
+    if (!tail.trim()) return;
+
+    const lines = tail.trim().split('\n');
+
+    // Walk backwards to find last assistant message
+    let status: SessionStatus = 'working';
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry = JSON.parse(lines[i]);
+
+        // Check for pending AskUserQuestion
+        if (entry.type === 'assistant' && entry.message?.content) {
+          const toolUses = entry.message.content
+            .filter((c: any) => c.type === 'tool_use' && c.name === 'AskUserQuestion')
+            .map((c: any) => c.id);
+
+          if (toolUses.length > 0) {
+            // Check if any AskUserQuestion lacks a ToolResult
+            const toolResults = new Set<string>();
+            for (let j = i + 1; j < lines.length; j++) {
+              try {
+                const r = JSON.parse(lines[j]);
+                if (r.type === 'tool_result' || (r.type === 'user' && r.message?.content)) {
+                  const contents = Array.isArray(r.message?.content) ? r.message.content : [];
+                  for (const c of contents) {
+                    if (c.type === 'tool_result') toolResults.add(c.tool_use_id);
+                  }
+                }
+              } catch {}
+            }
+            const pending = toolUses.some((id: string) => !toolResults.has(id));
+            if (pending) {
+              status = 'needs-attention';
+              break;
+            }
+          }
+
+          // Check stop_reason
+          if (entry.message?.stop_reason === 'end_turn') {
+            status = 'idle';
+          }
+          break;
+        }
+      } catch {}
+    }
+
+    statuses.set(session.sessionId, status);
+  }));
+
+  const elapsed = Date.now() - startTime;
+  if (elapsed > 10) {
+    console.log(`[session-status] Initial scan: ${activeSessions.length} sessions in ${elapsed}ms`);
+  }
+
+  return statuses;
+};
+
 export { STATUS_DIR, HOOK_SCRIPT_PATH };
