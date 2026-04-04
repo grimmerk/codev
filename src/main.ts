@@ -678,8 +678,11 @@ ipcMain.on('open-folder-selector', async (event) => {
   // Update terminal CWD if PTY is running (#88)
   if (ptyProcess) {
     const home = require('os').homedir();
-    const shortPath = folderPath.startsWith(home) ? folderPath.replace(home, '~') : folderPath;
-    ptyProcess.write(`cd ${shortPath} && clear\n`);
+    const rest = folderPath.startsWith(home) ? folderPath.slice(home.length) : null;
+    // POSIX-safe: single-quote the path, escape embedded single quotes
+    const escaped = (rest !== null ? rest : folderPath).replace(/'/g, "'\\''");
+    const cdPath = rest !== null ? `~'${escaped}'` : `'${escaped}'`;
+    ptyProcess.write(`cd ${cdPath} && clear\n`);
   }
 });
 
