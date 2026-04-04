@@ -981,7 +981,8 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
 
 /**
  * Load last assistant response for active sessions.
- * Uses tail -n 200 to read the end of the JSONL file (fast even on 80MB files: ~19ms).
+ * Uses tail -n 100 to read the end of the JSONL file (fast even on 80MB files).
+ * Benchmark: 100 sessions parallel via Promise.all = ~150ms. tail -n 100 finds same hit rate as -n 200.
  * Returns a map of sessionId -> last assistant text.
  */
 export const loadLastAssistantResponses = async (
@@ -1004,7 +1005,7 @@ export const loadLastAssistantResponses = async (
 
     if (!fs.existsSync(jsonlPath)) return;
 
-    const output = await execPromise(`tail -n 200 "${jsonlPath}" | grep '"type":"assistant"' | tail -1`);
+    const output = await execPromise(`tail -n 100 "${jsonlPath}" | grep '"type":"assistant"' | tail -1`);
     if (!output.trim()) return;
 
     try {
