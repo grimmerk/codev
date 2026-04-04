@@ -158,8 +158,29 @@ Status hooks are an **additional layer** on top of the existing detection system
 | Hook script execution | ~5ms (bash + write file) | Per Claude Code turn (~1-5/min) |
 | fs.watch notification | ~0ms (OS-level, no polling) | Per status file change |
 | Status file read | ~1ms | Per fs.watch event |
-| Startup JSONL scan | ~1ms per session (tail 50 lines) | Once on CodeV launch |
+| Startup JSONL scan | ~1ms per session (tail 100 lines) | Once on CodeV launch |
 | Total CPU when idle | ~0% | — |
+
+### Complexity analysis
+
+All operations are O(n) or better (n = number of active sessions):
+
+| Step | Complexity | Notes |
+|---|---|---|
+| readAllStatuses() | O(n) | readdir + read each file |
+| detectActiveSessions() | O(n) | readdir sessions/*.json |
+| Filter sessions without status | O(n) | filter on Map |
+| scanInitialStatuses() | O(m) parallel | m = sessions without status file, each `tail + grep` |
+| cleanupStaleStatuses() | O(n) | readdir + Set.has() |
+| fs.watch callback | O(n) | readAllStatuses() once |
+
+**Note:** `get-session-statuses` uses `allSessions.find()` per session without status → O(m×s) where m = sessions without status, s = total sessions in history.jsonl. In practice m ≈ 0 after first startup (scan results are persisted to files), and s is cached with 5s TTL.
+
+### File accumulation prevention
+
+Two mechanisms prevent status files from growing indefinitely:
+1. **SessionEnd hook** — removes `{sessionId}.json` when session ends normally
+2. **cleanupStaleStatuses()** — runs on each `get-session-statuses` call (startup + window focus), deletes files for sessions no longer in active set (handles crash/SIGKILL cases)
 
 ### Architecture note: `get-session-statuses` and duplicate detection
 
