@@ -512,7 +512,8 @@ function SwitcherApp() {
       if (statuses) setSessionStatuses(statuses);
     });
     window.electronAPI.onSessionStatusesUpdated((_event: any, statuses: Record<string, string>) => {
-      setSessionStatuses(statuses);
+      // Merge instead of replace — preserve JSONL-scanned statuses for sessions without status files
+      setSessionStatuses((prev) => ({ ...prev, ...statuses }));
     });
 
     window.electronAPI.onCheckTerminalAndHide(() => {
@@ -538,6 +539,10 @@ function SwitcherApp() {
       if (modeRef.current === 'sessions') {
         fetchClaudeSessions();
       }
+      // Refresh session statuses on window focus
+      window.electronAPI.getSessionStatuses().then((statuses: Record<string, string | null>) => {
+        if (statuses) setSessionStatuses((prev) => ({ ...prev, ...statuses }));
+      });
       // Refresh display mode setting
       window.electronAPI.getSessionDisplayMode().then((mode: string) => {
         setSessionDisplayMode(mode || 'first');
