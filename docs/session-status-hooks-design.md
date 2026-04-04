@@ -146,6 +146,25 @@ In popup.tsx, under General:
 | Startup JSONL scan | ~1ms per session (tail 50 lines) | Once on CodeV launch |
 | Total CPU when idle | ~0% | — |
 
+### Architecture note: `get-session-statuses` and duplicate detection
+
+The `get-session-statuses` IPC handler internally calls `detectActiveSessions()` and `readClaudeSessions(500)` to find sessions without status files for JSONL scanning. This duplicates work the renderer already does.
+
+**Why it's acceptable:**
+- Both functions have 5s TTL cache. At startup, the renderer's detection and `get-session-statuses` run within ~1s, so the second call hits cache (~0ms).
+- No race condition — both calls return correct results; at worst there's duplicate work on a cold cache (~45ms total).
+- `getSessionStatuses()` is called **once on mount** + **once per window focus**. After that, updates come from `fs.watch` push via `onSessionStatusesUpdated` (merge, not replace).
+
+**Why not pass `activeMap` from renderer instead:**
+- Adds IPC coupling (renderer must finish detection before requesting statuses).
+- The handler becomes dependent on renderer timing.
+- Cache hit already makes the duplicate cost ~0ms.
+- Keeping the handler self-contained is simpler and more maintainable.
+
+### Bug fix: merge vs replace on status update
+
+`onSessionStatusesUpdated` must **merge** into existing state (`{...prev, ...newStatuses}`), not replace. JSONL-scanned statuses (for sessions without status files) exist only in React state. A replace would clear them when fs.watch fires for unrelated status file changes.
+
 ## VS Code Claude Code Sessions
 
 Hooks fire for ALL Claude Code sessions, including VS Code extension (`entrypoint: "claude-vscode"`). This means:

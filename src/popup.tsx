@@ -517,7 +517,7 @@ const PopupDefaultExample = ({
                 </select>
               </div>
               <div style={rowStyle}>
-                <span style={labelStyle}>Session Status</span>
+                <span style={labelStyle} title="Uses Claude Code hooks to detect session state">Session Status <span style={{ fontSize: '10px', color: '#888' }}>(hooks)</span></span>
                 <label
                   style={{
                     position: 'relative',
