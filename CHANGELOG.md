@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.65
+
+- Style: remove quotes around custom session titles (color already distinguishes them)
+
 ## 1.0.64
 
 - Feat: show last assistant response for all sessions (not just active)
