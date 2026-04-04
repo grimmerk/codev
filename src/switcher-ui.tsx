@@ -333,6 +333,7 @@ function SwitcherApp() {
   const [prLinks, setPrLinks] = useState<Record<string, { prNumber: number; prUrl: string }>>({});
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
+  const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
   const activeStateRef = useRef<Record<string, number>>({});
 
@@ -494,6 +495,14 @@ function SwitcherApp() {
     window.electronAPI.onSwitchToTerminal(() => {
       modeRef.current = 'terminal';
       setMode('terminal');
+    });
+
+    // Session status updates from hooks (fs.watch)
+    window.electronAPI.getSessionStatuses().then((statuses: Record<string, string>) => {
+      if (statuses) setSessionStatuses(statuses);
+    });
+    window.electronAPI.onSessionStatusesUpdated((_event: any, statuses: Record<string, string>) => {
+      setSessionStatuses(statuses);
     });
 
     window.electronAPI.onCheckTerminalAndHide(() => {
@@ -947,9 +956,13 @@ function SwitcherApp() {
                 >
                   {/* Fixed-width dot container for alignment */}
                   <div style={{ width: '14px', flexShrink: 0, paddingTop: '4px' }}>
-                    {session.isActive && (
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#CE93D8', display: 'inline-block' }} />
-                    )}
+                    {session.isActive && (() => {
+                      const status = sessionStatuses[session.sessionId];
+                      const color = status === 'idle' ? '#66BB6A'
+                        : status === 'needs-attention' ? '#FFA726'
+                        : '#CE93D8'; // working or unknown
+                      return <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />;
+                    })()}
                   </div>
                   {/* Content area */}
                   <div style={{ flex: 1, minWidth: 0 }}>
