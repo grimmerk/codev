@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.61
+
+- Fix: terminal cursor — white non-blinking block (matching iTerm2 style)
+- Feat: Cmd+K clears terminal screen
+- Feat: Shift+Enter sends newline in terminal (for Claude Code multi-line input)
+
 ## 1.0.60
 
 - Fix: terminal cd uses ~ shorthand + clear for cleaner output

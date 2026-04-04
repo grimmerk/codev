@@ -21,10 +21,10 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
       theme: {
         background: '#1e1e1e',
         foreground: '#e9e9e9',
-        cursor: '#00BCD4',
+        cursor: '#C0C0C0',
         selectionBackground: 'rgba(0, 188, 212, 0.3)',
       },
-      cursorBlink: true,
+      cursorBlink: false,
       allowProposedApi: true,
     });
 
@@ -39,6 +39,9 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
       // Cmd+←/→ → beginning/end of line
       if (e.type === 'keydown' && e.metaKey && e.key === 'ArrowLeft') { term.input('\x01'); return false; }
       if (e.type === 'keydown' && e.metaKey && e.key === 'ArrowRight') { term.input('\x05'); return false; }
+      if (e.type === 'keydown' && e.metaKey && e.key === 'k') { term.clear(); return false; }
+      // Shift+Enter → Ctrl+J (line feed) for Claude Code multi-line input
+      if (e.shiftKey && e.key === 'Enter') { if (e.type === 'keydown') term.input('\x0a'); return false; }
       return true;
     });
 
