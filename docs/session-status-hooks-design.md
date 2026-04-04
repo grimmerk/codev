@@ -15,16 +15,30 @@ Show active session status (working / idle / needs-attention) via colored dots i
 
 ## Architecture
 
-```
-Claude Code session
-  → hook fires (Stop/PermissionRequest/UserPromptSubmit/etc.)
-  → runs ~/.claude/codev-status-hook.sh
-  → writes ~/.claude/codev-status/{sessionId}.json
+### Normal flow (CodeV already running)
 
-CodeV (main process)
-  ← fs.watch(~/.claude/codev-status/) detects file change
-  ← reads status file
+```text
+Claude Code session starts/receives prompt/stops
+  → hook event fires (Stop/UserPromptSubmit/PermissionRequest/etc.)
+  → runs ~/.claude/codev-status-hook.sh
+  → writes ~/.claude/codev-status/{sessionId}.json (atomic: tmp + mv)
+  → CodeV fs.watch detects file change
   → IPC to renderer → dot color update
+```
+
+### CodeV late-start flow (sessions already running)
+
+```text
+CodeV starts
+  → get-session-statuses IPC handler:
+    1. readAllStatuses() — read existing status files
+    2. detectActiveSessions() — find active sessions (PID files)
+    3. Compare: which active sessions have no status file?
+    4. scanInitialStatuses() — read JSONL tail (100 lines) for those
+       → find last assistant entry → determine idle / needs-attention
+    5. writeStatusFile() — persist scan results as status files
+       (so fs.watch replace won't lose them)
+    6. cleanupStaleStatuses() — delete files for sessions no longer active
 ```
 
 ### On CodeV startup (catch-up for sessions started before CodeV)
