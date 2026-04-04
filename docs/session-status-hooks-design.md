@@ -35,7 +35,8 @@ CodeV (main process)
    a. Check ~/.claude/codev-status/{sessionId}.json → use if exists
    b. Otherwise, read last ~50 lines of session JSONL → determine initial status
       - Has pending AskUserQuestion tool use → needs-attention
-      - Last entry is assistant with stop_reason "end_turn" → idle
+      - Last assistant message with no pending tool use → idle
+      - Note: `stop_reason` can be null in some JSONL entries — don't rely on it
       - Otherwise → working (or unknown)
 ```
 
