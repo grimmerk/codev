@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.64
+
+- Feat: show last assistant response for all sessions (not just active)
+
 ## 1.0.63
 
 - Fix: Terminal tab sessions correctly detected as CODEV (not parent terminal)

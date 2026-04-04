@@ -500,7 +500,7 @@ const PopupDefaultExample = ({
                 </div>
               )}
               <div style={rowStyle}>
-                <span style={labelStyle}>Session Preview</span>
+                <span style={labelStyle} title="User prompt display mode. Assistant response (◀ blue text) always shown.">Session Preview</span>
                 <select
                   value={sessionDisplayMode}
                   onChange={(e) => {
@@ -515,6 +515,9 @@ const PopupDefaultExample = ({
                   <option value="last">Last User Prompt</option>
                   <option value="both">First + Last</option>
                 </select>
+              </div>
+              <div style={{ padding: '0 16px 2px', fontSize: '9px', color: '#555' }}>
+                ◀ Assistant response always shown
               </div>
               <div style={rowStyle}>
                 <span style={labelStyle} title="Uses Claude Code hooks to detect session state">Session Status <span style={{ fontSize: '10px', color: '#888' }}>(hooks)</span></span>
