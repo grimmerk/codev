@@ -674,6 +674,11 @@ ipcMain.on('open-folder-selector', async (event) => {
   if (window) {
     window.webContents.send('folder-selected', folderPath);
   }
+
+  // Update terminal CWD if PTY is running (#88)
+  if (ptyProcess) {
+    ptyProcess.write(`cd "${folderPath}"\n`);
+  }
 });
 
 ipcMain.on('ide-preference-changed', async (_event, preferredIDE: string) => {
