@@ -272,10 +272,9 @@ export const scanInitialStatuses = async (
             }
           }
 
-          // Check stop_reason
-          if (entry.message?.stop_reason === 'end_turn') {
-            status = 'idle';
-          }
+          // Last assistant message with no pending tools → idle
+          // (stop_reason may be null/undefined in some JSONL entries)
+          status = 'idle';
           break;
         }
       } catch {}
