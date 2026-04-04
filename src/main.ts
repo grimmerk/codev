@@ -1062,8 +1062,11 @@ const trayToggleEvtHandler = async () => {
 
   // Set callback for CodeV embedded terminal sessions
   setCodevTerminalCallback((_sessionId: string) => {
-    switcherWindow?.webContents.send('switch-to-terminal');
     showSwitcherWindow();
+    // Send after show to ensure window exists and is ready
+    setTimeout(() => {
+      switcherWindow?.webContents.send('switch-to-terminal');
+    }, 50);
   });
 
   // Pre-initialize aiAssistantWindow for faster first open

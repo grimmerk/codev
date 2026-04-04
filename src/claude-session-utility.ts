@@ -186,7 +186,12 @@ export const detectTerminalApp = async (pid: number): Promise<string> => {
 
     const commLower = comm.toLowerCase();
     // CodeV's embedded terminal (node-pty runs under Electron)
-    if (commLower.includes('electron') || commLower.includes('codev')) return 'codev';
+    if (commLower.includes('codev')) return 'codev';
+    // Check if this Electron process is CodeV by inspecting command line
+    if (commLower.includes('electron')) {
+      const cmdline = (await execPromise(`ps -o command= -p ${currentPid} 2>/dev/null`)).trim();
+      if (cmdline.toLowerCase().includes('codev')) return 'codev';
+    }
     if (commLower.includes('iterm') || commLower.includes('iterm2')) return 'iterm2';
     if (commLower.includes('cmux')) return 'cmux';
     if (commLower.includes('ghostty')) return 'ghostty';

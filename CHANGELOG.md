@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.63
+
+- Fix: Terminal tab sessions correctly detected as CODEV (not parent terminal)
+- Click Terminal tab session → switches to Term tab instead of external terminal
+
 ## 1.0.62
 
 - Feat: session status hooks — colored dots for working (pulse) / idle / needs-attention (blink)
