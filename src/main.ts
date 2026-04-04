@@ -34,6 +34,7 @@ import {
   watchStatusDir,
   scanInitialStatuses,
   writeStatusFile,
+  cleanupStaleStatuses,
   SessionStatus,
 } from './session-status-hooks';
 import {
@@ -1845,9 +1846,10 @@ ipcMain.handle('get-session-statuses', async () => {
   const obj: Record<string, SessionStatus> = {};
   fileStatuses.forEach((v, k) => { obj[k] = v; });
 
-  // Scan active sessions that don't have status files yet
+  // Scan active sessions that don't have status files yet + cleanup stale ones
   try {
     const activeMap = await detectActiveSessions();
+    cleanupStaleStatuses(new Set(activeMap.keys()));
     const allSessions = readClaudeSessions(500); // hoisted out of loop
     const sessionsWithoutStatus = Array.from(activeMap.entries())
       .filter(([sessionId]) => !obj[sessionId])

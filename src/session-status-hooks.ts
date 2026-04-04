@@ -297,6 +297,23 @@ export const scanInitialStatuses = async (
 };
 
 /**
+ * Clean up stale status files for sessions that are no longer active.
+ * Call on startup to prevent accumulation from crashed sessions or missing SessionEnd hooks.
+ */
+export const cleanupStaleStatuses = (activeSessionIds: Set<string>): void => {
+  try {
+    if (!fs.existsSync(STATUS_DIR)) return;
+    for (const file of fs.readdirSync(STATUS_DIR)) {
+      if (!file.endsWith('.json')) continue;
+      const sessionId = file.replace('.json', '');
+      if (!activeSessionIds.has(sessionId)) {
+        try { fs.unlinkSync(path.join(STATUS_DIR, file)); } catch {}
+      }
+    }
+  } catch {}
+};
+
+/**
  * Write a status file for a session (used to persist JSONL-scanned statuses).
  */
 export const writeStatusFile = (sessionId: string, status: string): void => {
