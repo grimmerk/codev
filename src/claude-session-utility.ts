@@ -185,6 +185,8 @@ export const detectTerminalApp = async (pid: number): Promise<string> => {
     if (!comm) break;
 
     const commLower = comm.toLowerCase();
+    // CodeV's embedded terminal (node-pty runs under Electron)
+    if (commLower.includes('electron') || commLower.includes('codev')) return 'codev';
     if (commLower.includes('iterm') || commLower.includes('iterm2')) return 'iterm2';
     if (commLower.includes('cmux')) return 'cmux';
     if (commLower.includes('ghostty')) return 'ghostty';
@@ -578,7 +580,7 @@ end tell`);
 
   // Ghostty + unknown terminals: cwd fallback (no async work, runs after cross-ref)
   for (const [terminal, items] of Object.entries(byTerminal)) {
-    if (terminal === 'iterm2' || terminal === 'cmux' || terminal === 'terminal') continue;
+    if (terminal === 'iterm2' || terminal === 'cmux' || terminal === 'terminal' || terminal === 'codev') continue;
     for (const item of items) {
       const fallback = item.candidates.find(s => !activeMap.has(s.sessionId));
       if (fallback) {
@@ -747,6 +749,10 @@ export const openSession = async (
   }
 
   switch (effectiveTerminal) {
+    case 'codev':
+      // Session is in CodeV's embedded terminal — notify renderer to switch to Term tab
+      openSessionInCodeV(sessionId);
+      break;
     case 'cmux':
       openSessionInCmux(sessionId, projectPath, isActive, activePid, customTitle);
       break;
@@ -768,6 +774,26 @@ export const openSession = async (
  * If the session is already active, switch to its tab
  * Otherwise, open a new tab and run claude --resume
  */
+/**
+ * Callback for opening sessions in CodeV's embedded terminal.
+ * Set by main.ts to avoid circular dependency.
+ */
+let codevTerminalCallback: ((sessionId: string) => void) | null = null;
+
+export const setCodevTerminalCallback = (cb: (sessionId: string) => void) => {
+  codevTerminalCallback = cb;
+};
+
+/**
+ * "Open" a session that's running in CodeV's embedded terminal.
+ * Switches to the Terminal tab instead of opening an external terminal.
+ */
+export const openSessionInCodeV = (sessionId: string): void => {
+  if (codevTerminalCallback) {
+    codevTerminalCallback(sessionId);
+  }
+};
+
 export const openSessionInITerm2 = (
   sessionId: string,
   projectPath: string,
