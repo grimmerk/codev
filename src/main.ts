@@ -25,6 +25,7 @@ import {
   invalidateSessionCache,
   loadSessionEnrichment,
   loadLastAssistantResponses,
+  setCodevTerminalCallback,
 } from './claude-session-utility';
 import {
   installHooks,
@@ -1058,6 +1059,15 @@ const trayToggleEvtHandler = async () => {
   if (isDebug) {
     console.log('when ready');
   }
+
+  // Set callback for CodeV embedded terminal sessions
+  setCodevTerminalCallback((_sessionId: string) => {
+    showSwitcherWindow();
+    // Send after show to ensure window exists and is ready
+    setTimeout(() => {
+      switcherWindow?.webContents.send('switch-to-terminal');
+    }, 50);
+  });
 
   // Pre-initialize aiAssistantWindow for faster first open
   // This is done after mainWindow is created, but before showing it
