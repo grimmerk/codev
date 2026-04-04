@@ -83,7 +83,7 @@ export const installHooks = (): void => {
 
     // Check if our hook is already installed
     const hasOurHook = settings.hooks[event].some((entry: any) =>
-      entry.hooks?.some((h: any) => h.command?.includes(HOOK_MARKER))
+      entry.hooks?.some((h: any) => h.command === HOOK_SCRIPT_PATH)
     );
 
     if (!hasOurHook) {
@@ -128,7 +128,7 @@ export const removeHooks = (): void => {
       if (!settings.hooks[event]) continue;
       const before = settings.hooks[event].length;
       settings.hooks[event] = settings.hooks[event].filter((entry: any) =>
-        !entry.hooks?.some((h: any) => h.command?.includes(HOOK_MARKER))
+        !entry.hooks?.some((h: any) => h.command === HOOK_SCRIPT_PATH)
       );
       if (settings.hooks[event].length === 0) {
         delete settings.hooks[event];
@@ -158,7 +158,7 @@ export const isHooksInstalled = (): boolean => {
     // Check if at least one of our events has our hook
     return HOOK_EVENTS.some(event =>
       settings.hooks[event]?.some((entry: any) =>
-        entry.hooks?.some((h: any) => h.command?.includes(HOOK_MARKER))
+        entry.hooks?.some((h: any) => h.command === HOOK_SCRIPT_PATH)
       )
     );
   } catch {
@@ -320,7 +320,7 @@ export const cleanupStaleStatuses = (activeSessionIds: Set<string>): void => {
 export const writeStatusFile = (sessionId: string, status: string): void => {
   try {
     fs.mkdirSync(STATUS_DIR, { recursive: true });
-    const tmpFile = path.join(STATUS_DIR, `.${sessionId}.tmp`);
+    const tmpFile = path.join(STATUS_DIR, `.codev-${sessionId}.tmp`);
     const targetFile = path.join(STATUS_DIR, `${sessionId}.json`);
     fs.writeFileSync(tmpFile, JSON.stringify({ status, timestamp: Math.floor(Date.now() / 1000), cwd: '' }));
     fs.renameSync(tmpFile, targetFile);
