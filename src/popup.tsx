@@ -33,7 +33,7 @@ const rowStyle: React.CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
-  padding: '6px 16px',
+  padding: '4px 16px',
 };
 
 const labelStyle: React.CSSProperties = {
