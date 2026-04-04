@@ -1,0 +1,202 @@
+/**
+ * Session Status Hooks — manages Claude Code hook configuration
+ * for detecting session status (working/idle/needs-attention).
+ *
+ * Hooks write status files to ~/.claude/codev-status/{sessionId}.json
+ * CodeV watches this directory via fs.watch for real-time updates.
+ */
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+const CLAUDE_DIR = path.join(os.homedir(), '.claude');
+const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
+const STATUS_DIR = path.join(CLAUDE_DIR, 'codev-status');
+const HOOK_SCRIPT_PATH = path.join(CLAUDE_DIR, 'codev-status-hook.sh');
+const HOOK_MARKER = 'codev-status-hook';
+
+const HOOK_EVENTS = [
+  'Stop',
+  'UserPromptSubmit',
+  'PermissionRequest',
+  'SubagentStart',
+  'SessionEnd',
+];
+
+const HOOK_SCRIPT = `#!/bin/bash
+# CodeV session status hook — writes status for CodeV to watch
+# Auto-managed by CodeV. Do not edit manually.
+INPUT=$(cat)
+SESSION_ID=$(echo "$INPUT" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+EVENT=$(echo "$INPUT" | grep -o '"hook_event_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+CWD=$(echo "$INPUT" | grep -o '"cwd":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -z "$SESSION_ID" ]; then exit 0; fi
+
+STATUS_DIR="$HOME/.claude/codev-status"
+mkdir -p "$STATUS_DIR"
+
+case "$EVENT" in
+  UserPromptSubmit|SubagentStart) STATUS="working" ;;
+  Stop)                          STATUS="idle" ;;
+  PermissionRequest)             STATUS="needs-attention" ;;
+  SessionEnd)                    rm -f "$STATUS_DIR/$SESSION_ID.json"; exit 0 ;;
+  *)                             STATUS="unknown" ;;
+esac
+
+echo "{\\"status\\":\\"$STATUS\\",\\"timestamp\\":$(date +%s),\\"cwd\\":\\"$CWD\\"}" > "$STATUS_DIR/$SESSION_ID.json"
+`;
+
+/**
+ * Install hooks into ~/.claude/settings.json (idempotent, merges with existing)
+ */
+export const installHooks = (): void => {
+  // Create hook script
+  fs.mkdirSync(path.dirname(HOOK_SCRIPT_PATH), { recursive: true });
+  fs.writeFileSync(HOOK_SCRIPT_PATH, HOOK_SCRIPT, { mode: 0o755 });
+
+  // Create status directory
+  fs.mkdirSync(STATUS_DIR, { recursive: true });
+
+  // Read existing settings
+  let settings: any = {};
+  try {
+    if (fs.existsSync(SETTINGS_PATH)) {
+      settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+    }
+  } catch {
+    settings = {};
+  }
+
+  if (!settings.hooks) settings.hooks = {};
+
+  let modified = false;
+
+  for (const event of HOOK_EVENTS) {
+    if (!settings.hooks[event]) settings.hooks[event] = [];
+
+    // Check if our hook is already installed
+    const hasOurHook = settings.hooks[event].some((entry: any) =>
+      entry.hooks?.some((h: any) => h.command?.includes(HOOK_MARKER))
+    );
+
+    if (!hasOurHook) {
+      settings.hooks[event].push({
+        matcher: '',
+        hooks: [{ type: 'command', command: HOOK_SCRIPT_PATH, timeout: 5 }],
+      });
+      modified = true;
+    }
+  }
+
+  if (modified) {
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+  }
+};
+
+/**
+ * Remove our hooks from ~/.claude/settings.json
+ */
+export const removeHooks = (): void => {
+  // Remove hook script
+  try { fs.unlinkSync(HOOK_SCRIPT_PATH); } catch {}
+
+  // Remove status files
+  try {
+    if (fs.existsSync(STATUS_DIR)) {
+      for (const f of fs.readdirSync(STATUS_DIR)) {
+        fs.unlinkSync(path.join(STATUS_DIR, f));
+      }
+      fs.rmdirSync(STATUS_DIR);
+    }
+  } catch {}
+
+  // Remove our entries from settings.json
+  try {
+    if (!fs.existsSync(SETTINGS_PATH)) return;
+    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+    if (!settings.hooks) return;
+
+    let modified = false;
+    for (const event of HOOK_EVENTS) {
+      if (!settings.hooks[event]) continue;
+      const before = settings.hooks[event].length;
+      settings.hooks[event] = settings.hooks[event].filter((entry: any) =>
+        !entry.hooks?.some((h: any) => h.command?.includes(HOOK_MARKER))
+      );
+      if (settings.hooks[event].length === 0) {
+        delete settings.hooks[event];
+      }
+      if (settings.hooks[event]?.length !== before) modified = true;
+    }
+
+    if (Object.keys(settings.hooks).length === 0) {
+      delete settings.hooks;
+    }
+
+    if (modified) {
+      fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+    }
+  } catch {}
+};
+
+/**
+ * Check if our hooks are currently installed
+ */
+export const isHooksInstalled = (): boolean => {
+  try {
+    if (!fs.existsSync(SETTINGS_PATH)) return false;
+    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+    if (!settings.hooks) return false;
+
+    // Check if at least one of our events has our hook
+    return HOOK_EVENTS.some(event =>
+      settings.hooks[event]?.some((entry: any) =>
+        entry.hooks?.some((h: any) => h.command?.includes(HOOK_MARKER))
+      )
+    );
+  } catch {
+    return false;
+  }
+};
+
+export type SessionStatus = 'working' | 'idle' | 'needs-attention' | 'active' | null;
+
+/**
+ * Read all status files from codev-status directory
+ */
+export const readAllStatuses = (): Map<string, SessionStatus> => {
+  const statuses = new Map<string, SessionStatus>();
+  try {
+    if (!fs.existsSync(STATUS_DIR)) return statuses;
+    for (const file of fs.readdirSync(STATUS_DIR)) {
+      if (!file.endsWith('.json')) continue;
+      const sessionId = file.replace('.json', '');
+      try {
+        const content = JSON.parse(fs.readFileSync(path.join(STATUS_DIR, file), 'utf-8'));
+        statuses.set(sessionId, content.status as SessionStatus);
+      } catch {}
+    }
+  } catch {}
+  return statuses;
+};
+
+/**
+ * Watch the status directory for changes.
+ * Returns a cleanup function to stop watching.
+ */
+export const watchStatusDir = (
+  onChange: (statuses: Map<string, SessionStatus>) => void,
+): (() => void) => {
+  fs.mkdirSync(STATUS_DIR, { recursive: true });
+
+  const watcher = fs.watch(STATUS_DIR, { persistent: false }, () => {
+    onChange(readAllStatuses());
+  });
+
+  return () => {
+    watcher.close();
+  };
+};
+
+export { STATUS_DIR, HOOK_SCRIPT_PATH };

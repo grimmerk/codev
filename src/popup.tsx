@@ -63,6 +63,7 @@ const PopupDefaultExample = ({
   const [leftClickBehavior, setLeftClickBehavior] =
     useState('switcher_window');
   const [isMASBuild, setIsMASBuild] = useState(false);
+  const [sessionStatusHooks, setSessionStatusHooks] = useState(true);
   const [ideDataAccessGranted, setIdeDataAccessGranted] = useState(false);
   const [shortcuts, setShortcuts] = useState({
     quickSwitcher: 'Command+Control+R',
@@ -110,6 +111,9 @@ const PopupDefaultExample = ({
     });
     window.electronAPI.getShortcuts().then((s: typeof shortcuts) => {
       if (s) setShortcuts(s);
+    });
+    window.electronAPI.getSessionStatusHooksEnabled().then((enabled: boolean) => {
+      setSessionStatusHooks(enabled);
     });
     window.electronAPI.getUpdateStatus().then((data: any) => {
       if (data) {
@@ -511,6 +515,53 @@ const PopupDefaultExample = ({
                   <option value="last">Last User Prompt</option>
                   <option value="both">First + Last</option>
                 </select>
+              </div>
+              <div style={rowStyle}>
+                <span style={labelStyle}>Session Status</span>
+                <label
+                  style={{
+                    position: 'relative',
+                    display: 'inline-block',
+                    width: '40px',
+                    height: '22px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={sessionStatusHooks}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setSessionStatusHooks(enabled);
+                      window.electronAPI.setSessionStatusHooksEnabled(enabled);
+                    }}
+                    style={{ opacity: 0, width: 0, height: 0 }}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      backgroundColor: sessionStatusHooks ? THEME.primary : '#555',
+                      borderRadius: '11px',
+                      transition: 'background-color 0.2s',
+                    }}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '2px',
+                      left: sessionStatusHooks ? '20px' : '2px',
+                      width: '18px',
+                      height: '18px',
+                      backgroundColor: '#fff',
+                      borderRadius: '50%',
+                      transition: 'left 0.2s',
+                    }}
+                  />
+                </label>
               </div>
             </div>
           )}

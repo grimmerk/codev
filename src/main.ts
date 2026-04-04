@@ -27,6 +27,14 @@ import {
   loadLastAssistantResponses,
 } from './claude-session-utility';
 import {
+  installHooks,
+  removeHooks,
+  isHooksInstalled,
+  readAllStatuses,
+  watchStatusDir,
+  SessionStatus,
+} from './session-status-hooks';
+import {
   deleteRecentProjectRecord,
   openVSCodeBasedIDE,
   readVSCodeBasedIDEState,
@@ -1072,6 +1080,9 @@ const trayToggleEvtHandler = async () => {
     }
   }, 1000); // Delay by 1 second to not interfere with main window initialization
 
+  // Initialize session status hooks (install if enabled, start watching)
+  initSessionStatusHooks();
+
   // Pre-spawn terminal for faster first Terminal tab switch
   setTimeout(() => {
     if (!ptyProcess) {
@@ -1775,6 +1786,55 @@ ipcMain.handle('get-login-item-settings', () => {
 
 ipcMain.on('set-login-item-settings', (_event, openAtLogin: boolean) => {
   app.setLoginItemSettings({ openAtLogin });
+});
+
+// Session status hooks
+let statusWatcherCleanup: (() => void) | null = null;
+
+const initSessionStatusHooks = async () => {
+  const enabled = (await settings.get('session-status-hooks')) !== false; // default: true
+  if (enabled) {
+    installHooks();
+    // Start watching for status changes
+    if (!statusWatcherCleanup) {
+      statusWatcherCleanup = watchStatusDir((statuses) => {
+        const obj: Record<string, SessionStatus> = {};
+        statuses.forEach((v, k) => { obj[k] = v; });
+        switcherWindow?.webContents.send('session-statuses-updated', obj);
+      });
+    }
+  }
+};
+
+ipcMain.handle('get-session-status-hooks-enabled', async () => {
+  return (await settings.get('session-status-hooks')) !== false;
+});
+
+ipcMain.on('set-session-status-hooks-enabled', async (_event, enabled: boolean) => {
+  await settings.set('session-status-hooks', enabled);
+  if (enabled) {
+    installHooks();
+    if (!statusWatcherCleanup) {
+      statusWatcherCleanup = watchStatusDir((statuses) => {
+        const obj: Record<string, SessionStatus> = {};
+        statuses.forEach((v, k) => { obj[k] = v; });
+        switcherWindow?.webContents.send('session-statuses-updated', obj);
+      });
+    }
+  } else {
+    removeHooks();
+    if (statusWatcherCleanup) {
+      statusWatcherCleanup();
+      statusWatcherCleanup = null;
+    }
+  }
+});
+
+ipcMain.handle('get-session-statuses', () => {
+  const statuses = readAllStatuses();
+  const obj: Record<string, SessionStatus> = {};
+  statuses.forEach((v, k) => { obj[k] = v; });
+  return obj;
 });
 
 ipcMain.handle('get-session-terminal-app', async () => {
