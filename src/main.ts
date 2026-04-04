@@ -677,7 +677,9 @@ ipcMain.on('open-folder-selector', async (event) => {
 
   // Update terminal CWD if PTY is running (#88)
   if (ptyProcess) {
-    ptyProcess.write(`cd "${folderPath}"\n`);
+    const home = require('os').homedir();
+    const shortPath = folderPath.startsWith(home) ? folderPath.replace(home, '~') : folderPath;
+    ptyProcess.write(`cd ${shortPath} && clear\n`);
   }
 });
 
