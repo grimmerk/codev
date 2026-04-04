@@ -176,6 +176,22 @@ The `get-session-statuses` IPC handler internally calls `detectActiveSessions()`
 - Cache hit already makes the duplicate cost ~0ms.
 - Keeping the handler self-contained is simpler and more maintainable.
 
+### Hook events: comparison with claude-control
+
+claude-control uses the same hook mechanism with a similar script. Comparison:
+
+| Event | claude-control | CodeV | Notes |
+|---|---|---|---|
+| SessionStart | ✓ | ✗ | Not added — purple (init) dot is acceptable for the few seconds before first prompt |
+| SessionEnd | ✓ | ✓ | Removes status file |
+| Stop | ✓ | ✓ | → idle |
+| UserPromptSubmit | ✓ | ✓ | → working |
+| PermissionRequest | ✓ | ✓ | → needs-attention |
+| SubagentStart | ✓ | ✓ | → working |
+| PostToolUseFailure | ✓ | ✗ | Not added — tool failures aren't always severe; no separate error color needed yet |
+
+Key difference: claude-control keys status files by PID (`$PPID`), CodeV keys by sessionId. SessionId is more stable across resume cycles.
+
 ### Bug fix: merge vs replace on status update
 
 `onSessionStatusesUpdated` must **merge** into existing state (`{...prev, ...newStatuses}`), not replace. JSONL-scanned statuses (for sessions without status files) exist only in React state. A replace would clear them when fs.watch fires for unrelated status file changes.
