@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.62
+
+- Feat: session status hooks — colored dots for working (pulse) / idle / needs-attention (blink)
+- Feat: auto-install Claude Code hooks for session status detection (toggle in Settings → Sessions)
+- Known: if hooks are removed externally while CodeV is running, restart CodeV to recover (#93)
+
 ## 1.0.61
 
 - Fix: terminal cursor — white non-blinking block (matching iTerm2 style)

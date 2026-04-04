@@ -28,6 +28,16 @@ const globalStyles = `
     50% { opacity: 0; }
   }
 
+  @keyframes statusPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+
+  @keyframes statusBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
   #switcher-root {
     height: 100vh;
     width: 100vw;
@@ -958,10 +968,18 @@ function SwitcherApp() {
                   <div style={{ width: '14px', flexShrink: 0, paddingTop: '4px' }}>
                     {session.isActive && (() => {
                       const status = sessionStatuses[session.sessionId];
-                      const color = status === 'idle' ? '#66BB6A'
+                      const color = status === 'working' ? '#E8956A'
+                        : status === 'idle' ? '#66BB6A'
                         : status === 'needs-attention' ? '#FFA726'
-                        : '#CE93D8'; // working or unknown
-                      return <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: color, display: 'inline-block' }} />;
+                        : '#CE93D8'; // no status data yet
+                      const animation = status === 'working' ? 'statusPulse 2s ease-in-out infinite'
+                        : status === 'needs-attention' ? 'statusBlink 1s ease-in-out infinite'
+                        : 'none';
+                      return <span style={{
+                        width: '6px', height: '6px', borderRadius: '50%',
+                        backgroundColor: color, display: 'inline-block',
+                        animation,
+                      }} />;
                     })()}
                   </div>
                   {/* Content area */}
