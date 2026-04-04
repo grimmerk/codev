@@ -27,6 +27,17 @@ import {
   loadLastAssistantResponses,
 } from './claude-session-utility';
 import {
+  installHooks,
+  removeHooks,
+  isHooksInstalled,
+  readAllStatuses,
+  watchStatusDir,
+  scanInitialStatuses,
+  writeStatusFile,
+  cleanupStaleStatuses,
+  SessionStatus,
+} from './session-status-hooks';
+import {
   deleteRecentProjectRecord,
   openVSCodeBasedIDE,
   readVSCodeBasedIDEState,
@@ -1072,6 +1083,9 @@ const trayToggleEvtHandler = async () => {
     }
   }, 1000); // Delay by 1 second to not interfere with main window initialization
 
+  // Initialize session status hooks (install if enabled, start watching)
+  initSessionStatusHooks();
+
   // Pre-spawn terminal for faster first Terminal tab switch
   setTimeout(() => {
     if (!ptyProcess) {
@@ -1775,6 +1789,89 @@ ipcMain.handle('get-login-item-settings', () => {
 
 ipcMain.on('set-login-item-settings', (_event, openAtLogin: boolean) => {
   app.setLoginItemSettings({ openAtLogin });
+});
+
+// Session status hooks
+let statusWatcherCleanup: (() => void) | null = null;
+
+const initSessionStatusHooks = async () => {
+  try {
+    const enabled = (await settings.get('session-status-hooks')) !== false; // default: true
+    if (enabled) {
+      installHooks();
+      // Start watching for status changes
+      if (!statusWatcherCleanup) {
+        statusWatcherCleanup = watchStatusDir((statuses) => {
+          const obj: Record<string, SessionStatus> = {};
+          statuses.forEach((v, k) => { obj[k] = v; });
+          switcherWindow?.webContents.send('session-statuses-updated', obj);
+        });
+      }
+    }
+  } catch (e) {
+    if (isDebug) console.error('Failed to init session status hooks:', e);
+  }
+};
+
+ipcMain.handle('get-session-status-hooks-enabled', async () => {
+  return (await settings.get('session-status-hooks')) !== false;
+});
+
+ipcMain.on('set-session-status-hooks-enabled', async (_event, enabled: boolean) => {
+  await settings.set('session-status-hooks', enabled);
+  if (enabled) {
+    installHooks();
+    if (!statusWatcherCleanup) {
+      statusWatcherCleanup = watchStatusDir((statuses) => {
+        const obj: Record<string, SessionStatus> = {};
+        statuses.forEach((v, k) => { obj[k] = v; });
+        switcherWindow?.webContents.send('session-statuses-updated', obj);
+      });
+    }
+  } else {
+    removeHooks();
+    if (statusWatcherCleanup) {
+      statusWatcherCleanup();
+      statusWatcherCleanup = null;
+    }
+    // Clear renderer dots immediately
+    switcherWindow?.webContents.send('session-statuses-updated', {});
+  }
+});
+
+ipcMain.handle('get-session-statuses', async () => {
+  // Return empty when hooks disabled — all dots revert to purple
+  const enabled = (await settings.get('session-status-hooks')) !== false;
+  if (!enabled) return {};
+
+  const fileStatuses = readAllStatuses();
+  const obj: Record<string, SessionStatus> = {};
+  fileStatuses.forEach((v, k) => { obj[k] = v; });
+
+  // Scan active sessions that don't have status files yet + cleanup stale ones
+  try {
+    const activeMap = await detectActiveSessions();
+    cleanupStaleStatuses(new Set(activeMap.keys()));
+    const allSessions = readClaudeSessions(500); // hoisted out of loop
+    const sessionsWithoutStatus = Array.from(activeMap.entries())
+      .filter(([sessionId]) => !obj[sessionId])
+      .map(([sessionId]) => {
+        const session = allSessions.find((s: any) => s.sessionId === sessionId);
+        return session ? { sessionId, project: session.project } : null;
+      })
+      .filter(Boolean) as { sessionId: string; project: string }[];
+
+    if (sessionsWithoutStatus.length > 0) {
+      const scanned = await scanInitialStatuses(sessionsWithoutStatus);
+      scanned.forEach((v, k) => {
+        obj[k] = v;
+        // Persist scanned status to file so fs.watch treats all statuses uniformly
+        writeStatusFile(k, v as string);
+      });
+    }
+  } catch {}
+
+  return obj;
 });
 
 ipcMain.handle('get-session-terminal-app', async () => {

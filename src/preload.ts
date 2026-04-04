@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
   setLoginItemSettings: (openAtLogin: boolean) => ipcRenderer.send('set-login-item-settings', openAtLogin),
 
+  // Session status hooks
+  getSessionStatusHooksEnabled: () => ipcRenderer.invoke('get-session-status-hooks-enabled'),
+  setSessionStatusHooksEnabled: (enabled: boolean) => ipcRenderer.send('set-session-status-hooks-enabled', enabled),
+  getSessionStatuses: () => ipcRenderer.invoke('get-session-statuses'),
+  onSessionStatusesUpdated: (callback: any) => ipcRenderer.on('session-statuses-updated', callback),
+
   // Claude Code session APIs
   getClaudeSessions: (limit?: number) => ipcRenderer.invoke('get-claude-sessions', limit),
   searchClaudeSessions: (query: string) => ipcRenderer.invoke('search-claude-sessions', query),

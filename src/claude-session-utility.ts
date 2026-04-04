@@ -685,7 +685,7 @@ const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promi
   const claimedSessionIds = new Set<string>();
 
   const output = await execPromise(
-    'ps aux | grep -E "[c]laude" | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory" | grep -v "node"'
+    'ps aux | grep -E "[c]laude" | grep -v "Claude.app" | grep -v "claude-history" | grep -v "ClaudeHistory"'
   );
   if (!output) return;
 

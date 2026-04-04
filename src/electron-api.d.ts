@@ -40,6 +40,12 @@ interface IElectronAPI {
   getLoginItemSettings: () => Promise<{ openAtLogin: boolean }>;
   setLoginItemSettings: (openAtLogin: boolean) => void;
 
+  // Session status hooks
+  getSessionStatusHooksEnabled: () => Promise<boolean>;
+  setSessionStatusHooksEnabled: (enabled: boolean) => void;
+  getSessionStatuses: () => Promise<Record<string, string | null>>;
+  onSessionStatusesUpdated: (callback: IpcCallback) => void;
+
   // Claude Code sessions
   getClaudeSessions: (limit?: number) => Promise<any>;
   searchClaudeSessions: (query: string) => Promise<any>;

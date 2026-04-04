@@ -28,6 +28,16 @@ const globalStyles = `
     50% { opacity: 0; }
   }
 
+  @keyframes statusPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+  }
+
+  @keyframes statusBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
   #switcher-root {
     height: 100vh;
     width: 100vw;
@@ -333,6 +343,7 @@ function SwitcherApp() {
   const [prLinks, setPrLinks] = useState<Record<string, { prNumber: number; prUrl: string }>>({});
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
+  const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
   const activeStateRef = useRef<Record<string, number>>({});
 
@@ -496,6 +507,15 @@ function SwitcherApp() {
       setMode('terminal');
     });
 
+    // Session status updates from hooks (fs.watch)
+    window.electronAPI.getSessionStatuses().then((statuses: Record<string, string>) => {
+      if (statuses) setSessionStatuses(statuses);
+    });
+    window.electronAPI.onSessionStatusesUpdated((_event: any, statuses: Record<string, string>) => {
+      // Use disk snapshot as source of truth — clears removed sessions
+      setSessionStatuses(statuses);
+    });
+
     window.electronAPI.onCheckTerminalAndHide(() => {
       if (modeRef.current === 'terminal') {
         window.electronAPI.hideApp();
@@ -519,6 +539,10 @@ function SwitcherApp() {
       if (modeRef.current === 'sessions') {
         fetchClaudeSessions();
       }
+      // Refresh session statuses on window focus
+      window.electronAPI.getSessionStatuses().then((statuses: Record<string, string | null>) => {
+        if (statuses) setSessionStatuses(statuses);
+      });
       // Refresh display mode setting
       window.electronAPI.getSessionDisplayMode().then((mode: string) => {
         setSessionDisplayMode(mode || 'first');
@@ -947,9 +971,21 @@ function SwitcherApp() {
                 >
                   {/* Fixed-width dot container for alignment */}
                   <div style={{ width: '14px', flexShrink: 0, paddingTop: '4px' }}>
-                    {session.isActive && (
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#CE93D8', display: 'inline-block' }} />
-                    )}
+                    {session.isActive && (() => {
+                      const status = sessionStatuses[session.sessionId];
+                      const color = status === 'working' ? '#E8956A'
+                        : status === 'idle' ? '#66BB6A'
+                        : status === 'needs-attention' ? '#FFA726'
+                        : '#CE93D8'; // no status data yet
+                      const animation = status === 'working' ? 'statusPulse 2s ease-in-out infinite'
+                        : status === 'needs-attention' ? 'statusBlink 1s ease-in-out infinite'
+                        : 'none';
+                      return <span style={{
+                        width: '6px', height: '6px', borderRadius: '50%',
+                        backgroundColor: color, display: 'inline-block',
+                        animation,
+                      }} />;
+                    })()}
                   </div>
                   {/* Content area */}
                   <div style={{ flex: 1, minWidth: 0 }}>
