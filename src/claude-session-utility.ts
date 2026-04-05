@@ -1032,14 +1032,18 @@ export const openSession = async (
     }
   }
 
-  // Check if this is a VS Code session
+  // Check if this is an active VS Code session — switch via URI handler
   const entrypoint = cachedEntrypoints?.get(sessionId);
-  if (entrypoint === 'claude-vscode') {
+  if (isActive && entrypoint === 'claude-vscode') {
     openSessionInVSCode(sessionId);
     return;
   }
 
   switch (effectiveTerminal) {
+    case 'vscode':
+      // User selected VS Code as launch terminal — resume via URI handler
+      openSessionInVSCode(sessionId);
+      return;
     case 'codev':
       // Session is in CodeV's embedded terminal — notify renderer to switch to Term tab
       openSessionInCodeV(sessionId);

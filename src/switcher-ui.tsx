@@ -1153,9 +1153,10 @@ function SwitcherApp() {
                           );
                         })()}
                         {(() => {
+                          // Only show terminal/IDE badge for active sessions
                           const badge = session.isActive
                             ? (terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' ? terminalApps[session.sessionId] : null)
-                            : ((session as any).entrypoint === 'claude-vscode' ? 'vscode' : null);
+                            : null;
                           return badge ? (
                             <span style={{
                               fontSize: '9px',
