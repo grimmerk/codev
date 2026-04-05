@@ -244,18 +244,19 @@ const PopupDefaultExample = ({
   return (
     <Popup
       isOpen={isOpen}
-      onClose={() => setIsOpen(false)}
+      onClose={() => {}}
       placement="bottom-end"
       content={() => (
         <div
           data-settings-panel
           style={{
             width: 420,
+            maxHeight: 560,
+            overflowY: 'auto',
             backgroundColor: '#252525',
             borderRadius: '6px',
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
             border: '1px solid #3a3a3a',
-            overflow: 'hidden',
           }}
         >
           <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
@@ -411,6 +412,41 @@ const PopupDefaultExample = ({
                 </button>
               </div>
             )}
+            <div style={rowStyle}>
+              <span style={labelStyle}>Launch Terminal</span>
+              <select
+                value={sessionTerminalApp}
+                onChange={(e) => {
+                  const app = e.target.value;
+                  setSessionTerminalApp(app);
+                  window.electronAPI.setSessionTerminalApp(app);
+                }}
+                style={selectStyle}
+              >
+                <option value="iterm2">iTerm2</option>
+                <option value="terminal">Terminal</option>
+                <option value="ghostty">Ghostty</option>
+                <option value="cmux">cmux</option>
+                <option value="vscode">VS Code</option>
+              </select>
+            </div>
+            {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'terminal' || sessionTerminalApp === 'ghostty') && (
+              <div style={rowStyle}>
+                <span style={labelStyle}>Launch Mode</span>
+                <select
+                  value={sessionTerminalMode}
+                  onChange={(e) => {
+                    const mode = e.target.value;
+                    setSessionTerminalMode(mode);
+                    window.electronAPI.setSessionTerminalMode(mode);
+                  }}
+                  style={selectStyle}
+                >
+                  <option value="tab">New Tab</option>
+                  <option value="window">New Window</option>
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Projects settings (only in Projects tab) */}
@@ -456,6 +492,19 @@ const PopupDefaultExample = ({
                   </button>
                 )}
               </div>
+              <div style={{ padding: '4px 16px 2px' }}>
+                <span style={{ fontSize: '11px', color: '#666' }}>Claude Session Launch</span>
+                {[
+                  { keys: '\u2318+Enter', label: 'New Claude Session' },
+                  { keys: '\u21E7+Enter', label: 'New Claude (CodeV Term)' },
+                  { keys: '\u2318+Click', label: 'New Claude Session' },
+                ].map((row) => (
+                  <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+                    <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
+                    <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -465,41 +514,6 @@ const PopupDefaultExample = ({
               <div style={{ ...rowStyle, padding: '4px 16px' }}>
                 <span style={{ ...labelStyle, fontSize: '11px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Sessions</span>
               </div>
-              <div style={rowStyle}>
-                <span style={labelStyle}>Launch Terminal</span>
-                <select
-                  value={sessionTerminalApp}
-                  onChange={(e) => {
-                    const app = e.target.value;
-                    setSessionTerminalApp(app);
-                    window.electronAPI.setSessionTerminalApp(app);
-                  }}
-                  style={selectStyle}
-                >
-                  <option value="iterm2">iTerm2</option>
-                  <option value="terminal">Terminal</option>
-                  <option value="ghostty">Ghostty</option>
-                  <option value="cmux">cmux</option>
-                  <option value="vscode">VS Code</option>
-                </select>
-              </div>
-              {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'terminal' || sessionTerminalApp === 'ghostty') && (
-                <div style={rowStyle}>
-                  <span style={labelStyle}>Launch Mode</span>
-                  <select
-                    value={sessionTerminalMode}
-                    onChange={(e) => {
-                      const mode = e.target.value;
-                      setSessionTerminalMode(mode);
-                      window.electronAPI.setSessionTerminalMode(mode);
-                    }}
-                    style={selectStyle}
-                  >
-                    <option value="tab">New Tab</option>
-                    <option value="window">New Window</option>
-                  </select>
-                </div>
-              )}
               <div style={rowStyle}>
                 <span style={labelStyle} title="User prompt display mode. Assistant response (◀ blue text) always shown.">Session Preview</span>
                 <select
