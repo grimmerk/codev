@@ -632,7 +632,7 @@ const readVSCodeSessionFromJSONL = (sessionId: string, cwd: string): {
         const entry = JSON.parse(line);
         if (entry.type === 'user' && entry.message?.role === 'user') {
           result.messageCount++;
-          // Extract text from user message content
+          // Extract text from user message content, skipping IDE context blocks
           const contentArr = entry.message.content;
           let text = '';
           if (typeof contentArr === 'string') {
@@ -640,7 +640,10 @@ const readVSCodeSessionFromJSONL = (sessionId: string, cwd: string): {
           } else if (Array.isArray(contentArr)) {
             for (const block of contentArr) {
               if (block?.type === 'text' && block?.text) {
-                text = block.text;
+                const t = block.text.trim();
+                // Skip VS Code IDE context injections (e.g. <ide_opened_file>, <ide_context>)
+                if (t.startsWith('<ide_')) continue;
+                text = t;
                 break;
               }
             }
