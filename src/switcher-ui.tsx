@@ -1085,7 +1085,16 @@ function SwitcherApp() {
                               window.electronAPI.openExternal(prLinks[session.sessionId].prUrl);
                             }}
                           >
-                            PR #{prLinks[session.sessionId].prNumber}
+                            <Highlighter
+                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              textToHighlight={`PR #${prLinks[session.sessionId].prNumber}`}
+                              highlightStyle={{
+                                backgroundColor: 'rgba(126, 200, 227, 0.25)',
+                                color: '#b0e0f0',
+                                padding: '0 1px',
+                                borderRadius: '2px',
+                              }}
+                            />
                           </span>
                         )}
                         {(() => {
