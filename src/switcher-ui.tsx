@@ -476,21 +476,18 @@ function SwitcherApp() {
       const activeIds = Object.keys(res?.activeMap || {});
       window.electronAPI.scanClosedVSCodeSessions(activeIds).then((closedVS: any[]) => {
         if (!closedVS || closedVS.length === 0) return;
-        // Merge closed VS Code sessions, deduplicate by sessionId
-        setAllSessions((prev: any[]) => {
+        // Merge closed VS Code sessions, deduplicate, sort by time, cap at 100
+        const mergeAndCap = (prev: any[]) => {
           const existingIds = new Set(prev.map((s: any) => s.sessionId));
           const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
           if (newSessions.length === 0) return prev;
           const merged = [...prev, ...newSessions];
           merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
-          return merged;
-        });
+          return merged.slice(0, 100);
+        };
+        setAllSessions((prev: any[]) => mergeAndCap(prev));
         setSessions((prev: any[]) => {
-          const existingIds = new Set(prev.map((s: any) => s.sessionId));
-          const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
-          if (newSessions.length === 0) return prev;
-          const merged = [...prev, ...newSessions];
-          merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+          const merged = mergeAndCap(prev);
           return sessionSearchValue.trim() ? filterSessionsLocally(merged, sessionSearchValue) : merged;
         });
         // Load enrichment for closed VS Code sessions

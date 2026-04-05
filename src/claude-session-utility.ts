@@ -717,11 +717,16 @@ const readVSCodeSessionFromJSONL = async (
     } catch {}
   }
 
-  // Get timestamp from tail
+  // Get timestamp from tail (convert ISO string to unix ms if needed)
   for (let i = tailLines.length - 1; i >= 0; i--) {
     try {
       const entry = JSON.parse(tailLines[i]);
-      if (entry.timestamp) { result.lastTimestamp = entry.timestamp; break; }
+      if (entry.timestamp) {
+        result.lastTimestamp = typeof entry.timestamp === 'string'
+          ? new Date(entry.timestamp).getTime()
+          : entry.timestamp;
+        break;
+      }
     } catch {}
   }
   return result;
@@ -1041,8 +1046,8 @@ export const openSession = async (
 
   switch (effectiveTerminal) {
     case 'vscode':
-      // User selected VS Code as launch terminal — resume via URI handler
-      openSessionInVSCode(sessionId);
+      // User selected VS Code as launch terminal — open project first, then resume
+      openSessionInVSCode(sessionId, projectPath);
       return;
     case 'codev':
       // Session is in CodeV's embedded terminal — notify renderer to switch to Term tab
@@ -1081,16 +1086,34 @@ export const setCodevTerminalCallback = (cb: (sessionId: string) => void) => {
 
 /**
  * Open a Claude Code session in VS Code via URI handler.
- * Switches to an existing session tab or resumes a closed session.
+ * For active sessions: switches to the existing session tab.
+ * For closed sessions: opens the project folder first, then resumes via URI handler.
  */
-export const openSessionInVSCode = (sessionId: string): void => {
+export const openSessionInVSCode = (sessionId: string, projectPath?: string): void => {
   const { exec } = require('child_process');
-  const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
-  exec(`open "${uri}"`, (error: any) => {
-    if (error) {
-      console.error('[openSessionInVSCode] failed:', error);
-    }
-  });
+
+  if (projectPath) {
+    // Closed session: open project folder first, then resume after a short delay
+    exec(`code "${projectPath}"`, (error: any) => {
+      if (error) {
+        console.error('[openSessionInVSCode] failed to open project:', error);
+        return;
+      }
+      // Wait for VS Code to open the workspace before resuming session
+      setTimeout(() => {
+        const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
+        exec(`open "${uri}"`);
+      }, 2000);
+    });
+  } else {
+    // Active session: directly switch via URI handler
+    const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
+    exec(`open "${uri}"`, (error: any) => {
+      if (error) {
+        console.error('[openSessionInVSCode] failed:', error);
+      }
+    });
+  }
 };
 
 /**
