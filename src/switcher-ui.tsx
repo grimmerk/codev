@@ -592,7 +592,27 @@ function SwitcherApp() {
     });
     window.electronAPI.onSessionStatusesUpdated((_event: any, statuses: Record<string, string>) => {
       // Use disk snapshot as source of truth — clears removed sessions
-      setSessionStatuses(statuses);
+      setSessionStatuses((prev: Record<string, string>) => {
+        // Detect sessions that just became idle (assistant finished responding)
+        const newlyIdle = Object.entries(statuses).filter(
+          ([id, status]) => status === 'idle' && prev[id] && prev[id] !== 'idle'
+        );
+        if (newlyIdle.length > 0) {
+          // Re-fetch last assistant response for sessions that just finished
+          const sessionsToRefresh = newlyIdle.map(([id]) => {
+            const s = allSessions.find((s: any) => s.sessionId === id);
+            return s || { sessionId: id, project: '' };
+          }).filter((s: any) => s.project);
+          if (sessionsToRefresh.length > 0) {
+            window.electronAPI.loadLastAssistantResponses(sessionsToRefresh).then((responses: Record<string, string>) => {
+              if (responses && Object.keys(responses).length > 0) {
+                setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+              }
+            });
+          }
+        }
+        return statuses;
+      });
     });
 
     window.electronAPI.onCheckTerminalAndHide(() => {
