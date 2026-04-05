@@ -364,7 +364,8 @@ function SwitcherApp() {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return allItems.filter((s) => {
       const prInfo = prLinks[s.sessionId];
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
+      const terminalBadge = terminalApps[s.sessionId] || ((s as any).entrypoint === 'claude-vscode' ? 'vscode' : '');
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''} ${terminalBadge}`.toLowerCase();
       return words.every((w: string) => searchTarget.includes(w));
     });
   };
@@ -1068,23 +1069,6 @@ function SwitcherApp() {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
-                        {(() => {
-                          const badge = session.isActive
-                            ? (terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' ? terminalApps[session.sessionId] : null)
-                            : ((session as any).entrypoint === 'claude-vscode' ? 'vscode' : null);
-                          return badge ? (
-                            <span style={{
-                              fontSize: '9px',
-                              color: '#aaa',
-                              border: '1px solid #555',
-                              borderRadius: '3px',
-                              padding: '1px 4px',
-                              textTransform: 'uppercase',
-                            }}>
-                              {badge}
-                            </span>
-                          ) : null;
-                        })()}
                         {prLinks[session.sessionId] && (
                           <span
                             style={{
@@ -1104,6 +1088,23 @@ function SwitcherApp() {
                             PR #{prLinks[session.sessionId].prNumber}
                           </span>
                         )}
+                        {(() => {
+                          const badge = session.isActive
+                            ? (terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' ? terminalApps[session.sessionId] : null)
+                            : ((session as any).entrypoint === 'claude-vscode' ? 'vscode' : null);
+                          return badge ? (
+                            <span style={{
+                              fontSize: '9px',
+                              color: '#aaa',
+                              border: '1px solid #555',
+                              borderRadius: '3px',
+                              padding: '1px 4px',
+                              textTransform: 'uppercase',
+                            }}>
+                              {badge}
+                            </span>
+                          ) : null;
+                        })()}
                         <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
                           {session.messageCount} msgs
                         </span>
