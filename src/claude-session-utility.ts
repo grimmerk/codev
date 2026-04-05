@@ -1175,17 +1175,18 @@ export const launchNewClaudeSession = (
       const tmpScript = '/tmp/codev-ghostty-new.scpt';
       const launchScript = terminalMode === 'window'
         ? `tell application "Ghostty"
-  activate
   set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${claudeCmd}\\n"}
   new window with configuration cfg
+  activate
 end tell`
         : `tell application "Ghostty"
-  activate
   set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${claudeCmd}\\n"}
   if (count windows) > 0 then
+    activate
     new tab in front window with configuration cfg
   else
     new window with configuration cfg
+    activate
   end if
 end tell`;
       fs.writeFileSync(tmpScript, launchScript);
@@ -1199,9 +1200,16 @@ end tell`;
       const tmpScript = '/tmp/codev-terminal-new.scpt';
       const escapedCommand = command.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const launchScript = terminalMode === 'window'
-        ? `tell application "Terminal"
-  activate
-  do script "${escapedCommand}"
+        ? `set wasRunning to (do shell script "pgrep -x Terminal >/dev/null 2>&1 && echo 1 || echo 0")
+tell application "Terminal"
+  if wasRunning is "0" then
+    activate
+    delay 0.3
+    do script "${escapedCommand}" in front window
+  else
+    do script "${escapedCommand}"
+    activate
+  end if
 end tell`
         : `tell application "Terminal"
   activate
@@ -1213,6 +1221,7 @@ end tell`
     do script "${escapedCommand}" in front window
   else
     do script "${escapedCommand}"
+    activate
   end if
 end tell`;
       fs.writeFileSync(tmpScript, launchScript);
@@ -1252,12 +1261,21 @@ end tell`;
       const tmpScript = '/tmp/codev-iterm-new.scpt';
       const escapedCommand = command.replace(/"/g, '\\"');
       const launchScript = terminalMode === 'window'
-        ? `tell application "iTerm2"
-  activate
-  set newWindow to (create window with default profile)
-  tell current session of newWindow
-    write text "${escapedCommand}"
-  end tell
+        ? `set wasRunning to (do shell script "pgrep -x iTerm2 >/dev/null 2>&1 && echo 1 || echo 0")
+tell application "iTerm2"
+  if wasRunning is "0" then
+    activate
+    delay 0.3
+    tell current session of current window
+      write text "${escapedCommand}"
+    end tell
+  else
+    set newWindow to (create window with default profile)
+    tell current session of newWindow
+      write text "${escapedCommand}"
+    end tell
+    activate
+  end if
 end tell`
         : `tell application "iTerm2"
   activate

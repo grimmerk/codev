@@ -259,7 +259,7 @@ const OptionUI = (
   return (
     <div
       key={value}
-      onClick={(e) => {
+      onClickCapture={(e) => {
         if (e.metaKey && onCmdClick) {
           e.stopPropagation();
           e.preventDefault();
