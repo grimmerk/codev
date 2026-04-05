@@ -1080,8 +1080,7 @@ const trayToggleEvtHandler = async () => {
     setTimeout(() => {
       switcherWindow?.webContents.send('switch-to-terminal');
       setTimeout(async () => {
-        const shortPath = projectPath.replace(os.homedir(), '~');
-        const cmd = `cd '${shortPath.replace(/'/g, "'\\''")}' && clear && claude\n`;
+        const cmd = `cd '${projectPath.replace(/'/g, "'\\''")}' && clear && claude\n`;
         if (!ptyProcess) {
           // PTY not spawned yet — spawn it first, then send command after ready
           await spawnTerminal();
