@@ -23,6 +23,8 @@ const HOOK_EVENTS = [
   'SessionEnd',
 ];
 
+const VSCODE_INDEX_PATH = path.join(STATUS_DIR, 'vscode-sessions.jsonl');
+
 const HOOK_SCRIPT = `#!/bin/bash
 # CodeV session status hook — writes status for CodeV to watch
 # Auto-managed by CodeV. Do not edit manually.
@@ -36,11 +38,24 @@ if [ -z "$SESSION_ID" ]; then exit 0; fi
 STATUS_DIR="$HOME/.claude/codev-status"
 mkdir -p "$STATUS_DIR"
 
+# Track VS Code sessions in index file (for CodeV to discover closed sessions)
+if [ "$CLAUDE_CODE_ENTRYPOINT" = "claude-vscode" ]; then
+  VS_MARKER="$STATUS_DIR/.vs-$SESSION_ID"
+  if [ ! -f "$VS_MARKER" ]; then
+    touch "$VS_MARKER"
+    SAFE_CWD_VS=$(echo "$CWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+    echo "{\\"sessionId\\":\\"$SESSION_ID\\",\\"cwd\\":\\"$SAFE_CWD_VS\\",\\"timestamp\\":$(date +%s)}" >> "$STATUS_DIR/vscode-sessions.jsonl"
+  fi
+fi
+
 case "$EVENT" in
   UserPromptSubmit|SubagentStart) STATUS="working" ;;
   Stop)                          STATUS="idle" ;;
   PermissionRequest)             STATUS="needs-attention" ;;
-  SessionEnd)                    rm -f "$STATUS_DIR/$SESSION_ID.json"; exit 0 ;;
+  SessionEnd)
+    rm -f "$STATUS_DIR/$SESSION_ID.json"
+    rm -f "$STATUS_DIR/.vs-$SESSION_ID"
+    exit 0 ;;
   *)                             STATUS="unknown" ;;
 esac
 
@@ -167,6 +182,28 @@ export const isHooksInstalled = (): boolean => {
 };
 
 export type SessionStatus = 'working' | 'idle' | 'needs-attention' | 'unknown' | null;
+
+/**
+ * Read VS Code session index (written by hooks when CLAUDE_CODE_ENTRYPOINT=claude-vscode).
+ * Returns a Map of sessionId -> cwd.
+ */
+export const readVSCodeIndex = (): Map<string, string> => {
+  const index = new Map<string, string>();
+  try {
+    if (!fs.existsSync(VSCODE_INDEX_PATH)) return index;
+    const content = fs.readFileSync(VSCODE_INDEX_PATH, 'utf-8');
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry.sessionId && entry.cwd) {
+          index.set(entry.sessionId, entry.cwd);
+        }
+      } catch {}
+    }
+  } catch {}
+  return index;
+};
 
 /**
  * Read all status files from codev-status directory

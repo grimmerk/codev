@@ -468,6 +468,49 @@ function SwitcherApp() {
         }
       });
     }
+
+    // Step 5: Scan closed VS Code sessions in background (SWR — async, cached 30s)
+    window.electronAPI.detectActiveSessions().then((res: any) => {
+      const activeIds = Object.keys(res?.activeMap || {});
+      window.electronAPI.scanClosedVSCodeSessions(activeIds).then((closedVS: any[]) => {
+        if (!closedVS || closedVS.length === 0) return;
+        // Merge closed VS Code sessions, deduplicate by sessionId
+        setAllSessions((prev: any[]) => {
+          const existingIds = new Set(prev.map((s: any) => s.sessionId));
+          const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
+          if (newSessions.length === 0) return prev;
+          const merged = [...prev, ...newSessions];
+          merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+          return merged;
+        });
+        setSessions((prev: any[]) => {
+          const existingIds = new Set(prev.map((s: any) => s.sessionId));
+          const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
+          if (newSessions.length === 0) return prev;
+          const merged = [...prev, ...newSessions];
+          merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+          return sessionSearchValue.trim() ? filterSessionsLocally(merged, sessionSearchValue) : merged;
+        });
+        // Load enrichment for closed VS Code sessions
+        window.electronAPI.loadSessionEnrichment(closedVS).then((enrichment) => {
+          if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
+            setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
+          }
+          if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
+            setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+          }
+          if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+            setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
+          }
+        });
+        // Load assistant responses for closed VS Code sessions
+        window.electronAPI.loadLastAssistantResponses(closedVS).then((responses: Record<string, string>) => {
+          if (responses && Object.keys(responses).length > 0) {
+            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+          }
+        });
+      });
+    });
   };
 
   const fetchWorkingFolderAndUpdate = async () => {

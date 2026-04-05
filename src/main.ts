@@ -26,6 +26,7 @@ import {
   loadSessionEnrichment,
   loadLastAssistantResponses,
   setCodevTerminalCallback,
+  scanClosedVSCodeSessions,
 } from './claude-session-utility';
 import {
   installHooks,
@@ -36,6 +37,7 @@ import {
   scanInitialStatuses,
   writeStatusFile,
   cleanupStaleStatuses,
+  readVSCodeIndex,
   SessionStatus,
 } from './session-status-hooks';
 import {
@@ -1947,6 +1949,11 @@ ipcMain.handle('detect-terminal-apps', async (_event, pidMap: Record<string, num
     results[sessionId] = await detectTerminalApp(pid);
   }));
   return results;
+});
+
+ipcMain.handle('scan-closed-vscode-sessions', async (_event, activeSessionIds: string[]) => {
+  const vsCodeIndex = readVSCodeIndex();
+  return scanClosedVSCodeSessions(new Set(activeSessionIds), vsCodeIndex);
 });
 
 ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => {
