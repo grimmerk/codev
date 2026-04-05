@@ -670,19 +670,26 @@ const parseAssistantMessageFromLines = (lines: string[]): string => {
  */
 const readVSCodeSessionFromJSONL = async (
   sessionId: string,
-  cwd: string,
+  cwdOrJsonlPath: string,
   execPromise: (cmd: string) => Promise<string>,
+  isJsonlPath = false,
 ): Promise<{
   firstUserMessage: string;
   lastUserMessage: string;
   lastAssistantMessage: string;
   lastTimestamp: number;
   messageCount: number;
+  cwd: string; // actual cwd read from JSONL content
 }> => {
-  const result = { firstUserMessage: '', lastUserMessage: '', lastAssistantMessage: '', lastTimestamp: 0, messageCount: 0 };
-  const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-  const jsonlPath = path.join(claudeDir, encodedProject, `${sessionId}.jsonl`);
+  const result = { firstUserMessage: '', lastUserMessage: '', lastAssistantMessage: '', lastTimestamp: 0, messageCount: 0, cwd: '' };
+  let jsonlPath: string;
+  if (isJsonlPath) {
+    jsonlPath = cwdOrJsonlPath;
+  } else {
+    const encodedProject = cwdOrJsonlPath.replace(/[^a-zA-Z0-9-]/g, '-');
+    const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+    jsonlPath = path.join(claudeDir, encodedProject, `${sessionId}.jsonl`);
+  }
 
   if (!fs.existsSync(jsonlPath)) return result;
 
@@ -700,6 +707,15 @@ const readVSCodeSessionFromJSONL = async (
   result.lastUserMessage = parseUserMessageFromLines(tailLines, true);
   result.lastAssistantMessage = parseAssistantMessageFromLines(tailLines);
   result.messageCount = parseInt(countOutput.trim(), 10) || 0;
+
+  // Extract actual cwd from JSONL entries (head lines have it in user/assistant messages)
+  for (const line of headLines) {
+    if (!line.includes('"cwd"')) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry.cwd) { result.cwd = entry.cwd; break; }
+    } catch {}
+  }
 
   // Get timestamp from tail
   for (let i = tailLines.length - 1; i >= 0; i--) {
@@ -781,9 +797,8 @@ export const scanClosedVSCodeSessions = async (
         fs.closeSync(fd);
         const chunk = Buffer.from(buf.buffer, 0, bytesRead).toString('utf-8');
         if (chunk.includes('"entrypoint":"claude-vscode"') || chunk.includes('"entrypoint": "claude-vscode"')) {
-          // Decode cwd from directory name
-          const cwd = '/' + dir.replace(/^-/, '').replace(/-/g, '/');
-          vsCodeFiles.push({ sessionId, cwd, jsonlPath: filePath });
+          // cwd will be read from JSONL content (directory name decode is lossy)
+          vsCodeFiles.push({ sessionId, cwd: '', jsonlPath: filePath });
         }
       } catch {}
     }
@@ -792,12 +807,18 @@ export const scanClosedVSCodeSessions = async (
   // Phase 2: Read first/last prompt + assistant for each session using head/tail (parallel)
   // Uses readVSCodeSessionFromJSONL (shared with active session detection)
   const sessions: ClaudeSession[] = [];
-  const promises = vsCodeFiles.map(async ({ sessionId, cwd }) => {
-    const info = await readVSCodeSessionFromJSONL(sessionId, cwd, execPromise);
+  const promises = vsCodeFiles.map(async ({ sessionId, cwd, jsonlPath }) => {
+    // For scanned files (not from hooks index), pass jsonlPath directly to avoid lossy cwd decode
+    const useJsonlPath = !vsCodeIndex.has(sessionId);
+    const info = await readVSCodeSessionFromJSONL(
+      sessionId, useJsonlPath ? jsonlPath : cwd, execPromise, useJsonlPath,
+    );
+    // Use actual cwd from JSONL content, fall back to hooks index cwd
+    const actualCwd = info.cwd || cwd;
     sessions.push({
       sessionId,
-      project: cwd,
-      projectName: path.basename(cwd) || cwd,
+      project: actualCwd,
+      projectName: path.basename(actualCwd) || actualCwd,
       firstUserMessage: info.firstUserMessage,
       lastUserMessage: info.lastUserMessage,
       lastAssistantMessage: info.lastAssistantMessage,
