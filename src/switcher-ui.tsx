@@ -430,6 +430,27 @@ function SwitcherApp() {
           }
         });
       }
+
+      // Load enrichment (ai-title, branch, PR) for VS Code sessions
+      if (vscodeSessions.length > 0) {
+        window.electronAPI.loadSessionEnrichment(vscodeSessions).then((enrichment) => {
+          if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
+            setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
+          }
+          if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
+            setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+          }
+          if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+            setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
+          }
+        });
+        // Load assistant responses for VS Code sessions
+        window.electronAPI.loadLastAssistantResponses(vscodeSessions).then((responses: Record<string, string>) => {
+          if (responses && Object.keys(responses).length > 0) {
+            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+          }
+        });
+      }
     });
 
     // Step 4: Load custom titles + branches in background
