@@ -5,6 +5,15 @@
 - **Default branch: `main`** (changed from `develop` — PRs should target `main`)
 - `develop` branch is legacy and no longer used
 
+## PR Review & Push Frequency
+
+- **Wait for all AI reviewers before pushing fixes.** This repo uses CodeRabbit (free OSS plan) and cubic. Both trigger on every push, but their review timing differs. Push once, wait for both to finish, then address all comments in a single fix commit.
+- **CodeRabbit free plan rate limits (per developer, across all repos):**
+  - 200 files per hour
+  - After 3 back-to-back reviews, limited to 4 reviews per hour
+  - Each push triggers an incremental review — rapid pushes (4+ within an hour) will queue or delay reviews
+- **Practical rule:** batch review fixes into one commit/push rather than pushing after each individual fix. This conserves review quota and avoids triggering redundant review cycles.
+
 ## Build Commands
 
 - Electron: `yarn start` (dev), `yarn make` (build), `yarn dev` (with server)
