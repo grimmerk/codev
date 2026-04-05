@@ -1079,10 +1079,24 @@ const trayToggleEvtHandler = async () => {
     showSwitcherWindow();
     setTimeout(() => {
       switcherWindow?.webContents.send('switch-to-terminal');
-      // Send cd + claude command to terminal after tab switch
       setTimeout(() => {
         const shortPath = projectPath.replace(os.homedir(), '~');
-        ptyProcess?.write(`cd ${shortPath.replace(/ /g, '\\ ')} && clear && claude\n`);
+        const cmd = `cd ${shortPath.replace(/ /g, '\\ ')} && clear && claude\n`;
+        if (!ptyProcess) return;
+        // Check if claude is running as child of PTY shell — Ctrl+C to exit first
+        const { execSync } = require('child_process');
+        try {
+          const childPid = execSync(`pgrep -P ${ptyProcess.pid} -x claude 2>/dev/null`, { encoding: 'utf-8' }).trim();
+          if (childPid) {
+            ptyProcess.write('\x03'); // Ctrl+C once
+            setTimeout(() => {
+              ptyProcess?.write('\x03'); // Ctrl+C again to ensure exit
+              setTimeout(() => ptyProcess?.write(cmd), 800);
+            }, 300);
+            return;
+          }
+        } catch {}
+        ptyProcess.write(cmd);
       }, 100);
     }, 50);
   });
