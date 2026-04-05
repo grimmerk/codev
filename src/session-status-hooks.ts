@@ -241,11 +241,17 @@ export const watchStatusDir = (
 ): (() => void) => {
   fs.mkdirSync(STATUS_DIR, { recursive: true });
 
+  // Debounce: fs.watch on macOS fires 3-6 times per file change
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   const watcher = fs.watch(STATUS_DIR, { persistent: false }, () => {
-    onChange(readAllStatuses());
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      onChange(readAllStatuses());
+    }, 50);
   });
 
   return () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
     watcher.close();
   };
 };

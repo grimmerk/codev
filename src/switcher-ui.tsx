@@ -607,7 +607,7 @@ function SwitcherApp() {
       }
       setSessionStatuses(statusStrings);
 
-      // Auto-refresh assistant response for idle sessions with newer timestamps
+      // Auto-refresh preview (user msg + assistant msg + order) for idle sessions
       const currentSessions = allSessionsRef.current;
       const sessionsToRefresh: any[] = [];
       for (const [id, v] of Object.entries(rawStatuses)) {
@@ -615,7 +615,6 @@ function SwitcherApp() {
         const ts = typeof v === 'object' ? (v.timestamp || 0) : 0;
         if (status !== 'idle' || !ts) continue;
         const lastFetched = lastAssistantFetchRef.current[id] || 0;
-        // Re-fetch if status timestamp (seconds) is newer than last fetch (ms)
         if (ts * 1000 > lastFetched) {
           const s = currentSessions.find((s: any) => s.sessionId === id);
           if (s?.project) sessionsToRefresh.push(s);
@@ -628,11 +627,36 @@ function SwitcherApp() {
         }
         // Small delay to ensure JSONL is fully flushed after Stop hook
         setTimeout(() => {
-          window.electronAPI.loadLastAssistantResponses(sessionsToRefresh).then((responses: Record<string, string>) => {
-            console.log('[status-refresh] re-fetched assistant responses:', Object.keys(responses).length, 'sessions');
-            if (responses && Object.keys(responses).length > 0) {
-              setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+          window.electronAPI.refreshSessionPreview(sessionsToRefresh).then((previews: Record<string, any>) => {
+            if (!previews || Object.keys(previews).length === 0) return;
+            // Update assistant responses
+            const newAssistant: Record<string, string> = {};
+            for (const [id, p] of Object.entries(previews)) {
+              if (p.lastAssistantMessage) newAssistant[id] = p.lastAssistantMessage;
             }
+            if (Object.keys(newAssistant).length > 0) {
+              setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...newAssistant }));
+            }
+            // Update last user message + timestamp + re-sort
+            const refreshedIds = new Set(Object.keys(previews));
+            const updateSessions = (list: any[]) => {
+              const updated = list.map((s: any) => {
+                if (!refreshedIds.has(s.sessionId)) return s;
+                const p = previews[s.sessionId];
+                return {
+                  ...s,
+                  lastUserMessage: p.lastUserMessage || s.lastUserMessage,
+                  lastTimestamp: now,
+                };
+              });
+              updated.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+              return updated;
+            };
+            setAllSessions((prev: any[]) => { const r = updateSessions(prev); allSessionsRef.current = r; return r; });
+            setSessions((prev: any[]) => {
+              const updated = updateSessions(prev);
+              return sessionSearchValue.trim() ? filterSessionsLocally(updated, sessionSearchValue) : updated;
+            });
           });
         }, 300);
       }

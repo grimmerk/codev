@@ -25,6 +25,7 @@ import {
   invalidateSessionCache,
   loadSessionEnrichment,
   loadLastAssistantResponses,
+  refreshSessionPreview,
   setCodevTerminalCallback,
   scanClosedVSCodeSessions,
 } from './claude-session-utility';
@@ -1978,6 +1979,13 @@ ipcMain.handle('load-session-enrichment', async (_event, sessions: any[]) => {
 ipcMain.handle('load-last-assistant-responses', async (_event, sessions: any[]) => {
   const responseMap = await loadLastAssistantResponses(sessions);
   return Object.fromEntries(responseMap);
+});
+
+ipcMain.handle('refresh-session-preview', async (_event, sessions: any[]) => {
+  const previewMap = await refreshSessionPreview(sessions);
+  const result: Record<string, any> = {};
+  previewMap.forEach((v, k) => { result[k] = v; });
+  return result;
 });
 
 ipcMain.handle('load-project-branches', async (_event, paths: string[]) => {

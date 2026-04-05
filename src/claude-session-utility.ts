@@ -1075,6 +1075,46 @@ export const openSession = async (
  * Otherwise, open a new tab and run claude --resume
  */
 /**
+ * Refresh session preview: reads tail -n 100 to extract both last user message
+ * and last assistant message in a single read. Used by status handler for
+ * real-time updates without duplicate file reads.
+ */
+export const refreshSessionPreview = async (
+  sessions: { sessionId: string; project: string }[]
+): Promise<Map<string, { lastUserMessage: string; lastAssistantMessage: string }>> => {
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 5000, maxBuffer: 10 * 1024 * 1024 }, (err: any, stdout: string) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
+  const results = new Map<string, { lastUserMessage: string; lastAssistantMessage: string }>();
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+
+  const promises = sessions.map(async (session) => {
+    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
+    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    if (!fs.existsSync(jsonlPath)) return;
+
+    const output = await execPromise(`tail -n 100 "${jsonlPath}"`);
+    if (!output.trim()) return;
+
+    const lines = output.split('\n').filter(Boolean);
+    const lastUserMessage = parseUserMessageFromLines(lines, true);
+    const lastAssistantMessage = parseAssistantMessageFromLines(lines);
+
+    if (lastUserMessage || lastAssistantMessage) {
+      results.set(session.sessionId, { lastUserMessage, lastAssistantMessage });
+    }
+  });
+
+  await Promise.all(promises);
+  return results;
+};
+
+/**
  * Callback for opening sessions in CodeV's embedded terminal.
  * Set by main.ts to avoid circular dependency.
  */

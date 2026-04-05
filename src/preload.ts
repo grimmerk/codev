@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   detectActiveSessions: () => ipcRenderer.invoke('detect-active-sessions'),
   detectTerminalApps: (pidMap: Record<string, number>, entrypointMap?: Record<string, string>) => ipcRenderer.invoke('detect-terminal-apps', pidMap, entrypointMap),
   scanClosedVSCodeSessions: (activeSessionIds: string[]) => ipcRenderer.invoke('scan-closed-vscode-sessions', activeSessionIds),
+  refreshSessionPreview: (sessions: any[]) => ipcRenderer.invoke('refresh-session-preview', sessions),
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) =>
     ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid, customTitle),
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>
