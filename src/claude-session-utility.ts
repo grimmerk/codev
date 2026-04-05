@@ -797,10 +797,14 @@ export const scanClosedVSCodeSessions = async (
       const filePath = path.join(dirPath, f);
       try {
         const fd = fs.openSync(filePath, 'r');
-        const buf = new Uint8Array(4096);
-        const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
-        fs.closeSync(fd);
-        const chunk = Buffer.from(buf.buffer, 0, bytesRead).toString('utf-8');
+        let chunk: string;
+        try {
+          const buf = new Uint8Array(4096);
+          const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+          chunk = Buffer.from(buf.buffer, 0, bytesRead).toString('utf-8');
+        } finally {
+          fs.closeSync(fd);
+        }
         if (chunk.includes('"entrypoint":"claude-vscode"') || chunk.includes('"entrypoint": "claude-vscode"')) {
           // cwd will be read from JSONL content (directory name decode is lossy)
           vsCodeFiles.push({ sessionId, cwd: '', jsonlPath: filePath });
@@ -1130,11 +1134,11 @@ export const setCodevTerminalCallback = (cb: (sessionId: string) => void) => {
  * For closed sessions: opens the project folder first, then resumes via URI handler.
  */
 export const openSessionInVSCode = (sessionId: string, projectPath?: string): void => {
-  const { exec } = require('child_process');
+  const { execFile } = require('child_process');
 
   if (projectPath) {
     // Closed session: open project folder first, then resume after a short delay
-    exec(`code "${projectPath}"`, (error: any) => {
+    execFile('code', [projectPath], (error: any) => {
       if (error) {
         console.error('[openSessionInVSCode] failed to open project:', error);
         return;
@@ -1142,13 +1146,13 @@ export const openSessionInVSCode = (sessionId: string, projectPath?: string): vo
       // Wait for VS Code to open the workspace before resuming session
       setTimeout(() => {
         const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
-        exec(`open "${uri}"`);
+        execFile('open', [uri]);
       }, 2000);
     });
   } else {
     // Active session: directly switch via URI handler
     const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
-    exec(`open "${uri}"`, (error: any) => {
+    execFile('open', [uri], (error: any) => {
       if (error) {
         console.error('[openSessionInVSCode] failed:', error);
       }

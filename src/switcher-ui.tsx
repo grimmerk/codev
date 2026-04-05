@@ -348,6 +348,7 @@ function SwitcherApp() {
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
+  const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -646,7 +647,8 @@ function SwitcherApp() {
             setAllSessions((prev: any[]) => { const r = updateSessions(prev); allSessionsRef.current = r; return r; });
             setSessions((prev: any[]) => {
               const updated = updateSessions(prev);
-              return sessionSearchValue.trim() ? filterSessionsLocally(updated, sessionSearchValue) : updated;
+              const search = sessionSearchRef2.current;
+              return search.trim() ? filterSessionsLocally(updated, search) : updated;
             });
           });
         }, 300);
@@ -1020,6 +1022,7 @@ function SwitcherApp() {
             onChange={(e) => {
               const val = e.target.value;
               setSessionSearchValue(val);
+              sessionSearchRef2.current = val;
               setSessions(filterSessionsLocally(allSessions, val));
               setSelectedSessionIndex(0);
             }}
@@ -1027,6 +1030,7 @@ function SwitcherApp() {
               if (e.key === 'Escape') {
                 if (sessionSearchValue) {
                   setSessionSearchValue('');
+                  sessionSearchRef2.current = '';
                   setSessions(allSessions);
                 } else {
                   hideApp();
