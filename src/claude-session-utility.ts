@@ -644,37 +644,70 @@ const parseUserMessageFromLines = (lines: string[], fromEnd = false): string => 
 };
 
 /**
- * Read basic session info from a VS Code session JSONL file.
- * For active sessions (typically small): reads full file.
- * Uses shared extractUserText() for IDE context filtering.
+ * Parse last assistant text from JSONL lines (shared with loadLastAssistantResponses pattern).
  */
-const readVSCodeSessionFromJSONL = (sessionId: string, cwd: string): {
+const parseAssistantMessageFromLines = (lines: string[]): string => {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"type":"assistant"')) continue;
+    try {
+      const obj = JSON.parse(lines[i]);
+      const content = obj?.message?.content;
+      if (!Array.isArray(content)) continue;
+      for (let j = content.length - 1; j >= 0; j--) {
+        if (content[j]?.type === 'text' && content[j]?.text?.trim()) {
+          return content[j].text.trim();
+        }
+      }
+    } catch {}
+  }
+  return '';
+};
+
+/**
+ * Read VS Code session info using head/tail (async, parallel).
+ * Single tail read extracts both last user prompt AND last assistant message,
+ * avoiding duplicate reads with loadLastAssistantResponses().
+ */
+const readVSCodeSessionFromJSONL = async (
+  sessionId: string,
+  cwd: string,
+  execPromise: (cmd: string) => Promise<string>,
+): Promise<{
   firstUserMessage: string;
   lastUserMessage: string;
+  lastAssistantMessage: string;
   lastTimestamp: number;
   messageCount: number;
-} => {
-  const result = { firstUserMessage: '', lastUserMessage: '', lastTimestamp: 0, messageCount: 0 };
+}> => {
+  const result = { firstUserMessage: '', lastUserMessage: '', lastAssistantMessage: '', lastTimestamp: 0, messageCount: 0 };
   const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const jsonlPath = path.join(claudeDir, encodedProject, `${sessionId}.jsonl`);
 
   if (!fs.existsSync(jsonlPath)) return result;
 
-  try {
-    const content = fs.readFileSync(jsonlPath, 'utf-8');
-    const lines = content.split('\n').filter(Boolean);
-    result.firstUserMessage = parseUserMessageFromLines(lines);
-    result.lastUserMessage = parseUserMessageFromLines(lines, true);
-    result.messageCount = lines.filter(l => l.includes('"type":"user"')).length;
-    // Get last timestamp
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const entry = JSON.parse(lines[i]);
-        if (entry.timestamp) { result.lastTimestamp = entry.timestamp; break; }
-      } catch {}
-    }
-  } catch { /* skip read errors */ }
+  // Parallel: head for first prompt, tail for last prompt + assistant, grep -c for count
+  const [headOutput, tailOutput, countOutput] = await Promise.all([
+    execPromise(`head -n 20 "${jsonlPath}"`),
+    execPromise(`tail -n 100 "${jsonlPath}"`),
+    execPromise(`grep -c '"type":"user"' "${jsonlPath}" 2>/dev/null`),
+  ]);
+
+  const headLines = headOutput.split('\n').filter(Boolean);
+  const tailLines = tailOutput.split('\n').filter(Boolean);
+
+  result.firstUserMessage = parseUserMessageFromLines(headLines);
+  result.lastUserMessage = parseUserMessageFromLines(tailLines, true);
+  result.lastAssistantMessage = parseAssistantMessageFromLines(tailLines);
+  result.messageCount = parseInt(countOutput.trim(), 10) || 0;
+
+  // Get timestamp from tail
+  for (let i = tailLines.length - 1; i >= 0; i--) {
+    try {
+      const entry = JSON.parse(tailLines[i]);
+      if (entry.timestamp) { result.lastTimestamp = entry.timestamp; break; }
+    } catch {}
+  }
   return result;
 };
 
@@ -756,40 +789,20 @@ export const scanClosedVSCodeSessions = async (
     }
   }
 
-  // Phase 2: Read first/last prompt for each VS Code session using head/tail (parallel)
+  // Phase 2: Read first/last prompt + assistant for each session using head/tail (parallel)
+  // Uses readVSCodeSessionFromJSONL (shared with active session detection)
   const sessions: ClaudeSession[] = [];
-  const promises = vsCodeFiles.map(async ({ sessionId, cwd, jsonlPath }) => {
-    const [headOutput, tailOutput, countOutput] = await Promise.all([
-      execPromise(`head -n 20 "${jsonlPath}"`),
-      execPromise(`tail -n 50 "${jsonlPath}"`),
-      execPromise(`grep -c '"type":"user"' "${jsonlPath}" 2>/dev/null`),
-    ]);
-
-    const headLines = headOutput.split('\n').filter(Boolean);
-    const tailLines = tailOutput.split('\n').filter(Boolean);
-
-    const firstUserMessage = parseUserMessageFromLines(headLines);
-    const lastUserMessage = parseUserMessageFromLines(tailLines, true);
-
-    // Get timestamp from tail
-    let lastTimestamp = 0;
-    for (let i = tailLines.length - 1; i >= 0; i--) {
-      try {
-        const entry = JSON.parse(tailLines[i]);
-        if (entry.timestamp) { lastTimestamp = entry.timestamp; break; }
-      } catch {}
-    }
-
-    const messageCount = parseInt(countOutput.trim(), 10) || 0;
-
+  const promises = vsCodeFiles.map(async ({ sessionId, cwd }) => {
+    const info = await readVSCodeSessionFromJSONL(sessionId, cwd, execPromise);
     sessions.push({
       sessionId,
       project: cwd,
       projectName: path.basename(cwd) || cwd,
-      firstUserMessage,
-      lastUserMessage,
-      lastTimestamp,
-      messageCount,
+      firstUserMessage: info.firstUserMessage,
+      lastUserMessage: info.lastUserMessage,
+      lastAssistantMessage: info.lastAssistantMessage,
+      lastTimestamp: info.lastTimestamp,
+      messageCount: info.messageCount,
       isActive: false,
       entrypoint: 'claude-vscode',
     });
@@ -816,6 +829,7 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
   const activeMap = new Map<string, number>();
   const entrypoints = new Map<string, string>();
   const vscodeSessions: ClaudeSession[] = [];
+  const vscodeReadPromises: Promise<void>[] = [];
   const needsCrossRef: { pid: number; cwd: string; candidates: ClaudeSession[] }[] = [];
 
   const { exec } = require('child_process');
@@ -853,20 +867,25 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
           if (entrypoint === 'claude-vscode') {
             // VS Code sessions: not in history.jsonl, add directly
             activeMap.set(sessionId, pid);
-            // Build a ClaudeSession entry from JSONL
-            const sessionInfo = readVSCodeSessionFromJSONL(sessionId, cwd);
-            vscodeSessions.push({
-              sessionId,
-              project: cwd,
-              projectName: path.basename(cwd) || cwd,
-              firstUserMessage: sessionInfo.firstUserMessage,
-              lastUserMessage: sessionInfo.lastUserMessage,
-              lastTimestamp: sessionInfo.lastTimestamp || data.startedAt || 0,
-              messageCount: sessionInfo.messageCount,
-              isActive: true,
-              activePid: pid,
-              entrypoint,
-            });
+            // Queue async JSONL read (head/tail in parallel)
+            const startedAt = data.startedAt;
+            vscodeReadPromises.push(
+              readVSCodeSessionFromJSONL(sessionId, cwd, execPromise).then((info) => {
+                vscodeSessions.push({
+                  sessionId,
+                  project: cwd,
+                  projectName: path.basename(cwd) || cwd,
+                  firstUserMessage: info.firstUserMessage,
+                  lastUserMessage: info.lastUserMessage,
+                  lastAssistantMessage: info.lastAssistantMessage,
+                  lastTimestamp: info.lastTimestamp || startedAt || 0,
+                  messageCount: info.messageCount,
+                  isActive: true,
+                  activePid: pid,
+                  entrypoint,
+                });
+              })
+            );
           } else {
             // CLI sessions: match against history.jsonl
             const knownSession = allSessions.find(s => s.sessionId === sessionId);
@@ -886,6 +905,11 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
         } catch {
           // skip malformed files
         }
+      }
+
+      // Read VS Code session JSONLs in parallel (head/tail)
+      if (vscodeReadPromises.length > 0) {
+        await Promise.all(vscodeReadPromises);
       }
 
       // Cross-reference for PIDs with same-cwd ambiguity.

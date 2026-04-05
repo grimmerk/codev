@@ -432,7 +432,7 @@ function SwitcherApp() {
         });
       }
 
-      // Load enrichment (ai-title, branch, PR) for VS Code sessions
+      // Load enrichment (ai-title, branch, PR) for active VS Code sessions
       if (vscodeSessions.length > 0) {
         window.electronAPI.loadSessionEnrichment(vscodeSessions).then((enrichment) => {
           if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
@@ -445,12 +445,14 @@ function SwitcherApp() {
             setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
           }
         });
-        // Load assistant responses for VS Code sessions
-        window.electronAPI.loadLastAssistantResponses(vscodeSessions).then((responses: Record<string, string>) => {
-          if (responses && Object.keys(responses).length > 0) {
-            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
-          }
-        });
+        // Use pre-loaded assistant responses (already read from tail in detectActiveSessions)
+        const preloaded: Record<string, string> = {};
+        for (const vs of vscodeSessions) {
+          if (vs.lastAssistantMessage) preloaded[vs.sessionId] = vs.lastAssistantMessage;
+        }
+        if (Object.keys(preloaded).length > 0) {
+          setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...preloaded }));
+        }
       }
     });
 
@@ -503,12 +505,14 @@ function SwitcherApp() {
             setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
           }
         });
-        // Load assistant responses for closed VS Code sessions
-        window.electronAPI.loadLastAssistantResponses(closedVS).then((responses: Record<string, string>) => {
-          if (responses && Object.keys(responses).length > 0) {
-            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
-          }
-        });
+        // Use pre-loaded assistant responses (already read from tail in scanClosedVSCodeSessions)
+        const preloaded: Record<string, string> = {};
+        for (const vs of closedVS) {
+          if (vs.lastAssistantMessage) preloaded[vs.sessionId] = vs.lastAssistantMessage;
+        }
+        if (Object.keys(preloaded).length > 0) {
+          setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...preloaded }));
+        }
       });
     });
   };
