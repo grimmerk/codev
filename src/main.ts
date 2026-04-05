@@ -1081,7 +1081,7 @@ const trayToggleEvtHandler = async () => {
       switcherWindow?.webContents.send('switch-to-terminal');
       setTimeout(() => {
         const shortPath = projectPath.replace(os.homedir(), '~');
-        const cmd = `cd ${shortPath.replace(/ /g, '\\ ')} && clear && claude\n`;
+        const cmd = `cd '${shortPath.replace(/'/g, "'\\''")}' && clear && claude\n`;
         if (!ptyProcess) return;
         // Check if claude is running as child of PTY shell — Ctrl+C to exit first
         const { execSync } = require('child_process');

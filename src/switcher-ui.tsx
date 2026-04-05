@@ -1401,6 +1401,8 @@ function SwitcherApp() {
           }
           // Cmd+Enter or Shift+Enter: launch new Claude session
           // Set flag so onChange knows to launch instead of opening IDE
+          // Clear on every keypress to prevent stale ref if onChange didn't fire
+          launchClaudeRef.current = null;
           if (evt.key === 'Enter' && (evt.metaKey || evt.shiftKey)) {
             launchClaudeRef.current = evt.shiftKey ? 'codev' : 'external';
           }

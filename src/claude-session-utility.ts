@@ -1263,7 +1263,7 @@ end tell`;
     case 'iterm2':
     default: {
       const tmpScript = '/tmp/codev-iterm-launch.scpt';
-      const escapedCommand = fullCommand.replace(/"/g, '\\"');
+      const escapedCommand = fullCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const launchScript = terminalMode === 'window'
         ? `set wasRunning to (do shell script "pgrep -x iTerm2 >/dev/null 2>&1 && echo 1 || echo 0")
 tell application "iTerm2"
@@ -1310,11 +1310,10 @@ export const launchNewClaudeSession = (
   terminalMode: string = 'tab',
 ): void => {
   if (terminalApp === 'vscode') {
-    const { exec, execFile } = require('child_process');
+    const { execFile } = require('child_process');
     // Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
     const bundleId = getCurrentIDEBundleId();
-    const escapedPath = projectPath.replace(/ /g, '\\ ');
-    exec(`open -b ${bundleId} ${escapedPath}`, (error: any) => {
+    execFile('open', ['-b', bundleId, projectPath], (error: any) => {
       if (error) {
         console.error('[launchNewClaudeSession] failed to open VS Code:', error);
         return;
@@ -1340,14 +1339,13 @@ export const launchNewClaudeSession = (
  * For closed sessions: opens the project folder first, then resumes via URI handler.
  */
 export const openSessionInVSCode = (sessionId: string, projectPath?: string): void => {
-  const { exec, execFile } = require('child_process');
+  const { execFile } = require('child_process');
 
   if (projectPath) {
     // Closed session: open project folder first, then resume after a short delay
     // Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
     const bundleId = getCurrentIDEBundleId();
-    const escapedPath = projectPath.replace(/ /g, '\\ ');
-    exec(`open -b ${bundleId} ${escapedPath}`, (error: any) => {
+    execFile('open', ['-b', bundleId, projectPath], (error: any) => {
       if (error) {
         console.error('[openSessionInVSCode] failed to open project:', error);
         return;

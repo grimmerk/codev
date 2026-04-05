@@ -199,7 +199,8 @@ This reuses the same pattern as existing session resume (`cd "<path>" && claude 
 For **VS Code** launch, use the URI handler instead (no `cd` needed):
 ```bash
 # Open project folder first (if not already open), then launch Claude Code tab
-code "<project-path>"
+# Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
+open -b com.microsoft.VSCode "<project-path>"
 open "vscode://anthropic.claude-code/open"
 
 # Or with a pre-filled prompt:
