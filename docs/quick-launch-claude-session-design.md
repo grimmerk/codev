@@ -215,7 +215,7 @@ Each terminal already has launch logic in `claude-session-utility.ts`:
 - **Ghostty**: AppleScript `new surface configuration` with `initial input`
 - **cmux**: CLI `new-workspace --command`
 - **Terminal.app**: AppleScript `do script`
-- **VS Code**: `code <path>` + URI handler `vscode://anthropic.claude-code/open`
+- **VS Code**: `open -b <bundleId> <path>` + URI handler `vscode://anthropic.claude-code/open`
 - **CodeV**: `terminalInput()` IPC to embedded PTY
 
 The new `launchNewClaudeSession()` function can delegate to these same implementations.

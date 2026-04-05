@@ -1079,10 +1079,15 @@ const trayToggleEvtHandler = async () => {
     showSwitcherWindow();
     setTimeout(() => {
       switcherWindow?.webContents.send('switch-to-terminal');
-      setTimeout(() => {
+      setTimeout(async () => {
         const shortPath = projectPath.replace(os.homedir(), '~');
         const cmd = `cd '${shortPath.replace(/'/g, "'\\''")}' && clear && claude\n`;
-        if (!ptyProcess) return;
+        if (!ptyProcess) {
+          // PTY not spawned yet — spawn it first, then send command after ready
+          await spawnTerminal();
+          setTimeout(() => ptyProcess?.write(cmd), 300);
+          return;
+        }
         // Check if claude is running as child of PTY shell — Ctrl+C to exit first
         const { execSync } = require('child_process');
         try {

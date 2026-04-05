@@ -12,7 +12,7 @@
   - 200 files per hour
   - After 3 back-to-back reviews, limited to 4 reviews per hour
   - Each push triggers an incremental review — rapid pushes (4+ within an hour) will queue or delay reviews
-- **Practical rule:** batch review fixes into one commit/push rather than pushing after each individual fix. This conserves review quota and avoids triggering redundant review cycles.
+- **Practical rule:** wait for all reviewers to finish, address all comments, then push fixes together (one or more commits is fine, but aim for a single push). This conserves review quota and avoids triggering redundant review cycles.
 
 ## Build Commands
 
