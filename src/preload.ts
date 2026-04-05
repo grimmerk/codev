@@ -56,6 +56,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   refreshSessionPreview: (sessions: any[]) => ipcRenderer.invoke('refresh-session-preview', sessions),
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) =>
     ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid, customTitle),
+  launchNewClaudeSession: (projectPath: string) =>
+    ipcRenderer.send('launch-new-claude-session', projectPath),
+  launchNewClaudeSessionInCodev: (projectPath: string) =>
+    ipcRenderer.send('launch-new-claude-session-in-codev', projectPath),
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>
     ipcRenderer.send('copy-claude-session-command', sessionId, projectPath),
   loadSessionEnrichment: (sessions: any[]) => ipcRenderer.invoke('load-session-enrichment', sessions),
@@ -160,6 +164,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resumeShortcut: (key: string) => ipcRenderer.invoke('resume-shortcut', key),
 
   // Terminal (node-pty + xterm.js)
+  terminalGetCwd: () => ipcRenderer.invoke('terminal-get-cwd'),
   terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => ipcRenderer.send('terminal-spawn', options),
   terminalAttach: (cols: number, rows: number) => ipcRenderer.send('terminal-attach', cols, rows),
   terminalInput: (data: string) => ipcRenderer.send('terminal-input', data),

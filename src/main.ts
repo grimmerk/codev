@@ -27,6 +27,8 @@ import {
   loadLastAssistantResponses,
   refreshSessionPreview,
   setCodevTerminalCallback,
+  setLaunchInCodevTerminalCallback,
+  launchNewClaudeSession,
   scanClosedVSCodeSessions,
 } from './claude-session-utility';
 import {
@@ -1072,6 +1074,37 @@ const trayToggleEvtHandler = async () => {
     }, 50);
   });
 
+  // Set callback for launching new claude session in CodeV terminal
+  setLaunchInCodevTerminalCallback((projectPath: string) => {
+    showSwitcherWindow();
+    setTimeout(() => {
+      switcherWindow?.webContents.send('switch-to-terminal');
+      setTimeout(async () => {
+        const cmd = `cd '${projectPath.replace(/'/g, "'\\''")}' && clear && claude\n`;
+        if (!ptyProcess) {
+          // PTY not spawned yet — spawn it first, then send command after ready
+          await spawnTerminal();
+          setTimeout(() => ptyProcess?.write(cmd), 300);
+          return;
+        }
+        // Check if claude is running as child of PTY shell — Ctrl+C to exit first
+        const { execSync } = require('child_process');
+        try {
+          const childPid = execSync(`pgrep -P ${ptyProcess.pid} -x claude 2>/dev/null`, { encoding: 'utf-8' }).trim();
+          if (childPid) {
+            ptyProcess.write('\x03'); // Ctrl+C once
+            setTimeout(() => {
+              ptyProcess?.write('\x03'); // Ctrl+C again to ensure exit
+              setTimeout(() => ptyProcess?.write(cmd), 800);
+            }, 300);
+            return;
+          }
+        } catch {}
+        ptyProcess.write(cmd);
+      }, 100);
+    }, 50);
+  });
+
   // Pre-initialize aiAssistantWindow for faster first open
   // This is done after mainWindow is created, but before showing it
   // so that initial startup isn't slowed down
@@ -1780,6 +1813,18 @@ ipcMain.on('terminal-input', (_event, data: string) => {
   ptyProcess?.write(data);
 });
 
+ipcMain.handle('terminal-get-cwd', async () => {
+  if (!ptyProcess) return null;
+  try {
+    const pid = ptyProcess.pid;
+    const { execSync } = require('child_process');
+    const cwd = execSync(`lsof -a -p ${pid} -d cwd -Fn 2>/dev/null | grep '^n' | head -1 | cut -c2-`, { encoding: 'utf-8' }).trim();
+    return cwd || null;
+  } catch {
+    return null;
+  }
+});
+
 ipcMain.on('terminal-resize', (_event, cols: number, rows: number) => {
   ptyProcess?.resize(cols, rows);
 });
@@ -1961,6 +2006,24 @@ ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath:
   const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
   const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
   openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode, customTitle);
+});
+
+ipcMain.on('launch-new-claude-session', async (_event, projectPath: string) => {
+  if (!existsSync(projectPath)) {
+    console.log('[launch-new-claude-session] path does not exist:', projectPath);
+    return;
+  }
+  const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
+  const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+  launchNewClaudeSession(projectPath, terminalApp, terminalMode);
+});
+
+ipcMain.on('launch-new-claude-session-in-codev', (_event, projectPath: string) => {
+  if (!existsSync(projectPath)) {
+    console.log('[launch-new-claude-session-in-codev] path does not exist:', projectPath);
+    return;
+  }
+  launchNewClaudeSession(projectPath, 'codev', 'tab');
 });
 
 ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {

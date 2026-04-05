@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
-const TerminalTab = ({ visible }: { visible: boolean }) => {
+const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunchExternal?: () => void }) => {
   const termRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -88,28 +88,47 @@ const TerminalTab = ({ visible }: { visible: boolean }) => {
     }, 50);
   }, [visible]);
 
-  // Re-fit and focus when switching back to terminal tab
+  // Re-focus when switching back to terminal tab (no re-fit needed — visibility preserves layout)
   useEffect(() => {
-    if (!visible || !initializedRef.current || !xtermRef.current || !fitAddonRef.current) return;
-    setTimeout(() => {
-      fitAddonRef.current?.fit();
-      const term = xtermRef.current;
-      if (term) {
-        window.electronAPI.terminalResize(term.cols, term.rows);
-        term.focus();
-      }
-    }, 50);
+    if (!visible || !initializedRef.current || !xtermRef.current) return;
+    xtermRef.current.focus();
   }, [visible]);
 
   return (
-    <div
-      ref={termRef}
-      style={{
-        width: '100%',
-        height: '100%',
-        backgroundColor: '#1e1e1e',
-      }}
-    />
+    <div style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#1e1e1e' }}>
+      <div
+        ref={termRef}
+        style={{
+          width: '100%',
+          height: '100%',
+          overflow: 'hidden',
+        }}
+      />
+      <button
+        onClick={() => onLaunchExternal?.()}
+        title="Open new Claude session in external terminal (uses current working directory)"
+        style={{
+          position: 'absolute',
+          bottom: '6px',
+          right: '8px',
+          backgroundColor: 'rgba(30, 30, 30, 0.85)',
+          border: '1px solid #444',
+          borderRadius: '3px',
+          padding: '2px 8px',
+          fontSize: '11px',
+          color: '#888',
+          cursor: 'pointer',
+          lineHeight: '18px',
+          zIndex: 10,
+          opacity: 0.6,
+          transition: 'opacity 0.2s, border-color 0.2s, color 0.2s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.borderColor = '#00BCD4'; e.currentTarget.style.color = '#ddd'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = '#888'; }}
+      >
+        Claude in Terminal
+      </button>
+    </div>
   );
 };
 

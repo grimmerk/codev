@@ -213,6 +213,7 @@ const formatOptionLabel = (
       <div style={nameStyle}>
         <Highlighter
           searchWords={searchWords}
+          autoEscape
           textToHighlight={name}
           highlightStyle={{
             backgroundColor: 'rgba(0, 188, 212, 0.2)',
@@ -225,6 +226,7 @@ const formatOptionLabel = (
       <div style={pathStyle}>
         <Highlighter
           searchWords={searchWords}
+          autoEscape
           textToHighlight={path}
           highlightStyle={{
             backgroundColor: 'rgba(0, 188, 212, 0.1)',
@@ -246,9 +248,10 @@ export interface SelectInputOptionInterface {
 }
 
 // Enhanced Option component with improved styling and hover effects
-const OptionUI: FC<OptionProps<SelectInputOptionInterface>> = (
-  props,
-  onDeleteClick,
+const OptionUI = (
+  props: OptionProps<SelectInputOptionInterface>,
+  onDeleteClick?: (data: any) => void,
+  onCmdClick?: (path: string) => void,
 ) => {
   const { selectOption, selectProps, data, isSelected, isFocused } = props;
   const { value, label } = data;
@@ -256,6 +259,13 @@ const OptionUI: FC<OptionProps<SelectInputOptionInterface>> = (
   return (
     <div
       key={value}
+      onClickCapture={(e) => {
+        if (e.metaKey && onCmdClick) {
+          e.stopPropagation();
+          e.preventDefault();
+          onCmdClick(value);
+        }
+      }}
       style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -310,6 +320,7 @@ const formatRelativeTime = (timestamp: string): string => {
 let loadTimes = 0;
 function SwitcherApp() {
   const optionPress = useRef(false);
+  const launchClaudeRef = useRef<'external' | 'codev' | null>(null);
 
   const ref = useRef(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
@@ -938,7 +949,7 @@ function SwitcherApp() {
               </svg>
             ) : mode === 'terminal' ? '💻' : '📂'}
           </span>
-          CodeV Quick Switcher
+          CodeV
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div
@@ -1010,9 +1021,24 @@ function SwitcherApp() {
         </div>
       </div>
 
-      {/* Terminal tab: always mounted, toggle visibility to preserve state */}
-      <div style={{ flex: 1, overflow: 'hidden', display: mode === 'terminal' ? 'flex' : 'none' }}>
-        <TerminalTab visible={mode === 'terminal'} />
+      {/* Terminal tab: always mounted, use visibility (not display) to preserve xterm layout and avoid re-fit flash (#99) */}
+      <div style={{
+        flex: mode === 'terminal' ? 1 : 0,
+        overflow: 'hidden',
+        visibility: mode === 'terminal' ? 'visible' : 'hidden',
+        position: mode === 'terminal' ? 'relative' : 'absolute',
+        width: mode === 'terminal' ? undefined : '100%',
+        height: mode === 'terminal' ? undefined : '100%',
+      }}>
+        <TerminalTab
+          visible={mode === 'terminal'}
+          onLaunchExternal={async () => {
+            const cwd = await window.electronAPI.terminalGetCwd();
+            if (cwd) {
+              window.electronAPI.launchNewClaudeSession(cwd);
+            }
+          }}
+        />
       </div>
 
       {mode !== 'terminal' && (mode === 'sessions' ? (
@@ -1143,6 +1169,7 @@ function SwitcherApp() {
                         <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
                           <Highlighter
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                            autoEscape
                             textToHighlight={session.projectName}
                             highlightStyle={{
                               backgroundColor: 'rgba(0, 188, 212, 0.2)',
@@ -1156,6 +1183,7 @@ function SwitcherApp() {
                           <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
                             {' '}* <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              autoEscape
                               textToHighlight={customTitles[session.sessionId].slice(0, 35)}
                               highlightStyle={{
                                 backgroundColor: 'rgba(126, 200, 126, 0.2)',
@@ -1170,6 +1198,7 @@ function SwitcherApp() {
                           <span style={{ color: '#888', fontSize: '11px', fontStyle: 'italic' }}>
                             {' '}[<Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              autoEscape
                               textToHighlight={branches[session.sessionId]}
                               highlightStyle={{
                                 backgroundColor: 'rgba(200, 200, 200, 0.15)',
@@ -1260,6 +1289,7 @@ function SwitcherApp() {
                           <span style={{ color: '#999', fontSize: '12px' }}>
                             <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              autoEscape
                               textToHighlight={(session.firstUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 50 : 80)}
                               highlightStyle={{
                                 backgroundColor: 'rgba(0, 188, 212, 0.1)',
@@ -1274,6 +1304,7 @@ function SwitcherApp() {
                           <span style={{ color: '#c89030', fontSize: '12px' }}>
                             <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              autoEscape
                               textToHighlight={(session.lastUserMessage || '').slice(0, 80)}
                               highlightStyle={{
                                 backgroundColor: 'rgba(232, 169, 70, 0.15)',
@@ -1289,6 +1320,7 @@ function SwitcherApp() {
                             {'  →  '}
                             <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              autoEscape
                               textToHighlight={(session.lastUserMessage || '').slice(0, 40)}
                               highlightStyle={{
                                 backgroundColor: 'rgba(232, 169, 70, 0.15)',
@@ -1307,6 +1339,7 @@ function SwitcherApp() {
                         <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
                           ◀ <Highlighter
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                            autoEscape
                             textToHighlight={assistantResponses[session.sessionId].slice(0, 80)}
                             highlightStyle={{
                               backgroundColor: 'rgba(139, 184, 208, 0.15)',
@@ -1366,12 +1399,27 @@ function SwitcherApp() {
               hideApp();
             }
           }
+          // Cmd+Enter or Shift+Enter: launch new Claude session
+          // Set flag so onChange knows to launch instead of opening IDE
+          // Clear on every keypress to prevent stale ref if onChange didn't fire
+          launchClaudeRef.current = null;
+          if (evt.key === 'Enter' && (evt.metaKey || evt.shiftKey)) {
+            launchClaudeRef.current = evt.shiftKey ? 'codev' : 'external';
+          }
         }}
         onInputChange={(evt) => {
           setInputValue(evt);
         }}
         onChange={(evt: any) => {
-          invokeVSCode(evt.value, optionPress.current);
+          const launchMode = launchClaudeRef.current;
+          launchClaudeRef.current = null;
+          if (launchMode === 'codev') {
+            window.electronAPI.launchNewClaudeSessionInCodev(evt.value);
+          } else if (launchMode === 'external') {
+            window.electronAPI.launchNewClaudeSession(evt.value);
+          } else {
+            invokeVSCode(evt.value, optionPress.current);
+          }
           /** in this case, when invokeVSCode triggers this ui to be hided,
            * there will no keyup event triggered to reset optionPress.current,
            * so we reset here */
@@ -1379,8 +1427,14 @@ function SwitcherApp() {
         }}
         // Custom components
         components={{
-          DropdownIndicator: null,
-          Option: (props) => OptionUI(props, onDeleteClick),
+          DropdownIndicator: () => (
+            <div style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}>
+              {'\u2318+Enter: New Claude'}
+            </div>
+          ),
+          Option: (props) => OptionUI(props, onDeleteClick, (path: string) => {
+            window.electronAPI.launchNewClaudeSession(path);
+          }),
         }}
         formatOptionLabel={(
           { value, label, everOpened }: { value: string; label: string; everOpened: boolean },
@@ -1422,6 +1476,7 @@ function SwitcherApp() {
               <div style={nameStyle}>
                 <Highlighter
                   searchWords={searchWords}
+                  autoEscape
                   textToHighlight={name}
                   highlightStyle={{
                     backgroundColor: 'rgba(0, 188, 212, 0.2)',
@@ -1435,6 +1490,7 @@ function SwitcherApp() {
                 <span style={{ color: '#888', fontSize: '13px', fontStyle: 'italic', flexShrink: 0, paddingRight: '10px' }}>
                   [<Highlighter
                     searchWords={searchWords}
+                    autoEscape
                     textToHighlight={branch}
                     highlightStyle={{
                       backgroundColor: 'rgba(200, 200, 200, 0.15)',
@@ -1456,6 +1512,7 @@ function SwitcherApp() {
               }}>
                 <Highlighter
                   searchWords={searchWords}
+                  autoEscape
                   textToHighlight={pathPart}
                   highlightStyle={{
                     backgroundColor: 'rgba(0, 188, 212, 0.1)',

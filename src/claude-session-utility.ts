@@ -7,6 +7,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -1129,6 +1130,210 @@ export const setCodevTerminalCallback = (cb: (sessionId: string) => void) => {
 };
 
 /**
+ * Callback for launching a new claude session in CodeV's embedded terminal.
+ * Set by main.ts — sends cd + claude command to the PTY, then switches to Term tab.
+ */
+let launchInCodevTerminalCallback: ((projectPath: string) => void) | null = null;
+
+export const setLaunchInCodevTerminalCallback = (cb: (projectPath: string) => void) => {
+  launchInCodevTerminalCallback = cb;
+};
+
+/**
+ * Run a shell command in a terminal app (new tab or window).
+ * Shared by session resume and new session launch.
+ * For Ghostty: `claudeCmd` is the bare command (no cd), projectPath sets initial working directory.
+ * For others: `fullCommand` is the full command string (cd + claude).
+ */
+export const runCommandInTerminal = (
+  fullCommand: string,
+  claudeCmd: string,
+  projectPath: string,
+  terminalApp: string = 'iterm2',
+  terminalMode: string = 'tab',
+): void => {
+  const { exec } = require('child_process');
+
+  switch (terminalApp) {
+    case 'ghostty': {
+      const tmpScript = '/tmp/codev-ghostty-launch.scpt';
+      const launchScript = terminalMode === 'window'
+        ? `tell application "Ghostty"
+  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${claudeCmd}\\n"}
+  new window with configuration cfg
+  activate
+end tell`
+        : `tell application "Ghostty"
+  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${claudeCmd}\\n"}
+  if (count windows) > 0 then
+    activate
+    new tab in front window with configuration cfg
+  else
+    new window with configuration cfg
+    activate
+  end if
+end tell`;
+      fs.writeFileSync(tmpScript, launchScript);
+      exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
+        if (error) console.error('[runCommandInTerminal] ghostty error:', error.message);
+        try { fs.unlinkSync(tmpScript); } catch {}
+      });
+      break;
+    }
+    case 'terminal': {
+      const tmpScript = '/tmp/codev-terminal-launch.scpt';
+      const escapedCommand = fullCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const launchScript = terminalMode === 'window'
+        ? `set wasRunning to (do shell script "pgrep -x Terminal >/dev/null 2>&1 && echo 1 || echo 0")
+tell application "Terminal"
+  if wasRunning is "0" then
+    activate
+    delay 0.3
+    do script "${escapedCommand}" in front window
+  else
+    do script "${escapedCommand}"
+    activate
+  end if
+end tell`
+        : `tell application "Terminal"
+  activate
+  if (count of windows) > 0 then
+    tell application "System Events"
+      keystroke "t" using command down
+    end tell
+    delay 0.3
+    do script "${escapedCommand}" in front window
+  else
+    do script "${escapedCommand}"
+    activate
+  end if
+end tell`;
+      fs.writeFileSync(tmpScript, launchScript);
+      exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
+        if (error) console.error('[runCommandInTerminal] Terminal.app error:', error.message);
+        try { fs.unlinkSync(tmpScript); } catch {}
+      });
+      break;
+    }
+    case 'cmux': {
+      const launchInCmux = () => {
+        const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "${claudeCmd}"`;
+        console.log('[cmux] launch cmd:', cmuxCmd);
+        exec(cmuxCmd,
+          { encoding: 'utf-8', timeout: 5000 },
+          (error: any, stdout: string, stderr: string) => {
+            console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
+            if (error) {
+              console.error('cmux new-workspace failed:', error.message);
+            } else {
+              const wsMatch = stdout.match(/workspace:\d+/);
+              if (wsMatch) {
+                exec(`${CMUX_CLI} select-workspace --workspace ${wsMatch[0]}`);
+              }
+              exec('osascript -e \'tell application "cmux" to activate\'');
+            }
+          }
+        );
+      };
+      exec('pgrep -x cmux', (error: any) => {
+        if (error) {
+          console.log('[cmux] not running, launching...');
+          exec('open -a cmux');
+          let attempts = 0;
+          const waitForCmux = () => {
+            attempts++;
+            exec(`${CMUX_CLI} tree 2>/dev/null`, { timeout: 2000 }, (err: any) => {
+              if (!err) {
+                console.log(`[cmux] ready after ${attempts * 500}ms`);
+                launchInCmux();
+              } else if (attempts < 10) {
+                setTimeout(waitForCmux, 500);
+              } else {
+                console.error('[cmux] timed out waiting for cmux');
+              }
+            });
+          };
+          setTimeout(waitForCmux, 500);
+        } else {
+          launchInCmux();
+        }
+      });
+      break;
+    }
+    case 'iterm2':
+    default: {
+      const tmpScript = '/tmp/codev-iterm-launch.scpt';
+      const escapedCommand = fullCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const launchScript = terminalMode === 'window'
+        ? `set wasRunning to (do shell script "pgrep -x iTerm2 >/dev/null 2>&1 && echo 1 || echo 0")
+tell application "iTerm2"
+  if wasRunning is "0" then
+    activate
+    delay 0.3
+    tell current session of current window
+      write text "${escapedCommand}"
+    end tell
+  else
+    set newWindow to (create window with default profile)
+    tell current session of newWindow
+      write text "${escapedCommand}"
+    end tell
+    activate
+  end if
+end tell`
+        : `tell application "iTerm2"
+  activate
+  tell current window
+    create tab with default profile
+    tell current session
+      write text "${escapedCommand}"
+    end tell
+  end tell
+end tell`;
+      fs.writeFileSync(tmpScript, launchScript);
+      exec(`osascript ${tmpScript}`, (error: any) => {
+        if (error) console.error('[runCommandInTerminal] iTerm2 error:', error.message);
+        try { fs.unlinkSync(tmpScript); } catch {}
+      });
+      break;
+    }
+  }
+};
+
+/**
+ * Launch a new Claude Code session (not resume) in the specified terminal.
+ * Fire-and-forget: opens terminal, cd's to project, runs `claude`.
+ */
+export const launchNewClaudeSession = (
+  projectPath: string,
+  terminalApp: string = 'iterm2',
+  terminalMode: string = 'tab',
+): void => {
+  if (terminalApp === 'vscode') {
+    const { execFile } = require('child_process');
+    // Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
+    const bundleId = getCurrentIDEBundleId();
+    execFile('open', ['-b', bundleId, projectPath], (error: any) => {
+      if (error) {
+        console.error('[launchNewClaudeSession] failed to open VS Code:', error);
+        return;
+      }
+      setTimeout(() => {
+        execFile('open', ['vscode://anthropic.claude-code/open']);
+      }, 2000);
+    });
+    return;
+  }
+  if (terminalApp === 'codev') {
+    if (launchInCodevTerminalCallback) {
+      launchInCodevTerminalCallback(projectPath);
+    }
+    return;
+  }
+  runCommandInTerminal(`cd "${projectPath}" && claude`, 'claude', projectPath, terminalApp, terminalMode);
+};
+
+/**
  * Open a Claude Code session in VS Code via URI handler.
  * For active sessions: switches to the existing session tab.
  * For closed sessions: opens the project folder first, then resumes via URI handler.
@@ -1138,7 +1343,9 @@ export const openSessionInVSCode = (sessionId: string, projectPath?: string): vo
 
   if (projectPath) {
     // Closed session: open project folder first, then resume after a short delay
-    execFile('code', [projectPath], (error: any) => {
+    // Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
+    const bundleId = getCurrentIDEBundleId();
+    execFile('open', ['-b', bundleId, projectPath], (error: any) => {
       if (error) {
         console.error('[openSessionInVSCode] failed to open project:', error);
         return;
@@ -1232,33 +1439,8 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    // Open new tab or window and run claude --resume
-    const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
-    const tmpScript = '/tmp/codev-iterm-launch.scpt';
-    const launchScript = terminalMode === 'window'
-      ? `tell application "iTerm2"
-  activate
-  set newWindow to (create window with default profile)
-  tell current session of newWindow
-    write text "${command.replace(/"/g, '\\"')}"
-  end tell
-end tell`
-      : `tell application "iTerm2"
-  activate
-  tell current window
-    create tab with default profile
-    tell current session
-      write text "${command.replace(/"/g, '\\"')}"
-    end tell
-  end tell
-end tell`;
-    fs.writeFileSync(tmpScript, launchScript);
-    exec(`osascript ${tmpScript}`, (error: any) => {
-      if (error) {
-        console.error('Error launching iTerm2 session:', error);
-      }
-      try { fs.unlinkSync(tmpScript); } catch {}
-    });
+    const resumeCmd = `claude --resume ${sessionId}`;
+    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
   }
 };
 
@@ -1472,34 +1654,8 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    // Launch new tab with command via surface configuration
-    // Use initial working directory for cd, and initialInput to type the resume command
-    const tmpScript = '/tmp/codev-ghostty-launch.scpt';
     const resumeCmd = `claude --resume ${sessionId}`;
-    const launchScript = terminalMode === 'window'
-      ? `tell application "Ghostty"
-  activate
-  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${resumeCmd}\\n"}
-  new window with configuration cfg
-end tell`
-      : `tell application "Ghostty"
-  activate
-  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${resumeCmd}\\n"}
-  if (count windows) > 0 then
-    new tab in front window with configuration cfg
-  else
-    new window with configuration cfg
-  end if
-end tell`;
-    fs.writeFileSync(tmpScript, launchScript);
-    exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
-      if (error) {
-        console.error('[ghostty] launch error:', error.message);
-        // Fallback: clipboard
-        copyResumeCommand(sessionId, projectPath);
-      }
-      try { fs.unlinkSync(tmpScript); } catch {}
-    });
+    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
   }
 };
 
@@ -1560,31 +1716,8 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    // Launch new tab or window and run claude --resume
-    const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
-    const escapedCmd = command.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    const tmpScript = '/tmp/codev-terminal-launch.scpt';
-    const launchScript = terminalMode === 'window'
-      ? `tell application "Terminal"
-  activate
-  do script "${escapedCmd}"
-end tell`
-      : `tell application "Terminal"
-  activate
-  if (count of windows) > 0 then
-    do script "${escapedCmd}" in front window
-  else
-    do script "${escapedCmd}"
-  end if
-end tell`;
-    fs.writeFileSync(tmpScript, launchScript);
-    exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
-      if (error) {
-        console.error('[Terminal.app] launch error:', error.message);
-        copyResumeCommand(sessionId, projectPath);
-      }
-      try { fs.unlinkSync(tmpScript); } catch {}
-    });
+    const resumeCmd = `claude --resume ${sessionId}`;
+    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
   }
 };
 
@@ -1728,58 +1861,8 @@ export const openSessionInCmux = (
       exec('osascript -e \'tell application "cmux" to activate\'');
     })();
   } else {
-    // Launch new workspace with command
-    // cmux's new-workspace doesn't auto-launch cmux (unlike open-cwd),
-    // so we need to check if cmux is running and launch it first if needed.
-    const launchInCmux = () => {
-      const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "claude --resume ${sessionId}"`;
-      console.log('[cmux] launch cmd:', cmuxCmd);
-      exec(cmuxCmd,
-        { encoding: 'utf-8', timeout: 5000 },
-        (error: any, stdout: string, stderr: string) => {
-          console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
-          if (error) {
-            console.error('cmux new-workspace failed, falling back to clipboard:', error.message);
-            copyResumeCommand(sessionId, projectPath);
-            exec('osascript -e \'tell application "cmux" to activate\'');
-          } else {
-            const wsMatch = stdout.match(/workspace:\d+/);
-            if (wsMatch) {
-              exec(`${CMUX_CLI} select-workspace --workspace ${wsMatch[0]}`);
-            }
-            exec('osascript -e \'tell application "cmux" to activate\'');
-          }
-        }
-      );
-    };
-
-    // Check if cmux is running via pgrep
-    exec('pgrep -x cmux', (error: any) => {
-      if (error) {
-        // cmux not running — launch it and wait until ready
-        console.log('[cmux] not running, launching...');
-        exec('open -a cmux');
-        let attempts = 0;
-        const waitForCmux = () => {
-          attempts++;
-          exec(`${CMUX_CLI} tree 2>/dev/null`, { timeout: 2000 }, (err: any) => {
-            if (!err) {
-              console.log(`[cmux] ready after ${attempts * 500}ms`);
-              launchInCmux();
-            } else if (attempts < 10) {
-              setTimeout(waitForCmux, 500);
-            } else {
-              console.error('[cmux] timed out waiting for cmux, falling back to clipboard');
-              copyResumeCommand(sessionId, projectPath);
-              exec('osascript -e \'tell application "cmux" to activate\'');
-            }
-          });
-        };
-        setTimeout(waitForCmux, 500);
-      } else {
-        launchInCmux();
-      }
-    });
+    const resumeCmd = `claude --resume ${sessionId}`;
+    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
   }
 };
 

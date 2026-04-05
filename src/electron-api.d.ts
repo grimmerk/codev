@@ -58,6 +58,8 @@ interface IElectronAPI {
   scanClosedVSCodeSessions: (activeSessionIds: string[]) => Promise<any[]>;
   refreshSessionPreview: (sessions: any[]) => Promise<Record<string, { lastUserMessage: string; lastAssistantMessage: string }>>;
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => void;
+  launchNewClaudeSession: (projectPath: string) => void;
+  launchNewClaudeSessionInCodev: (projectPath: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;
   loadSessionEnrichment: (sessions: any[]) => Promise<{ titles: Record<string, string>; branches: Record<string, string>; prLinks: Record<string, { prNumber: number; prUrl: string }> }>;
   loadLastAssistantResponses: (sessions: any[]) => Promise<Record<string, string>>;
@@ -129,6 +131,7 @@ interface IElectronAPI {
   resumeShortcut: (key: string) => Promise<void>;
 
   // Terminal (node-pty + xterm.js)
+  terminalGetCwd: () => Promise<string | null>;
   terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => void;
   terminalAttach: (cols: number, rows: number) => void;
   terminalInput: (data: string) => void;
