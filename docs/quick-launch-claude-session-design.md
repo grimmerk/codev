@@ -61,10 +61,49 @@ Note: Exact shortcut assignment may be swapped after hands-on testing. Both shor
 | `src/preload.ts` | Expose new IPC to renderer |
 | `src/electron-api.d.ts` | Type definition for new API |
 
-#### Optional Enhancement
+#### Mouse Support
 
-- Show a small Claude icon button on hover (next to existing `x` remove button) for mouse users
-- Custom shortcut support (like existing ⌃+⌘+R customization)
+`Cmd+Click` on a project item also launches a new Claude session (same as `Cmd+Enter`).
+
+#### UI Button Consideration (Deferred)
+
+A permanent Claude icon button on each project item was considered but deferred:
+- **Pro**: Discoverable, mouse-friendly
+- **Con**: Visual noise on items where it's unused; Projects row already has name + branch + path + X button
+- **Con**: Sessions tab items are even more crowded — inconsistent if only Projects has it
+- **Decision**: Start with keyboard (`Cmd+Enter`) + mouse (`Cmd+Click`) only. Revisit if discoverability is a problem.
+
+An alternative is the **expanded item view** (see Phase 1.5 below).
+
+#### Custom Shortcut Support
+
+Both shortcuts should be user-customizable (like existing ⌃+⌘+R etc.).
+
+### Phase 1.5: Expanded Project Item View (Deferred)
+
+An expandable detail view for project items, similar to the planned Space-key Quick Look for sessions (#66 item 3).
+
+#### Concept
+
+```
+  fred-ff [main]                              /Users/grimmer/git
+  ┌─────────────────────────────────────────────────────────┐
+  │  [Open in IDE]  [New Claude ▾]  [Open in Terminal]      │
+  │  Active sessions: 2 (1 CLI, 1 VS Code)                  │
+  └─────────────────────────────────────────────────────────┘
+  codev [docs/quick-launch-claude-session]     /Users/grimmer/git
+```
+
+- `Space` or `→` to expand selected project item
+- Shows action buttons + extra info (active sessions, git status)
+- `[New Claude ▾]` dropdown for terminal selection
+- `Esc` or `←` to collapse
+
+#### Relationship with Cmd+Enter
+
+These can coexist — expanded view is for "browse then decide" users, `Cmd+Enter` is for power users who want instant action. Like Finder: `Space` = Quick Look, `Cmd+O` = open.
+
+If expanded view becomes the primary interaction model, `Cmd+Enter` shortcut becomes less critical but still valuable as a fast path.
 
 ### Phase 2: Search Bar `>` Command Mode (Power User Flexibility)
 
@@ -129,6 +168,22 @@ Use case: user has been navigating in CodeV terminal and wants to "promote" to a
 While in Terminal tab, a shortcut or button that takes the current directory and opens `cd <cwd> && claude` in external terminal.
 
 Use case: user cd'd to the right place in CodeV terminal but wants the Claude session in a real terminal.
+
+## Worktree Scenarios
+
+Launching new sessions often involves git worktrees. Three cases:
+
+| Case | Path | How created | Phase 1 coverage |
+|------|------|-------------|------------------|
+| **A. Sibling worktree** | `~/git/codev-xxx` | Manual `git worktree add` | ✅ Appears in Projects (if under Working Directory) |
+| **B. Claude-managed** | Inside project (`.claude/worktrees/...`) | `claude --worktree [name]` | Partial — path may not be in Projects list |
+| **C. Existing path** | Any existing directory | Already created elsewhere | ✅ If in Projects list |
+
+**Notes:**
+- `claude --worktree [name]` only accepts a name, not a custom path. It creates worktrees in a Claude-managed location inside the project.
+- Preferred workflow: sibling worktrees at `~/git/<project>-<name>` (Case A). These appear automatically in Projects tab when Working Directory is set to `~/git/`.
+- One-shot worktree creation (create + launch in one action) requires multiple steps (`git worktree add` + `cd` + `claude`), better suited for Terminal tab or Phase 2 `>` command mode.
+- Phase 1 covers Cases A and C fully. Case B is uncommon when users prefer sibling worktrees.
 
 ## Technical Notes
 
