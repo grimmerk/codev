@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.66
+
+- Style: use `*` separator for custom titles (matches Claude Code display)
+
 ## 1.0.65
 
 - Style: remove quotes around custom session titles (color already distinguishes them)

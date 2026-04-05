@@ -1002,7 +1002,7 @@ function SwitcherApp() {
                         </span>
                         {customTitles[session.sessionId] && (
                           <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
-                            {' '}· <Highlighter
+                            {' '}* <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               textToHighlight={customTitles[session.sessionId].slice(0, 35)}
                               highlightStyle={{
