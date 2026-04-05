@@ -205,11 +205,16 @@ export const readVSCodeIndex = (): Map<string, string> => {
   return index;
 };
 
+export interface StatusEntry {
+  status: SessionStatus;
+  timestamp: number; // unix seconds from status file
+}
+
 /**
  * Read all status files from codev-status directory
  */
-export const readAllStatuses = (): Map<string, SessionStatus> => {
-  const statuses = new Map<string, SessionStatus>();
+export const readAllStatuses = (): Map<string, StatusEntry> => {
+  const statuses = new Map<string, StatusEntry>();
   try {
     if (!fs.existsSync(STATUS_DIR)) return statuses;
     for (const file of fs.readdirSync(STATUS_DIR)) {
@@ -217,7 +222,10 @@ export const readAllStatuses = (): Map<string, SessionStatus> => {
       const sessionId = file.replace('.json', '');
       try {
         const content = JSON.parse(fs.readFileSync(path.join(STATUS_DIR, file), 'utf-8'));
-        statuses.set(sessionId, content.status as SessionStatus);
+        statuses.set(sessionId, {
+          status: content.status as SessionStatus,
+          timestamp: content.timestamp || 0,
+        });
       } catch {}
     }
   } catch {}
@@ -229,7 +237,7 @@ export const readAllStatuses = (): Map<string, SessionStatus> => {
  * Returns a cleanup function to stop watching.
  */
 export const watchStatusDir = (
-  onChange: (statuses: Map<string, SessionStatus>) => void,
+  onChange: (statuses: Map<string, StatusEntry>) => void,
 ): (() => void) => {
   fs.mkdirSync(STATUS_DIR, { recursive: true });
 

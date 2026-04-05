@@ -347,6 +347,7 @@ function SwitcherApp() {
   const modeRef = useRef<SwitcherMode>('projects');
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
+  const lastAssistantFetchRef = useRef<Record<string, number>>({});
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -589,33 +590,47 @@ function SwitcherApp() {
     });
 
     // Session status updates from hooks (fs.watch)
-    window.electronAPI.getSessionStatuses().then((statuses: Record<string, string>) => {
-      if (statuses) setSessionStatuses(statuses);
+    window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
+      if (!rawStatuses) return;
+      const statusStrings: Record<string, string> = {};
+      for (const [id, v] of Object.entries(rawStatuses)) {
+        statusStrings[id] = typeof v === 'object' ? v.status : v;
+      }
+      setSessionStatuses(statusStrings);
     });
-    window.electronAPI.onSessionStatusesUpdated((_event: any, statuses: Record<string, string>) => {
-      // Use disk snapshot as source of truth — clears removed sessions
-      setSessionStatuses((prev: Record<string, string>) => {
-        // Detect sessions that just became idle (assistant finished responding)
-        const newlyIdle = Object.entries(statuses).filter(
-          ([id, status]) => status === 'idle' && prev[id] && prev[id] !== 'idle'
-        );
-        if (newlyIdle.length > 0) {
-          // Re-fetch last assistant response for sessions that just finished
-          const currentSessions = allSessionsRef.current;
-          const sessionsToRefresh = newlyIdle.map(([id]) => {
-            const s = currentSessions.find((s: any) => s.sessionId === id);
-            return s || { sessionId: id, project: '' };
-          }).filter((s: any) => s.project);
-          if (sessionsToRefresh.length > 0) {
-            window.electronAPI.loadLastAssistantResponses(sessionsToRefresh).then((responses: Record<string, string>) => {
-              if (responses && Object.keys(responses).length > 0) {
-                setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
-              }
-            });
-          }
+    window.electronAPI.onSessionStatusesUpdated((_event: any, rawStatuses: Record<string, any>) => {
+      // Extract status strings for dots display
+      const statusStrings: Record<string, string> = {};
+      for (const [id, v] of Object.entries(rawStatuses)) {
+        statusStrings[id] = typeof v === 'object' ? v.status : v;
+      }
+      setSessionStatuses(statusStrings);
+
+      // Auto-refresh assistant response for idle sessions with newer timestamps
+      const currentSessions = allSessionsRef.current;
+      const sessionsToRefresh: any[] = [];
+      for (const [id, v] of Object.entries(rawStatuses)) {
+        const status = typeof v === 'object' ? v.status : v;
+        const ts = typeof v === 'object' ? (v.timestamp || 0) : 0;
+        if (status !== 'idle' || !ts) continue;
+        const lastFetched = lastAssistantFetchRef.current[id] || 0;
+        // Re-fetch if status timestamp (seconds) is newer than last fetch (ms)
+        if (ts * 1000 > lastFetched) {
+          const s = currentSessions.find((s: any) => s.sessionId === id);
+          if (s?.project) sessionsToRefresh.push(s);
         }
-        return statuses;
-      });
+      }
+      if (sessionsToRefresh.length > 0) {
+        const now = Date.now();
+        for (const s of sessionsToRefresh) {
+          lastAssistantFetchRef.current[s.sessionId] = now;
+        }
+        window.electronAPI.loadLastAssistantResponses(sessionsToRefresh).then((responses: Record<string, string>) => {
+          if (responses && Object.keys(responses).length > 0) {
+            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+          }
+        });
+      }
     });
 
     window.electronAPI.onCheckTerminalAndHide(() => {
@@ -642,8 +657,13 @@ function SwitcherApp() {
         fetchClaudeSessions();
       }
       // Refresh session statuses on window focus
-      window.electronAPI.getSessionStatuses().then((statuses: Record<string, string | null>) => {
-        if (statuses) setSessionStatuses(statuses);
+      window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
+        if (!rawStatuses) return;
+        const statusStrings: Record<string, string> = {};
+        for (const [id, v] of Object.entries(rawStatuses)) {
+          statusStrings[id] = typeof v === 'object' ? v.status : v;
+        }
+        setSessionStatuses(statusStrings);
       });
       // Refresh display mode setting
       window.electronAPI.getSessionDisplayMode().then((mode: string) => {

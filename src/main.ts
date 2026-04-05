@@ -1814,7 +1814,7 @@ const initSessionStatusHooks = async () => {
       // Start watching for status changes
       if (!statusWatcherCleanup) {
         statusWatcherCleanup = watchStatusDir((statuses) => {
-          const obj: Record<string, SessionStatus> = {};
+          const obj: Record<string, any> = {};
           statuses.forEach((v, k) => { obj[k] = v; });
           switcherWindow?.webContents.send('session-statuses-updated', obj);
         });
@@ -1835,7 +1835,7 @@ ipcMain.on('set-session-status-hooks-enabled', async (_event, enabled: boolean) 
     installHooks();
     if (!statusWatcherCleanup) {
       statusWatcherCleanup = watchStatusDir((statuses) => {
-        const obj: Record<string, SessionStatus> = {};
+        const obj: Record<string, any> = {};
         statuses.forEach((v, k) => { obj[k] = v; });
         switcherWindow?.webContents.send('session-statuses-updated', obj);
       });
@@ -1857,7 +1857,7 @@ ipcMain.handle('get-session-statuses', async () => {
   if (!enabled) return {};
 
   const fileStatuses = readAllStatuses();
-  const obj: Record<string, SessionStatus> = {};
+  const obj: Record<string, any> = {};
   fileStatuses.forEach((v, k) => { obj[k] = v; });
 
   // Scan active sessions that don't have status files yet + cleanup stale ones
@@ -1878,7 +1878,7 @@ ipcMain.handle('get-session-statuses', async () => {
     if (sessionsWithoutStatus.length > 0) {
       const scanned = await scanInitialStatuses(sessionsWithoutStatus);
       scanned.forEach((v, k) => {
-        obj[k] = v;
+        obj[k] = { status: v, timestamp: Math.floor(Date.now() / 1000) };
         // Persist scanned status to file so fs.watch treats all statuses uniformly
         writeStatusFile(k, v as string);
       });
