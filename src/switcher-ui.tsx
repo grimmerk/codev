@@ -1047,18 +1047,23 @@ function SwitcherApp() {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
-                        {session.isActive && terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' && (
-                          <span style={{
-                            fontSize: '9px',
-                            color: '#aaa',
-                            border: '1px solid #555',
-                            borderRadius: '3px',
-                            padding: '1px 4px',
-                            textTransform: 'uppercase',
-                          }}>
-                            {terminalApps[session.sessionId]}
-                          </span>
-                        )}
+                        {(() => {
+                          const badge = session.isActive
+                            ? (terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' ? terminalApps[session.sessionId] : null)
+                            : ((session as any).entrypoint === 'claude-vscode' ? 'vscode' : null);
+                          return badge ? (
+                            <span style={{
+                              fontSize: '9px',
+                              color: '#aaa',
+                              border: '1px solid #555',
+                              borderRadius: '3px',
+                              padding: '1px 4px',
+                              textTransform: 'uppercase',
+                            }}>
+                              {badge}
+                            </span>
+                          ) : null;
+                        })()}
                         {prLinks[session.sessionId] && (
                           <span
                             style={{
