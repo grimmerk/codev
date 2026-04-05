@@ -11,8 +11,8 @@ Claude Code runs inside VS Code as an extension (`entrypoint: "claude-vscode"`).
 - **Not in `history.jsonl`**: VS Code sessions are excluded from the global history log (upstream bugs [#24579](https://github.com/anthropics/claude-code/issues/24579), [#18619](https://github.com/anthropics/claude-code/issues/18619))
 - **No `/rename` support**: Cannot set custom titles ([#33165](https://github.com/anthropics/claude-code/issues/33165))
 - **Has `ai-title`**: Auto-generated titles stored in session JSONL (e.g., `"Casual greeting and session start"`)
-- **URI handler available**: `vscode://anthropic.claude-code/open?session=<UUID>` can switch to a specific session tab
-- **Hooks work**: Status hooks fire for VS Code sessions (verified experimentally)
+- **URI handler available**: `vscode://anthropic.claude-code/open?session=<UUID>` (requires extension v2.1.72+)
+- **Hooks work**: Status hooks fire for VS Code sessions via `$CLAUDE_CODE_ENTRYPOINT` env var (verified experimentally)
 
 ## Data Availability
 
@@ -24,63 +24,85 @@ Claude Code runs inside VS Code as an extension (`entrypoint: "claude-vscode"`).
 | AI-generated title | Yes | `ai-title` entry in session JSONL (written once per session) |
 | Custom title (`/rename`) | No | Not supported in VS Code extension |
 | First/last user prompt | Yes | Readable from session JSONL head/tail |
-| Last assistant response | Yes | Readable from session JSONL tail (existing algorithm) |
+| Last assistant response | Yes | Readable from session JSONL tail (shared algorithm) |
 | Git branch | Yes | In JSONL entries |
 | PR links | Yes | If created during session |
-| Closed session record | **No** | Not in `history.jsonl` — requires workaround |
+| Closed session record | **No** | Not in `history.jsonl` — solved via JSONL scan + hooks index |
 | IDE workspace info | Yes | `~/.claude/ide/<PID>.lock` (workspace folders, IDE name) |
 
 ## Architecture
 
 ### Layer 1: Detection
 
-**Active sessions** — Remove the `entrypoint !== 'cli'` filter in `detectActiveSessions()` (line 635 of `claude-session-utility.ts`). VS Code sessions will appear alongside CLI sessions.
+**Active sessions** — Removed the `entrypoint !== 'cli'` filter in `detectActiveSessions()`. VS Code sessions appear alongside CLI sessions. Uses async `readVSCodeSessionFromJSONL()` with head/tail for metadata.
 
 **Closed sessions** — Two-pronged approach:
-1. **Hooks index (real-time)**: Extend `codev-status-hook.sh` to append a record to `~/.claude/codev-status/vscode-sessions.jsonl` on `SessionStart` when `entrypoint === "claude-vscode"`. This captures new VS Code sessions as they start.
-2. **JSONL scan (startup, one-time)**: On app startup, scan `~/.claude/projects/*/` for JSONL files with `entrypoint: "claude-vscode"` in their first line. Merge results with hooks index. Cache the result.
+1. **Hooks index**: `codev-status-hook.sh` detects `$CLAUDE_CODE_ENTRYPOINT === "claude-vscode"` and appends to `~/.claude/codev-status/vscode-sessions.jsonl`. Uses marker files (`.vs-{sessionId}`) to avoid duplicate writes. Works even when CodeV is not running.
+2. **JSONL scan**: `scanClosedVSCodeSessions()` reads first 4KB of each JSONL file to check entrypoint. Hooks-indexed sessions are skipped (no 4KB read needed). Results cached for 30s.
 
 ### Layer 2: Display
 
-- **Badge**: Show `[VSCODE]` badge (similar to existing `[GHOSTTY]`, `[ITERM2]` badges)
-- **Title**: Use `ai-title` from JSONL. Priority: `custom-title > ai-title > first prompt`
-  - Also apply `ai-title` fallback to CLI sessions that lack `/rename` titles
-- **Status dot**: Same as CLI sessions (hooks already fire for VS Code)
-- **First/last prompt**: Read from JSONL head/tail (shared algorithm with existing "show final assistant message")
-- **Search**: Include `ai-title` in search filter
+- **Badge**: `[VSCODE]` badge shown for **active** sessions only (consistent with CLI terminal badges). Closed sessions do not show terminal badges to avoid visual noise and stale badge issues.
+- **Title**: `ai-title` from JSONL as fallback. Priority: `custom-title > ai-title > first prompt`
+- **Status dot**: Same as CLI sessions (hooks fire for VS Code via `$CLAUDE_CODE_ENTRYPOINT`)
+- **First/last prompt**: Read from JSONL via shared `parseUserMessageFromLines()`, skips `<ide_>` context blocks via `extractUserText()`
+- **Search**: Includes `ai-title`, terminal type (`vscode`/`ghostty`/`iterm2`), and PR URLs
+- **Badge highlights**: Search matches highlight terminal badge and PR badge text
 
 ### Layer 3: Switch (active sessions)
 
-Use the VS Code URI handler:
+Uses the VS Code URI handler:
 ```
 open "vscode://anthropic.claude-code/open?session=<UUID>"
 ```
 
 Verified behavior:
 - Existing session UUID: switches to that session tab in VS Code
-- First call requires user to allow the URI handler (one-time dialog)
+- First call requires user to allow the URI handler (one-time dialog, check "Do not ask me again")
 - No Accessibility API or AppleScript needed
 - MAS-compatible (uses standard URI scheme)
 
 ### Layer 4: Resume (closed sessions)
 
-Same URI handler works for closed sessions:
-```
-open "vscode://anthropic.claude-code/open?session=<UUID>"
-```
+Two-step process for VS Code resume:
+1. Open project folder: `code "<projectPath>"`
+2. After 2s delay (for VS Code to load workspace): URI handler `vscode://anthropic.claude-code/open?session=<UUID>`
 
-If the session belongs to the current workspace, it resumes in a new tab.
+If the user's Launch Terminal is not set to VS Code, closed sessions resume in the default terminal (standard behavior).
 
-### Layer 5: Launch (new session)
+Measured latency:
+| Scenario | Time |
+|----------|------|
+| Active session switch | Instant |
+| Resume in already-open VS Code project | ~1-2s |
+| Resume in new VS Code project | ~3-5s |
 
-```
-open "vscode://anthropic.claude-code/open"
-open "vscode://anthropic.claude-code/open?prompt=<url-encoded-text>"
-```
+### Layer 5: Settings
 
-### Layer 6: Title Enrichment (`ai-title`)
+- **Launch Terminal dropdown**: Added "VS Code" option alongside iTerm2, Terminal, Ghostty, cmux
+- When set to VS Code, closed session clicks use the URI handler resume flow
+- Launch Mode (tab/window) does not apply to VS Code
 
-Add `ai-title` grep to `loadSessionEnrichment()` alongside existing `custom-title` grep. Merge into the titles map with priority: `custom-title > ai-title`.
+### Layer 6: Shared Algorithm (head/tail reads)
+
+`readVSCodeSessionFromJSONL()` performs a single set of parallel reads:
+- `head -n 20` → first user prompt (via `parseUserMessageFromLines()`)
+- `tail -n 100` → last user prompt + last assistant message (via `parseUserMessageFromLines(lines, true)` + `parseAssistantMessageFromLines()`)
+- `grep -c '"type":"user"'` → message count
+- Also extracts `cwd` from JSONL content (directory name decode is lossy)
+
+This avoids duplicate tail reads — the assistant response is extracted from the same tail output, so `loadLastAssistantResponses()` is not called again for VS Code sessions.
+
+Shared helper functions:
+| Function | Purpose | Used by |
+|----------|---------|---------|
+| `extractUserText(content)` | Extract text from message content, skip `<ide_>` blocks | `parseUserMessageFromLines()` |
+| `parseUserMessageFromLines(lines, fromEnd?)` | Find user message in JSONL lines | `readVSCodeSessionFromJSONL()` |
+| `parseAssistantMessageFromLines(lines)` | Find last assistant message in JSONL lines | `readVSCodeSessionFromJSONL()` |
+
+### Layer 7: Title Enrichment (`ai-title`)
+
+Added `ai-title` grep to `loadSessionEnrichment()` alongside existing `custom-title` grep. Priority: `custom-title > ai-title`.
 
 Format in JSONL: `{"type":"ai-title","sessionId":"...","aiTitle":"..."}`
 
@@ -88,35 +110,22 @@ Characteristics:
 - Written once per session (does not change)
 - Present in both VS Code and newer CLI sessions
 - AI-generated, descriptive (e.g., "Casual greeting and session start")
-
-## Implementation Plan
-
-### Phase 1: Active VS Code sessions (this PR)
-
-1. Remove `entrypoint` filter in `detectActiveSessions()`
-2. Return `entrypoint` field from session JSON to caller
-3. Add `[VSCODE]` badge rendering in `switcher-ui.tsx`
-4. Add `ai-title` support to `loadSessionEnrichment()`
-5. Route VS Code session clicks to URI handler (`open "vscode://..."`)
-6. Add `ai-title` to search filter
-7. Add "New VS Code Session" launch option
-
-### Phase 2: Closed VS Code sessions (follow-up)
-
-1. Extend hooks to record VS Code session starts in index file
-2. Add JSONL scan for historical VS Code sessions on startup
-3. Merge closed VS Code sessions into session list
-4. Handle resume via URI handler
+- See #104 for applying ai-title fallback to all sessions
 
 ## Performance
 
 | Operation | Cost | Notes |
 |-----------|------|-------|
-| Detection (active) | +0ms | Same `sessions/*.json` read, just removed filter |
-| ai-title grep | +~1ms/session | Parallel with existing greps, single pass possible |
-| URI handler switch | ~50ms | Single `open` command |
-| Hooks index write | ~5ms/event | Only on SessionStart, append-only |
-| JSONL scan (startup) | ~50-200ms | One-time, cached. Reads first line of each JSONL |
+| Detection (active) | +0ms | Same `sessions/*.json` read, removed filter |
+| JSONL scan (closed) | ~50ms | 218 files, 4KB read per file, cached 30s |
+| Hooks index skip | saves ~0.2ms/file | Known VS Code sessions skip 4KB entrypoint check |
+| head/tail read per session | ~5-10ms | Parallel head-20 + tail-100 + grep-c |
+| ai-title grep | +~1ms/session | Parallel with existing greps |
+| URI handler switch | instant | Single `open` command |
+| URI handler resume | ~1-5s | `code <path>` + 2s delay + URI handler |
+| Hooks index write | ~5ms/event | Per hook event, marker file prevents duplicates |
+| Session count | capped at 100 | Sort by timestamp, then slice after merge |
+| Timestamp normalization | +0ms | ISO string → unix ms conversion in reader |
 
 ## VS Code URI Handler Reference
 
@@ -126,7 +135,17 @@ Characteristics:
 | `vscode://anthropic.claude-code/open?session=<UUID>` | Switch to / resume session |
 | `vscode://anthropic.claude-code/open?prompt=<text>` | Open with pre-filled prompt |
 
+Requires Claude Code VS Code extension **v2.1.72+** (released 2026-03-10).
+
 First call shows a permission dialog in VS Code. User can check "Do not ask me again" to suppress future dialogs.
+
+## Known Limitations
+
+1. **Closed sessions not in `history.jsonl`**: Workaround via JSONL scan + hooks index. Upstream fix may come via [#24579](https://github.com/anthropics/claude-code/issues/24579).
+2. **No `/rename` in VS Code**: Use `ai-title` as fallback ([#33165](https://github.com/anthropics/claude-code/issues/33165)).
+3. **Resume delay**: 2s fixed delay for workspace loading. Could be optimized by detecting if project is already open.
+4. **URI handler one-time dialog**: First use requires user to click "Allow" in VS Code.
+5. **JSONL timestamp format**: VS Code uses ISO strings, CLI uses unix ms. Normalized at read time.
 
 ## Alternatives Considered
 
@@ -134,6 +153,7 @@ First call shows a permission dialog in VS Code. User can check "Do not ask me a
 - Can find Claude Code tab in VS Code's AX tree (`AXRadioButton title="Claude Code"`)
 - More complex, requires Accessibility permission, not MAS-compatible
 - **Decision**: Not needed — URI handler provides better precision (session-level vs tab-level)
+- Reference: [mediar-ai/mcp-server-macos-use](https://github.com/mediar-ai/mcp-server-macos-use)
 
 ### `code -r <path>` (c9watch / claude-control approach)
 - Only switches to VS Code window, cannot target specific session
