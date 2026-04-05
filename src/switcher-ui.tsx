@@ -1069,34 +1069,42 @@ function SwitcherApp() {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
-                        {prLinks[session.sessionId] && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              color: '#7ec8e3',
-                              border: '1px solid #4a8a9e',
-                              borderRadius: '3px',
-                              padding: '1px 5px',
-                              cursor: 'pointer',
-                            }}
-                            title={prLinks[session.sessionId].prUrl}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.electronAPI.openExternal(prLinks[session.sessionId].prUrl);
-                            }}
-                          >
-                            <Highlighter
-                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
-                              textToHighlight={`PR #${prLinks[session.sessionId].prNumber}`}
-                              highlightStyle={{
-                                backgroundColor: 'rgba(126, 200, 227, 0.25)',
-                                color: '#b0e0f0',
-                                padding: '0 1px',
-                                borderRadius: '2px',
+                        {prLinks[session.sessionId] && (() => {
+                          const prInfo = prLinks[session.sessionId];
+                          const searchWords = sessionSearchValue.split(/\s+/).filter(Boolean);
+                          // Highlight badge when search matches PR URL (not just badge text)
+                          const urlMatch = searchWords.length > 0 && searchWords.some((w: string) =>
+                            prInfo.prUrl.toLowerCase().includes(w.toLowerCase()));
+                          return (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                color: urlMatch ? '#b0e0f0' : '#7ec8e3',
+                                border: `1px solid ${urlMatch ? '#7ec8e3' : '#4a8a9e'}`,
+                                borderRadius: '3px',
+                                padding: '1px 5px',
+                                cursor: 'pointer',
+                                backgroundColor: urlMatch ? 'rgba(126, 200, 227, 0.2)' : 'transparent',
                               }}
-                            />
-                          </span>
-                        )}
+                              title={prInfo.prUrl}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.electronAPI.openExternal(prInfo.prUrl);
+                              }}
+                            >
+                              <Highlighter
+                                searchWords={searchWords}
+                                textToHighlight={`PR #${prInfo.prNumber}`}
+                                highlightStyle={{
+                                  backgroundColor: 'rgba(126, 200, 227, 0.25)',
+                                  color: '#b0e0f0',
+                                  padding: '0 1px',
+                                  borderRadius: '2px',
+                                }}
+                              />
+                            </span>
+                          );
+                        })()}
                         {(() => {
                           const badge = session.isActive
                             ? (terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' ? terminalApps[session.sessionId] : null)
