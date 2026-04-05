@@ -949,7 +949,7 @@ function SwitcherApp() {
               </svg>
             ) : mode === 'terminal' ? '💻' : '📂'}
           </span>
-          CodeV Quick Switcher
+          CodeV
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div
