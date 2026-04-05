@@ -480,6 +480,7 @@ const PopupDefaultExample = ({
                   <option value="terminal">Terminal</option>
                   <option value="ghostty">Ghostty</option>
                   <option value="cmux">cmux</option>
+                  <option value="vscode">VS Code</option>
                 </select>
               </div>
               {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'terminal' || sessionTerminalApp === 'ghostty') && (

@@ -346,6 +346,9 @@ function SwitcherApp() {
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
   const activeStateRef = useRef<Record<string, number>>({});
+  const allSessionsRef = useRef<any[]>([]);
+  const lastAssistantFetchRef = useRef<Record<string, number>>({});
+  const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -364,7 +367,8 @@ function SwitcherApp() {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return allItems.filter((s) => {
       const prInfo = prLinks[s.sessionId];
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''}`.toLowerCase();
+      const terminalBadge = terminalApps[s.sessionId] || ((s as any).entrypoint === 'claude-vscode' ? 'vscode' : '');
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''} ${terminalBadge}`.toLowerCase();
       return words.every((w: string) => searchTarget.includes(w));
     });
   };
@@ -380,6 +384,7 @@ function SwitcherApp() {
       return s;
     });
     setAllSessions(newSessions);
+    allSessionsRef.current = newSessions;
     setSessions(sessionSearchValue.trim() ? filterSessionsLocally(newSessions, sessionSearchValue) : newSessions);
 
     // Step 2: Load last assistant responses for all sessions (first 100)
@@ -389,33 +394,109 @@ function SwitcherApp() {
       }
     });
 
-    // Step 3: Detect active sessions in background (slow, spawns processes)
-    window.electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
+    // Step 3: Detect active sessions in background (spawns processes)
+    window.electronAPI.detectActiveSessions().then((result: any) => {
+      const activeMap: Record<string, number> = result?.activeMap || {};
+      const vscodeSessions: any[] = result?.vscodeSessions || [];
+      const entrypointMap: Record<string, string> = result?.entrypoints || {};
+
       // Save to ref for SWR on next refresh
-      activeStateRef.current = activeMap || {};
+      activeStateRef.current = activeMap;
 
-      const updateActive = (list: any[]) => list.map((s) => ({
-        ...s,
-        isActive: s.sessionId in (activeMap || {}),
-        activePid: (activeMap || {})[s.sessionId],
-      }));
-      setAllSessions((prev: any[]) => updateActive(prev));
-      setSessions((prev: any[]) => updateActive(prev));
+      const updateActive = (list: any[]) => {
+        // Mark existing sessions as active/inactive
+        const updated = list.map((s: any) => ({
+          ...s,
+          isActive: s.sessionId in activeMap,
+          activePid: activeMap[s.sessionId],
+          entrypoint: entrypointMap[s.sessionId] || s.entrypoint,
+        }));
+        // Merge VS Code sessions that aren't already in the list
+        for (const vs of vscodeSessions) {
+          if (!updated.find((s: any) => s.sessionId === vs.sessionId)) {
+            updated.push({ ...vs, entrypoint: 'claude-vscode' });
+          }
+        }
+        // Re-sort by lastTimestamp descending
+        updated.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+        return updated;
+      };
+      setAllSessions((prev: any[]) => { const r = updateActive(prev); allSessionsRef.current = r; return r; });
+      setSessions((prev: any[]) => {
+        const updated = updateActive(prev);
+        const search = sessionSearchRef2.current;
+        return search.trim() ? filterSessionsLocally(updated, search) : updated;
+      });
 
-      if (activeMap && Object.keys(activeMap).length > 0) {
+      if (Object.keys(activeMap).length > 0) {
+        // Detect terminal apps for active sessions (pass entrypoints to skip process tree walk for VS Code)
+        window.electronAPI.detectTerminalApps(activeMap, entrypointMap).then((apps: Record<string, string>) => {
+          if (apps && Object.keys(apps).length > 0) {
+            setTerminalApps((prev: Record<string, string>) => ({ ...prev, ...apps }));
+          }
+        });
+      }
 
-        // Step 2c: Detect terminal apps for active sessions
-        if (Object.keys(activeMap).length > 0) {
-          window.electronAPI.detectTerminalApps(activeMap).then((apps: Record<string, string>) => {
-            if (apps && Object.keys(apps).length > 0) {
-              setTerminalApps((prev: Record<string, string>) => ({ ...prev, ...apps }));
+      // Load enrichment (ai-title, branch, PR) for active VS Code sessions
+      const allVSCode = [...vscodeSessions]; // collect for combined enrichment with closed
+      if (vscodeSessions.length > 0) {
+        // Use pre-loaded assistant responses (already read from tail in detectActiveSessions)
+        const preloaded: Record<string, string> = {};
+        for (const vs of vscodeSessions) {
+          if (vs.lastAssistantMessage) preloaded[vs.sessionId] = vs.lastAssistantMessage;
+        }
+        if (Object.keys(preloaded).length > 0) {
+          setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...preloaded }));
+        }
+      }
+
+      // Step 5: Scan closed VS Code sessions (reuse activeMap from Step 3, no duplicate call)
+      const activeIds = Object.keys(activeMap);
+      window.electronAPI.scanClosedVSCodeSessions(activeIds).then((closedVS: any[]) => {
+        if (closedVS && closedVS.length > 0) {
+          // Merge closed VS Code sessions, deduplicate, sort, cap at 100
+          const mergeAndCap = (prev: any[]) => {
+            const existingIds = new Set(prev.map((s: any) => s.sessionId));
+            const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
+            if (newSessions.length === 0) return prev;
+            const merged = [...prev, ...newSessions];
+            merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+            return merged.slice(0, 100);
+          };
+          setAllSessions((prev: any[]) => { const r = mergeAndCap(prev); allSessionsRef.current = r; return r; });
+          setSessions((prev: any[]) => {
+            const merged = mergeAndCap(prev);
+            const search = sessionSearchRef2.current;
+            return search.trim() ? filterSessionsLocally(merged, search) : merged;
+          });
+          allVSCode.push(...closedVS);
+          // Use pre-loaded assistant responses from closed sessions
+          const preloaded: Record<string, string> = {};
+          for (const vs of closedVS) {
+            if (vs.lastAssistantMessage) preloaded[vs.sessionId] = vs.lastAssistantMessage;
+          }
+          if (Object.keys(preloaded).length > 0) {
+            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...preloaded }));
+          }
+        }
+        // Load enrichment for ALL VS Code sessions (active + closed) in one call
+        if (allVSCode.length > 0) {
+          window.electronAPI.loadSessionEnrichment(allVSCode).then((enrichment) => {
+            if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
+              setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
+            }
+            if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
+              setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+            }
+            if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+              setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
             }
           });
         }
-      }
+      });
     });
 
-    // Step 3: Load custom titles + branches in background
+    // Step 4: Load custom titles + branches in background
     if (result && result.length > 0) {
       window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment) => {
         if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
@@ -504,12 +585,76 @@ function SwitcherApp() {
     });
 
     // Session status updates from hooks (fs.watch)
-    window.electronAPI.getSessionStatuses().then((statuses: Record<string, string>) => {
-      if (statuses) setSessionStatuses(statuses);
+    window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
+      if (!rawStatuses) return;
+      const statusStrings: Record<string, string> = {};
+      for (const [id, v] of Object.entries(rawStatuses)) {
+        statusStrings[id] = typeof v === 'object' ? v.status : v;
+      }
+      setSessionStatuses(statusStrings);
     });
-    window.electronAPI.onSessionStatusesUpdated((_event: any, statuses: Record<string, string>) => {
-      // Use disk snapshot as source of truth — clears removed sessions
-      setSessionStatuses(statuses);
+    window.electronAPI.onSessionStatusesUpdated((_event: any, rawStatuses: Record<string, any>) => {
+      // Extract status strings for dots display
+      const statusStrings: Record<string, string> = {};
+      for (const [id, v] of Object.entries(rawStatuses)) {
+        statusStrings[id] = typeof v === 'object' ? v.status : v;
+      }
+      setSessionStatuses(statusStrings);
+
+      // Auto-refresh preview (user msg + assistant msg + order) for idle sessions
+      const currentSessions = allSessionsRef.current;
+      const sessionsToRefresh: any[] = [];
+      for (const [id, v] of Object.entries(rawStatuses)) {
+        const status = typeof v === 'object' ? v.status : v;
+        const ts = typeof v === 'object' ? (v.timestamp || 0) : 0;
+        if (status !== 'idle' || !ts) continue;
+        const lastFetched = lastAssistantFetchRef.current[id] || 0;
+        if (ts * 1000 > lastFetched) {
+          const s = currentSessions.find((s: any) => s.sessionId === id);
+          if (s?.project) sessionsToRefresh.push(s);
+        }
+      }
+      if (sessionsToRefresh.length > 0) {
+        const now = Date.now();
+        for (const s of sessionsToRefresh) {
+          lastAssistantFetchRef.current[s.sessionId] = now;
+        }
+        // Small delay to ensure JSONL is fully flushed after Stop hook
+        setTimeout(() => {
+          window.electronAPI.refreshSessionPreview(sessionsToRefresh).then((previews: Record<string, any>) => {
+            if (!previews || Object.keys(previews).length === 0) return;
+            // Update assistant responses
+            const newAssistant: Record<string, string> = {};
+            for (const [id, p] of Object.entries(previews)) {
+              if (p.lastAssistantMessage) newAssistant[id] = p.lastAssistantMessage;
+            }
+            if (Object.keys(newAssistant).length > 0) {
+              setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...newAssistant }));
+            }
+            // Update last user message + timestamp + re-sort
+            const refreshedIds = new Set(Object.keys(previews));
+            const updateSessions = (list: any[]) => {
+              const updated = list.map((s: any) => {
+                if (!refreshedIds.has(s.sessionId)) return s;
+                const p = previews[s.sessionId];
+                return {
+                  ...s,
+                  lastUserMessage: p.lastUserMessage || s.lastUserMessage,
+                  lastTimestamp: now,
+                };
+              });
+              updated.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+              return updated;
+            };
+            setAllSessions((prev: any[]) => { const r = updateSessions(prev); allSessionsRef.current = r; return r; });
+            setSessions((prev: any[]) => {
+              const updated = updateSessions(prev);
+              const search = sessionSearchRef2.current;
+              return search.trim() ? filterSessionsLocally(updated, search) : updated;
+            });
+          });
+        }, 300);
+      }
     });
 
     window.electronAPI.onCheckTerminalAndHide(() => {
@@ -536,8 +681,13 @@ function SwitcherApp() {
         fetchClaudeSessions();
       }
       // Refresh session statuses on window focus
-      window.electronAPI.getSessionStatuses().then((statuses: Record<string, string | null>) => {
-        if (statuses) setSessionStatuses(statuses);
+      window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
+        if (!rawStatuses) return;
+        const statusStrings: Record<string, string> = {};
+        for (const [id, v] of Object.entries(rawStatuses)) {
+          statusStrings[id] = typeof v === 'object' ? v.status : v;
+        }
+        setSessionStatuses(statusStrings);
       });
       // Refresh display mode setting
       window.electronAPI.getSessionDisplayMode().then((mode: string) => {
@@ -874,6 +1024,7 @@ function SwitcherApp() {
             onChange={(e) => {
               const val = e.target.value;
               setSessionSearchValue(val);
+              sessionSearchRef2.current = val;
               setSessions(filterSessionsLocally(allSessions, val));
               setSelectedSessionIndex(0);
             }}
@@ -881,6 +1032,7 @@ function SwitcherApp() {
               if (e.key === 'Escape') {
                 if (sessionSearchValue) {
                   setSessionSearchValue('');
+                  sessionSearchRef2.current = '';
                   setSessions(allSessions);
                 } else {
                   hideApp();
@@ -1030,37 +1182,69 @@ function SwitcherApp() {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
-                        {session.isActive && terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' && (
-                          <span style={{
-                            fontSize: '9px',
-                            color: '#aaa',
-                            border: '1px solid #555',
-                            borderRadius: '3px',
-                            padding: '1px 4px',
-                            textTransform: 'uppercase',
-                          }}>
-                            {terminalApps[session.sessionId]}
-                          </span>
-                        )}
-                        {prLinks[session.sessionId] && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              color: '#7ec8e3',
-                              border: '1px solid #4a8a9e',
+                        {prLinks[session.sessionId] && (() => {
+                          const prInfo = prLinks[session.sessionId];
+                          const searchWords = sessionSearchValue.split(/\s+/).filter(Boolean);
+                          // Highlight badge when search matches PR URL (not just badge text)
+                          const urlMatch = searchWords.length > 0 && searchWords.some((w: string) =>
+                            prInfo.prUrl.toLowerCase().includes(w.toLowerCase()));
+                          return (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                color: urlMatch ? '#b0e0f0' : '#7ec8e3',
+                                border: `1px solid ${urlMatch ? '#7ec8e3' : '#4a8a9e'}`,
+                                borderRadius: '3px',
+                                padding: '1px 5px',
+                                cursor: 'pointer',
+                                backgroundColor: urlMatch ? 'rgba(126, 200, 227, 0.2)' : 'transparent',
+                              }}
+                              title={prInfo.prUrl}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.electronAPI.openExternal(prInfo.prUrl);
+                              }}
+                            >
+                              <Highlighter
+                                searchWords={searchWords}
+                                textToHighlight={`PR #${prInfo.prNumber}`}
+                                highlightStyle={{
+                                  backgroundColor: 'rgba(126, 200, 227, 0.25)',
+                                  color: '#b0e0f0',
+                                  padding: '0 1px',
+                                  borderRadius: '2px',
+                                }}
+                              />
+                            </span>
+                          );
+                        })()}
+                        {(() => {
+                          // Only show terminal/IDE badge for active sessions
+                          const badge = session.isActive
+                            ? (terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' ? terminalApps[session.sessionId] : null)
+                            : null;
+                          return badge ? (
+                            <span style={{
+                              fontSize: '9px',
+                              color: '#aaa',
+                              border: '1px solid #555',
                               borderRadius: '3px',
-                              padding: '1px 5px',
-                              cursor: 'pointer',
-                            }}
-                            title={prLinks[session.sessionId].prUrl}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.electronAPI.openExternal(prLinks[session.sessionId].prUrl);
-                            }}
-                          >
-                            PR #{prLinks[session.sessionId].prNumber}
-                          </span>
-                        )}
+                              padding: '1px 4px',
+                              textTransform: 'uppercase',
+                            }}>
+                              <Highlighter
+                                searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                                textToHighlight={badge}
+                                highlightStyle={{
+                                  backgroundColor: 'rgba(200, 200, 200, 0.25)',
+                                  color: '#fff',
+                                  padding: '0 1px',
+                                  borderRadius: '2px',
+                                }}
+                              />
+                            </span>
+                          ) : null;
+                        })()}
                         <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
                           {session.messageCount} msgs
                         </span>

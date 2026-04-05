@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.67
+
+- Feat: VS Code Claude Code session support — detect, display, switch, resume
+  - Active sessions: `[VSCODE]` badge, instant switch via URI handler
+  - Closed sessions: JSONL scan + hooks index, resume via `code <path>` + URI handler
+  - `ai-title` as display name fallback (custom-title > ai-title > first prompt)
+  - VS Code added to Launch Terminal dropdown in Settings
+  - Requires Claude Code VS Code extension v2.1.72+
+- Feat: real-time session preview updates on idle
+  - Last assistant message, last user message, and session order auto-update
+  - Single `tail -n 100` read for both user + assistant messages
+  - fs.watch debounced (50ms) to reduce duplicate triggers on macOS
+- Feat: search by terminal type (`vscode`/`ghostty`/`iterm2`)
+- Style: PR badge before terminal badge, search highlighting on both
+- Fix: ISO string timestamps normalized to unix ms (correct sort order)
+- Fix: skip `<ide_opened_file>` context blocks in VS Code session preview
+
 ## 1.0.66
 
 - Style: use `*` separator for custom titles (matches Claude Code display)

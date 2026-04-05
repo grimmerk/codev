@@ -19,7 +19,14 @@ export interface ClaudeSession {
   messageCount: number;
   isActive: boolean;       // whether a claude process is running for this session
   activePid?: number;
-  terminalApp?: string;    // detected terminal: 'iterm2', 'cmux', 'ghostty', etc.
+  terminalApp?: string;    // detected terminal: 'iterm2', 'cmux', 'ghostty', 'vscode', etc.
+  entrypoint?: string;     // 'cli', 'claude-vscode', etc.
+}
+
+export interface ActiveSessionResult {
+  activeMap: Map<string, number>;      // sessionId -> pid (all active sessions)
+  vscodeSessions: ClaudeSession[];     // VS Code sessions not in history.jsonl
+  entrypoints: Map<string, string>;    // sessionId -> entrypoint ('cli', 'claude-vscode')
 }
 
 interface HistoryLine {
@@ -50,6 +57,8 @@ const CACHE_TTL_MS = 5000; // refresh cache after 5 seconds
 
 // Cache for active session detection to avoid spawning processes on every keystroke
 let cachedActiveMap: Map<string, number> | null = null;
+let cachedVSCodeSessions: ClaudeSession[] | null = null;
+let cachedEntrypoints: Map<string, string> | null = null;
 let activeCacheTimestamp = 0;
 const ACTIVE_CACHE_TTL_MS = 5000;
 
@@ -60,6 +69,8 @@ let titlesCacheTimestamp = 0;
 export const invalidateSessionCache = () => {
   cachedSessions = null;
   cachedActiveMap = null;
+  cachedVSCodeSessions = null;
+  cachedEntrypoints = null;
   cachedCustomTitles = null;
   cachedBranches = null;
 };
@@ -595,13 +606,260 @@ end tell`);
   }
 };
 
-export const detectActiveSessions = async (): Promise<Map<string, number>> => {
+/**
+ * Extract user-visible text from a message content array, skipping IDE context blocks.
+ * Shared by active session reader + closed session scanner.
+ */
+const extractUserText = (content: any): string => {
+  if (typeof content === 'string') return content.trim().slice(0, 200);
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block?.type === 'text' && block?.text) {
+        const t = block.text.trim();
+        if (t.startsWith('<ide_')) continue;
+        return t.slice(0, 200);
+      }
+    }
+  }
+  return '';
+};
+
+/**
+ * Parse user messages from JSONL lines. Returns first user text found.
+ * Shared parser used by both head (first prompt) and tail (last prompt) readers.
+ */
+const parseUserMessageFromLines = (lines: string[], fromEnd = false): string => {
+  const iter = fromEnd ? [...lines].reverse() : lines;
+  for (const line of iter) {
+    if (!line.includes('"type":"user"')) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type === 'user' && entry.message?.role === 'user') {
+        const text = extractUserText(entry.message.content);
+        if (text) return text;
+      }
+    } catch {}
+  }
+  return '';
+};
+
+/**
+ * Parse last assistant text from JSONL lines (shared with loadLastAssistantResponses pattern).
+ */
+const parseAssistantMessageFromLines = (lines: string[]): string => {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"type":"assistant"')) continue;
+    try {
+      const obj = JSON.parse(lines[i]);
+      const content = obj?.message?.content;
+      if (!Array.isArray(content)) continue;
+      for (let j = content.length - 1; j >= 0; j--) {
+        if (content[j]?.type === 'text' && content[j]?.text?.trim()) {
+          return content[j].text.trim();
+        }
+      }
+    } catch {}
+  }
+  return '';
+};
+
+/**
+ * Read VS Code session info using head/tail (async, parallel).
+ * Single tail read extracts both last user prompt AND last assistant message,
+ * avoiding duplicate reads with loadLastAssistantResponses().
+ */
+const readVSCodeSessionFromJSONL = async (
+  sessionId: string,
+  cwdOrJsonlPath: string,
+  execPromise: (cmd: string) => Promise<string>,
+  isJsonlPath = false,
+): Promise<{
+  firstUserMessage: string;
+  lastUserMessage: string;
+  lastAssistantMessage: string;
+  lastTimestamp: number;
+  messageCount: number;
+  cwd: string; // actual cwd read from JSONL content
+}> => {
+  const result = { firstUserMessage: '', lastUserMessage: '', lastAssistantMessage: '', lastTimestamp: 0, messageCount: 0, cwd: '' };
+  let jsonlPath: string;
+  if (isJsonlPath) {
+    jsonlPath = cwdOrJsonlPath;
+  } else {
+    const encodedProject = cwdOrJsonlPath.replace(/[^a-zA-Z0-9-]/g, '-');
+    const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+    jsonlPath = path.join(claudeDir, encodedProject, `${sessionId}.jsonl`);
+  }
+
+  if (!fs.existsSync(jsonlPath)) return result;
+
+  // Parallel: head for first prompt, tail for last prompt + assistant, grep -c for count
+  const [headOutput, tailOutput, countOutput] = await Promise.all([
+    execPromise(`head -n 20 "${jsonlPath}"`),
+    execPromise(`tail -n 100 "${jsonlPath}"`),
+    execPromise(`grep -c '"type":"user"' "${jsonlPath}" 2>/dev/null`),
+  ]);
+
+  const headLines = headOutput.split('\n').filter(Boolean);
+  const tailLines = tailOutput.split('\n').filter(Boolean);
+
+  result.firstUserMessage = parseUserMessageFromLines(headLines);
+  result.lastUserMessage = parseUserMessageFromLines(tailLines, true);
+  result.lastAssistantMessage = parseAssistantMessageFromLines(tailLines);
+  result.messageCount = parseInt(countOutput.trim(), 10) || 0;
+
+  // Extract actual cwd from JSONL entries (head lines have it in user/assistant messages)
+  for (const line of headLines) {
+    if (!line.includes('"cwd"')) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry.cwd) { result.cwd = entry.cwd; break; }
+    } catch {}
+  }
+
+  // Get timestamp from tail (convert ISO string to unix ms if needed)
+  for (let i = tailLines.length - 1; i >= 0; i--) {
+    try {
+      const entry = JSON.parse(tailLines[i]);
+      if (entry.timestamp) {
+        result.lastTimestamp = typeof entry.timestamp === 'string'
+          ? new Date(entry.timestamp).getTime()
+          : entry.timestamp;
+        break;
+      }
+    } catch {}
+  }
+  return result;
+};
+
+// Cache for closed VS Code sessions scan
+let cachedClosedVSCode: ClaudeSession[] | null = null;
+let closedVSCodeTimestamp = 0;
+const CLOSED_VSCODE_CACHE_TTL_MS = 30000; // 30s — less frequent than active detection
+
+/**
+ * Scan ~/.claude/projects/ for closed VS Code sessions.
+ * Reads first 4KB of each JSONL to check entrypoint, then uses head/tail
+ * to extract first/last user prompt (shared algorithm with loadLastAssistantResponses).
+ *
+ * Uses hooks index (vscode-sessions.jsonl) to skip already-known files.
+ * Skips active sessions (caller should filter by activeMap).
+ *
+ * Benchmark: ~50ms for 218 files (4KB read per file).
+ */
+export const scanClosedVSCodeSessions = async (
+  activeSessionIds: Set<string>,
+  vsCodeIndex: Map<string, string>,
+): Promise<ClaudeSession[]> => {
+  const now = Date.now();
+  if (cachedClosedVSCode && (now - closedVSCodeTimestamp) < CLOSED_VSCODE_CACHE_TTL_MS) {
+    return cachedClosedVSCode.filter(s => !activeSessionIds.has(s.sessionId));
+  }
+
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024 }, (err: any, stdout: string) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+  if (!fs.existsSync(claudeDir)) return [];
+
+  // Phase 1: Identify VS Code session files
+  // Use hooks index for known sessions, scan remaining files
+  const vsCodeFiles: { sessionId: string; cwd: string; jsonlPath: string }[] = [];
+
+  // Add known sessions from hooks index
+  for (const [sessionId, cwd] of vsCodeIndex) {
+    if (activeSessionIds.has(sessionId)) continue;
+    const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
+    const jsonlPath = path.join(claudeDir, encodedProject, `${sessionId}.jsonl`);
+    if (fs.existsSync(jsonlPath)) {
+      vsCodeFiles.push({ sessionId, cwd, jsonlPath });
+    }
+  }
+
+  // Scan remaining JSONL files not in hooks index
+  const knownIds = new Set(vsCodeIndex.keys());
+  const dirs = fs.readdirSync(claudeDir);
+  for (const dir of dirs) {
+    const dirPath = path.join(claudeDir, dir);
+    try {
+      if (!fs.statSync(dirPath).isDirectory()) continue;
+    } catch { continue; }
+    const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
+    for (const f of files) {
+      const sessionId = f.replace('.jsonl', '');
+      if (knownIds.has(sessionId) || activeSessionIds.has(sessionId)) continue;
+      // Read first 4KB to check entrypoint
+      const filePath = path.join(dirPath, f);
+      try {
+        const fd = fs.openSync(filePath, 'r');
+        let chunk: string;
+        try {
+          const buf = new Uint8Array(4096);
+          const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+          chunk = Buffer.from(buf.buffer, 0, bytesRead).toString('utf-8');
+        } finally {
+          fs.closeSync(fd);
+        }
+        if (chunk.includes('"entrypoint":"claude-vscode"') || chunk.includes('"entrypoint": "claude-vscode"')) {
+          // cwd will be read from JSONL content (directory name decode is lossy)
+          vsCodeFiles.push({ sessionId, cwd: '', jsonlPath: filePath });
+        }
+      } catch {}
+    }
+  }
+
+  // Phase 2: Read first/last prompt + assistant for each session using head/tail (parallel)
+  // Uses readVSCodeSessionFromJSONL (shared with active session detection)
+  const sessions: ClaudeSession[] = [];
+  const promises = vsCodeFiles.map(async ({ sessionId, cwd, jsonlPath }) => {
+    // For scanned files (not from hooks index), pass jsonlPath directly to avoid lossy cwd decode
+    const useJsonlPath = !vsCodeIndex.has(sessionId);
+    const info = await readVSCodeSessionFromJSONL(
+      sessionId, useJsonlPath ? jsonlPath : cwd, execPromise, useJsonlPath,
+    );
+    // Use actual cwd from JSONL content, fall back to hooks index cwd
+    const actualCwd = info.cwd || cwd;
+    sessions.push({
+      sessionId,
+      project: actualCwd,
+      projectName: path.basename(actualCwd) || actualCwd,
+      firstUserMessage: info.firstUserMessage,
+      lastUserMessage: info.lastUserMessage,
+      lastAssistantMessage: info.lastAssistantMessage,
+      lastTimestamp: info.lastTimestamp,
+      messageCount: info.messageCount,
+      isActive: false,
+      entrypoint: 'claude-vscode',
+    });
+  });
+
+  await Promise.all(promises);
+  sessions.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+
+  cachedClosedVSCode = sessions;
+  closedVSCodeTimestamp = now;
+  return sessions.filter(s => !activeSessionIds.has(s.sessionId));
+};
+
+export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
   const now = Date.now();
   if (cachedActiveMap && (now - activeCacheTimestamp) < ACTIVE_CACHE_TTL_MS) {
-    return cachedActiveMap;
+    return {
+      activeMap: cachedActiveMap,
+      vscodeSessions: cachedVSCodeSessions || [],
+      entrypoints: cachedEntrypoints || new Map(),
+    };
   }
 
   const activeMap = new Map<string, number>();
+  const entrypoints = new Map<string, string>();
+  const vscodeSessions: ClaudeSession[] = [];
+  const vscodeReadPromises: Promise<void>[] = [];
   const needsCrossRef: { pid: number; cwd: string; candidates: ClaudeSession[] }[] = [];
 
   const { exec } = require('child_process');
@@ -628,32 +886,60 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
           const pid = data.pid as number;
           const sessionId = data.sessionId as string;
           const cwd = data.cwd as string;
-          const entrypoint = data.entrypoint as string;
+          const entrypoint = (data.entrypoint as string) || 'cli';
           if (!pid || !sessionId) continue;
-
-          // Skip non-terminal sessions (VS Code, Claude Desktop) — can't switch to them
-          if (entrypoint && entrypoint !== 'cli') continue;
 
           // Verify process is still alive
           try { process.kill(pid, 0); } catch { continue; }
 
-          // Try direct sessionId match against history.jsonl
-          const knownSession = allSessions.find(s => s.sessionId === sessionId);
-          if (knownSession) {
+          entrypoints.set(sessionId, entrypoint);
+
+          if (entrypoint === 'claude-vscode') {
+            // VS Code sessions: not in history.jsonl, add directly
             activeMap.set(sessionId, pid);
-          } else if (cwd) {
-            // sessionId not in history — find session by cwd
-            const cwdCandidates = allSessions.filter(s => s.project === cwd && !activeMap.has(s.sessionId));
-            if (cwdCandidates.length === 1) {
-              activeMap.set(cwdCandidates[0].sessionId, pid);
-            } else if (cwdCandidates.length > 1) {
-              // Multiple same-cwd candidates — queue for cross-reference
-              needsCrossRef.push({ pid, cwd, candidates: cwdCandidates });
+            // Queue async JSONL read (head/tail in parallel)
+            const startedAt = data.startedAt;
+            vscodeReadPromises.push(
+              readVSCodeSessionFromJSONL(sessionId, cwd, execPromise).then((info) => {
+                vscodeSessions.push({
+                  sessionId,
+                  project: cwd,
+                  projectName: path.basename(cwd) || cwd,
+                  firstUserMessage: info.firstUserMessage,
+                  lastUserMessage: info.lastUserMessage,
+                  lastAssistantMessage: info.lastAssistantMessage,
+                  lastTimestamp: info.lastTimestamp || startedAt || 0,
+                  messageCount: info.messageCount,
+                  isActive: true,
+                  activePid: pid,
+                  entrypoint,
+                });
+              })
+            );
+          } else {
+            // CLI sessions: match against history.jsonl
+            const knownSession = allSessions.find(s => s.sessionId === sessionId);
+            if (knownSession) {
+              activeMap.set(sessionId, pid);
+            } else if (cwd) {
+              // sessionId not in history — find session by cwd
+              const cwdCandidates = allSessions.filter(s => s.project === cwd && !activeMap.has(s.sessionId));
+              if (cwdCandidates.length === 1) {
+                activeMap.set(cwdCandidates[0].sessionId, pid);
+              } else if (cwdCandidates.length > 1) {
+                // Multiple same-cwd candidates — queue for cross-reference
+                needsCrossRef.push({ pid, cwd, candidates: cwdCandidates });
+              }
             }
           }
         } catch {
           // skip malformed files
         }
+      }
+
+      // Read VS Code session JSONLs in parallel (head/tail)
+      if (vscodeReadPromises.length > 0) {
+        await Promise.all(vscodeReadPromises);
       }
 
       // Cross-reference for PIDs with same-cwd ambiguity.
@@ -672,8 +958,10 @@ export const detectActiveSessions = async (): Promise<Map<string, number>> => {
   }
 
   cachedActiveMap = activeMap;
+  cachedVSCodeSessions = vscodeSessions;
+  cachedEntrypoints = entrypoints;
   activeCacheTimestamp = now;
-  return activeMap;
+  return { activeMap, vscodeSessions, entrypoints };
 };
 
 /**
@@ -753,7 +1041,18 @@ export const openSession = async (
     }
   }
 
+  // Check if this is an active VS Code session — switch via URI handler
+  const entrypoint = cachedEntrypoints?.get(sessionId);
+  if (isActive && entrypoint === 'claude-vscode') {
+    openSessionInVSCode(sessionId);
+    return;
+  }
+
   switch (effectiveTerminal) {
+    case 'vscode':
+      // User selected VS Code as launch terminal — open project first, then resume
+      openSessionInVSCode(sessionId, projectPath);
+      return;
     case 'codev':
       // Session is in CodeV's embedded terminal — notify renderer to switch to Term tab
       openSessionInCodeV(sessionId);
@@ -780,6 +1079,46 @@ export const openSession = async (
  * Otherwise, open a new tab and run claude --resume
  */
 /**
+ * Refresh session preview: reads tail -n 100 to extract both last user message
+ * and last assistant message in a single read. Used by status handler for
+ * real-time updates without duplicate file reads.
+ */
+export const refreshSessionPreview = async (
+  sessions: { sessionId: string; project: string }[]
+): Promise<Map<string, { lastUserMessage: string; lastAssistantMessage: string }>> => {
+  const { exec } = require('child_process');
+  const execPromise = (cmd: string): Promise<string> =>
+    new Promise((resolve) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 5000, maxBuffer: 10 * 1024 * 1024 }, (err: any, stdout: string) => {
+        resolve(err ? '' : stdout);
+      });
+    });
+
+  const results = new Map<string, { lastUserMessage: string; lastAssistantMessage: string }>();
+  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
+
+  const promises = sessions.map(async (session) => {
+    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
+    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    if (!fs.existsSync(jsonlPath)) return;
+
+    const output = await execPromise(`tail -n 100 "${jsonlPath}"`);
+    if (!output.trim()) return;
+
+    const lines = output.split('\n').filter(Boolean);
+    const lastUserMessage = parseUserMessageFromLines(lines, true);
+    const lastAssistantMessage = parseAssistantMessageFromLines(lines);
+
+    if (lastUserMessage || lastAssistantMessage) {
+      results.set(session.sessionId, { lastUserMessage, lastAssistantMessage });
+    }
+  });
+
+  await Promise.all(promises);
+  return results;
+};
+
+/**
  * Callback for opening sessions in CodeV's embedded terminal.
  * Set by main.ts to avoid circular dependency.
  */
@@ -787,6 +1126,38 @@ let codevTerminalCallback: ((sessionId: string) => void) | null = null;
 
 export const setCodevTerminalCallback = (cb: (sessionId: string) => void) => {
   codevTerminalCallback = cb;
+};
+
+/**
+ * Open a Claude Code session in VS Code via URI handler.
+ * For active sessions: switches to the existing session tab.
+ * For closed sessions: opens the project folder first, then resumes via URI handler.
+ */
+export const openSessionInVSCode = (sessionId: string, projectPath?: string): void => {
+  const { execFile } = require('child_process');
+
+  if (projectPath) {
+    // Closed session: open project folder first, then resume after a short delay
+    execFile('code', [projectPath], (error: any) => {
+      if (error) {
+        console.error('[openSessionInVSCode] failed to open project:', error);
+        return;
+      }
+      // Wait for VS Code to open the workspace before resuming session
+      setTimeout(() => {
+        const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
+        execFile('open', [uri]);
+      }, 2000);
+    });
+  } else {
+    // Active session: directly switch via URI handler
+    const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
+    execFile('open', [uri], (error: any) => {
+      if (error) {
+        console.error('[openSessionInVSCode] failed:', error);
+      }
+    });
+  }
 };
 
 /**
@@ -936,17 +1307,28 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
 
     if (!fs.existsSync(jsonlPath)) return;
 
-    // Run title, branch, and PR link greps in parallel for each file
-    const [titleOutput, branchOutput, prLinkOutput] = await Promise.all([
+    // Run title, ai-title, branch, and PR link greps in parallel for each file
+    const [titleOutput, aiTitleOutput, branchOutput, prLinkOutput] = await Promise.all([
       execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
+      execPromise(`grep '"type":"ai-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
       execPromise(`tail -n 5 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
       execPromise(`grep '"type":"pr-link"' "${jsonlPath}" 2>/dev/null | tail -1`),
     ]);
 
+    // Priority: custom-title > ai-title
     if (titleOutput.trim()) {
       try {
         const parsed = JSON.parse(titleOutput.trim());
         const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
+        if (title) {
+          titles.set(session.sessionId, title);
+        }
+      } catch {}
+    }
+    if (!titles.has(session.sessionId) && aiTitleOutput.trim()) {
+      try {
+        const parsed = JSON.parse(aiTitleOutput.trim());
+        const title = (parsed.aiTitle || '').trim();
         if (title) {
           titles.set(session.sessionId, title);
         }
