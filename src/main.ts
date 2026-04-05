@@ -27,6 +27,8 @@ import {
   loadLastAssistantResponses,
   refreshSessionPreview,
   setCodevTerminalCallback,
+  setLaunchInCodevTerminalCallback,
+  launchNewClaudeSession,
   scanClosedVSCodeSessions,
 } from './claude-session-utility';
 import {
@@ -1072,6 +1074,19 @@ const trayToggleEvtHandler = async () => {
     }, 50);
   });
 
+  // Set callback for launching new claude session in CodeV terminal
+  setLaunchInCodevTerminalCallback((projectPath: string) => {
+    showSwitcherWindow();
+    setTimeout(() => {
+      switcherWindow?.webContents.send('switch-to-terminal');
+      // Send cd + claude command to terminal after tab switch
+      setTimeout(() => {
+        const shortPath = projectPath.replace(os.homedir(), '~');
+        ptyProcess?.write(`cd ${shortPath.replace(/ /g, '\\ ')} && clear && claude\n`);
+      }, 100);
+    }, 50);
+  });
+
   // Pre-initialize aiAssistantWindow for faster first open
   // This is done after mainWindow is created, but before showing it
   // so that initial startup isn't slowed down
@@ -1961,6 +1976,16 @@ ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath:
   const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
   const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
   openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode, customTitle);
+});
+
+ipcMain.on('launch-new-claude-session', async (_event, projectPath: string) => {
+  const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
+  const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+  launchNewClaudeSession(projectPath, terminalApp, terminalMode);
+});
+
+ipcMain.on('launch-new-claude-session-in-codev', (_event, projectPath: string) => {
+  launchNewClaudeSession(projectPath, 'codev', 'tab');
 });
 
 ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {

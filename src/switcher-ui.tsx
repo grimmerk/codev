@@ -248,9 +248,10 @@ export interface SelectInputOptionInterface {
 }
 
 // Enhanced Option component with improved styling and hover effects
-const OptionUI: FC<OptionProps<SelectInputOptionInterface>> = (
-  props,
-  onDeleteClick,
+const OptionUI = (
+  props: OptionProps<SelectInputOptionInterface>,
+  onDeleteClick?: (data: any) => void,
+  onCmdClick?: (path: string) => void,
 ) => {
   const { selectOption, selectProps, data, isSelected, isFocused } = props;
   const { value, label } = data;
@@ -258,6 +259,13 @@ const OptionUI: FC<OptionProps<SelectInputOptionInterface>> = (
   return (
     <div
       key={value}
+      onClick={(e) => {
+        if (e.metaKey && onCmdClick) {
+          e.stopPropagation();
+          e.preventDefault();
+          onCmdClick(value);
+        }
+      }}
       style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -312,6 +320,7 @@ const formatRelativeTime = (timestamp: string): string => {
 let loadTimes = 0;
 function SwitcherApp() {
   const optionPress = useRef(false);
+  const launchClaudeRef = useRef<'external' | 'codev' | null>(null);
 
   const ref = useRef(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
@@ -1375,12 +1384,25 @@ function SwitcherApp() {
               hideApp();
             }
           }
+          // Cmd+Enter or Shift+Enter: launch new Claude session
+          // Set flag so onChange knows to launch instead of opening IDE
+          if (evt.key === 'Enter' && (evt.metaKey || evt.shiftKey)) {
+            launchClaudeRef.current = evt.shiftKey ? 'codev' : 'external';
+          }
         }}
         onInputChange={(evt) => {
           setInputValue(evt);
         }}
         onChange={(evt: any) => {
-          invokeVSCode(evt.value, optionPress.current);
+          const launchMode = launchClaudeRef.current;
+          launchClaudeRef.current = null;
+          if (launchMode === 'codev') {
+            window.electronAPI.launchNewClaudeSessionInCodev(evt.value);
+          } else if (launchMode === 'external') {
+            window.electronAPI.launchNewClaudeSession(evt.value);
+          } else {
+            invokeVSCode(evt.value, optionPress.current);
+          }
           /** in this case, when invokeVSCode triggers this ui to be hided,
            * there will no keyup event triggered to reset optionPress.current,
            * so we reset here */
@@ -1389,7 +1411,9 @@ function SwitcherApp() {
         // Custom components
         components={{
           DropdownIndicator: null,
-          Option: (props) => OptionUI(props, onDeleteClick),
+          Option: (props) => OptionUI(props, onDeleteClick, (path: string) => {
+            window.electronAPI.launchNewClaudeSession(path);
+          }),
         }}
         formatOptionLabel={(
           { value, label, everOpened }: { value: string; label: string; everOpened: boolean },
