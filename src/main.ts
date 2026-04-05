@@ -1795,6 +1795,18 @@ ipcMain.on('terminal-input', (_event, data: string) => {
   ptyProcess?.write(data);
 });
 
+ipcMain.handle('terminal-get-cwd', async () => {
+  if (!ptyProcess) return null;
+  try {
+    const pid = ptyProcess.pid;
+    const { execSync } = require('child_process');
+    const cwd = execSync(`lsof -a -p ${pid} -d cwd -Fn 2>/dev/null | grep '^n' | head -1 | cut -c2-`, { encoding: 'utf-8' }).trim();
+    return cwd || null;
+  } catch {
+    return null;
+  }
+});
+
 ipcMain.on('terminal-resize', (_event, cols: number, rows: number) => {
   ptyProcess?.resize(cols, rows);
 });

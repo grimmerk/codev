@@ -1021,9 +1021,24 @@ function SwitcherApp() {
         </div>
       </div>
 
-      {/* Terminal tab: always mounted, toggle visibility to preserve state */}
-      <div style={{ flex: 1, overflow: 'hidden', display: mode === 'terminal' ? 'flex' : 'none' }}>
-        <TerminalTab visible={mode === 'terminal'} />
+      {/* Terminal tab: always mounted, use visibility (not display) to preserve xterm layout and avoid re-fit flash (#99) */}
+      <div style={{
+        flex: mode === 'terminal' ? 1 : 0,
+        overflow: 'hidden',
+        visibility: mode === 'terminal' ? 'visible' : 'hidden',
+        position: mode === 'terminal' ? 'relative' : 'absolute',
+        width: mode === 'terminal' ? undefined : '100%',
+        height: mode === 'terminal' ? undefined : '100%',
+      }}>
+        <TerminalTab
+          visible={mode === 'terminal'}
+          onLaunchExternal={async () => {
+            const cwd = await window.electronAPI.terminalGetCwd();
+            if (cwd) {
+              window.electronAPI.launchNewClaudeSession(cwd);
+            }
+          }}
+        />
       </div>
 
       {mode !== 'terminal' && (mode === 'sessions' ? (

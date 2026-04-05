@@ -164,6 +164,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resumeShortcut: (key: string) => ipcRenderer.invoke('resume-shortcut', key),
 
   // Terminal (node-pty + xterm.js)
+  terminalGetCwd: () => ipcRenderer.invoke('terminal-get-cwd'),
   terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => ipcRenderer.send('terminal-spawn', options),
   terminalAttach: (cols: number, rows: number) => ipcRenderer.send('terminal-attach', cols, rows),
   terminalInput: (data: string) => ipcRenderer.send('terminal-input', data),

@@ -131,6 +131,7 @@ interface IElectronAPI {
   resumeShortcut: (key: string) => Promise<void>;
 
   // Terminal (node-pty + xterm.js)
+  terminalGetCwd: () => Promise<string | null>;
   terminalSpawn: (options: { cwd?: string; cols?: number; rows?: number }) => void;
   terminalAttach: (cols: number, rows: number) => void;
   terminalInput: (data: string) => void;
