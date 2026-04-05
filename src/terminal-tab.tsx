@@ -95,41 +95,39 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
   }, [visible]);
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#1e1e1e' }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'flex-end',
-        padding: '2px 8px',
-        gap: '6px',
-        flexShrink: 0,
-      }}>
-        <button
-          onClick={() => onLaunchExternal?.()}
-          title="Open new Claude session in external terminal (uses current working directory)"
-          style={{
-            backgroundColor: 'transparent',
-            border: '1px solid #444',
-            borderRadius: '3px',
-            padding: '1px 8px',
-            fontSize: '11px',
-            color: '#aaa',
-            cursor: 'pointer',
-            lineHeight: '18px',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#00BCD4'; e.currentTarget.style.color = '#ddd'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = '#aaa'; }}
-        >
-          Claude in Terminal
-        </button>
-      </div>
+    <div style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#1e1e1e' }}>
       <div
         ref={termRef}
         style={{
-          flex: 1,
+          width: '100%',
+          height: '100%',
           overflow: 'hidden',
-          backgroundColor: '#1e1e1e',
         }}
       />
+      <button
+        onClick={() => onLaunchExternal?.()}
+        title="Open new Claude session in external terminal (uses current working directory)"
+        style={{
+          position: 'absolute',
+          bottom: '6px',
+          right: '8px',
+          backgroundColor: 'rgba(30, 30, 30, 0.85)',
+          border: '1px solid #444',
+          borderRadius: '3px',
+          padding: '2px 8px',
+          fontSize: '11px',
+          color: '#888',
+          cursor: 'pointer',
+          lineHeight: '18px',
+          zIndex: 10,
+          opacity: 0.6,
+          transition: 'opacity 0.2s, border-color 0.2s, color 0.2s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.borderColor = '#00BCD4'; e.currentTarget.style.color = '#ddd'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = '#888'; }}
+      >
+        Claude in Terminal
+      </button>
     </div>
   );
 };
