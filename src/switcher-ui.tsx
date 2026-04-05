@@ -388,7 +388,6 @@ function SwitcherApp() {
 
     // Step 2: Load last assistant responses for all sessions (first 100)
     window.electronAPI.loadLastAssistantResponses((result || []).slice(0, 100)).then((responses: Record<string, string>) => {
-      console.log('[fetchSessions] loaded assistant responses:', Object.keys(responses || {}).length);
       if (responses && Object.keys(responses).length > 0) {
         setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
       }
@@ -437,18 +436,8 @@ function SwitcherApp() {
       }
 
       // Load enrichment (ai-title, branch, PR) for active VS Code sessions
+      const allVSCode = [...vscodeSessions]; // collect for combined enrichment with closed
       if (vscodeSessions.length > 0) {
-        window.electronAPI.loadSessionEnrichment(vscodeSessions).then((enrichment) => {
-          if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
-            setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
-          }
-          if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
-            setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
-          }
-          if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
-            setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
-          }
-        });
         // Use pre-loaded assistant responses (already read from tail in detectActiveSessions)
         const preloaded: Record<string, string> = {};
         for (const vs of vscodeSessions) {
@@ -458,6 +447,50 @@ function SwitcherApp() {
           setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...preloaded }));
         }
       }
+
+      // Step 5: Scan closed VS Code sessions (reuse activeMap from Step 3, no duplicate call)
+      const activeIds = Object.keys(activeMap);
+      window.electronAPI.scanClosedVSCodeSessions(activeIds).then((closedVS: any[]) => {
+        if (closedVS && closedVS.length > 0) {
+          // Merge closed VS Code sessions, deduplicate, sort, cap at 100
+          const mergeAndCap = (prev: any[]) => {
+            const existingIds = new Set(prev.map((s: any) => s.sessionId));
+            const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
+            if (newSessions.length === 0) return prev;
+            const merged = [...prev, ...newSessions];
+            merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+            return merged.slice(0, 100);
+          };
+          setAllSessions((prev: any[]) => { const r = mergeAndCap(prev); allSessionsRef.current = r; return r; });
+          setSessions((prev: any[]) => {
+            const merged = mergeAndCap(prev);
+            return sessionSearchValue.trim() ? filterSessionsLocally(merged, sessionSearchValue) : merged;
+          });
+          allVSCode.push(...closedVS);
+          // Use pre-loaded assistant responses from closed sessions
+          const preloaded: Record<string, string> = {};
+          for (const vs of closedVS) {
+            if (vs.lastAssistantMessage) preloaded[vs.sessionId] = vs.lastAssistantMessage;
+          }
+          if (Object.keys(preloaded).length > 0) {
+            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...preloaded }));
+          }
+        }
+        // Load enrichment for ALL VS Code sessions (active + closed) in one call
+        if (allVSCode.length > 0) {
+          window.electronAPI.loadSessionEnrichment(allVSCode).then((enrichment) => {
+            if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
+              setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
+            }
+            if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
+              setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+            }
+            if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+              setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
+            }
+          });
+        }
+      });
     });
 
     // Step 4: Load custom titles + branches in background
@@ -474,48 +507,6 @@ function SwitcherApp() {
         }
       });
     }
-
-    // Step 5: Scan closed VS Code sessions in background (SWR — async, cached 30s)
-    window.electronAPI.detectActiveSessions().then((res: any) => {
-      const activeIds = Object.keys(res?.activeMap || {});
-      window.electronAPI.scanClosedVSCodeSessions(activeIds).then((closedVS: any[]) => {
-        if (!closedVS || closedVS.length === 0) return;
-        // Merge closed VS Code sessions, deduplicate, sort by time, cap at 100
-        const mergeAndCap = (prev: any[]) => {
-          const existingIds = new Set(prev.map((s: any) => s.sessionId));
-          const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
-          if (newSessions.length === 0) return prev;
-          const merged = [...prev, ...newSessions];
-          merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
-          return merged.slice(0, 100);
-        };
-        setAllSessions((prev: any[]) => { const r = mergeAndCap(prev); allSessionsRef.current = r; return r; });
-        setSessions((prev: any[]) => {
-          const merged = mergeAndCap(prev);
-          return sessionSearchValue.trim() ? filterSessionsLocally(merged, sessionSearchValue) : merged;
-        });
-        // Load enrichment for closed VS Code sessions
-        window.electronAPI.loadSessionEnrichment(closedVS).then((enrichment) => {
-          if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
-            setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
-          }
-          if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
-            setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
-          }
-          if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
-            setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
-          }
-        });
-        // Use pre-loaded assistant responses (already read from tail in scanClosedVSCodeSessions)
-        const preloaded: Record<string, string> = {};
-        for (const vs of closedVS) {
-          if (vs.lastAssistantMessage) preloaded[vs.sessionId] = vs.lastAssistantMessage;
-        }
-        if (Object.keys(preloaded).length > 0) {
-          setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...preloaded }));
-        }
-      });
-    });
   };
 
   const fetchWorkingFolderAndUpdate = async () => {
