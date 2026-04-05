@@ -424,7 +424,7 @@ Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of sessio
 | `claude` or `claude -r` (picker), `/rename`'d but not yet exited | Yes (but detection wrong without cross-ref) | Cross-reference fixes detection ✓ → Title match ✓ | Detection wrong → may click wrong item |
 | `claude` or `claude -r` (picker), never `/rename`'d | No | **Unsolvable** | cwd fallback ✗ |
 
-**Key difference**: iTerm2 and Terminal.app have TTY matching as fallback — when detection has the correct PID, they can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty/cmux lack per-tab TTY, so without a custom title + same cwd, they fall back to cwd matching which may switch to the wrong tab.
+**Key difference**: iTerm2 and Terminal.app have TTY matching as fallback — when detection has the correct PID, they can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty lacks per-tab TTY, so without a custom title + same cwd, it falls back to cwd matching which may switch to the wrong tab. cmux also lacks native TTY in AppleScript, but compensates via its `tree --all` CLI which exposes per-surface TTY for cross-reference.
 
 **Detection with `sessions/` (v1.0.44+)**: Most cases are resolved by direct sessionId matching against history.jsonl. Cross-reference only needed after `/clear` (sessionId mismatch) with multiple same-cwd sessions — a rare combination. The "unsolvable" case (no `/rename` + same cwd) is now limited to cross-reference fallback scenarios, not the primary detection path.
 
