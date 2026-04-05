@@ -382,7 +382,7 @@ Session-related settings are only visible when in Sessions mode (fixes popup int
 | iTerm2 ✅ | `ps` + `lsof` + tty | Title match → TTY fallback | AppleScript: new tab/window + execute | No restriction |
 | Ghostty ✅ | `ps` + parent tree | Title match → cwd fallback | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
 | cmux ✅ | `ps` + `lsof` | Title match → cwd fallback → project name fallback (surface-level) | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll` |
-| Terminal.app | `ps` + tty | AppleScript focus | AppleScript: new tab + execute | No restriction |
+| Terminal.app ✅ | `ps` + tty | Title match → TTY fallback | AppleScript: new tab/window + execute | No restriction |
 | Custom | — | — | User command template / clipboard | — |
 
 ### Same-CWD Session Matching
@@ -410,12 +410,12 @@ When multiple sessions share the same project path, there are two separate conce
 | `-n "name"` / `--resume "title"` | Match against custom titles | All |
 | `claude -r` (picker) / bare `claude` | cwd fallback + cross-ref | iTerm2/cmux (with `/rename`) |
 
-Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of session` AppleScript; cmux: `tree --all` tty= field), then match tab name against custom titles. Requires `/rename`. Ghostty pending upstream TTY ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
+Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of session` AppleScript; Terminal.app: `tty of tab` AppleScript; cmux: `tree --all` tty= field), then match tab name against custom titles. Requires `/rename`. Ghostty pending upstream TTY ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
 
 #### Switch layer (click → jump to correct tab)
 
-| Launch command | Has custom title? | iTerm2 | Ghostty / cmux |
-|----------------|-------------------|--------|----------------|
+| Launch command | Has custom title? | iTerm2 / Terminal.app | Ghostty / cmux |
+|----------------|-------------------|----------------------|----------------|
 | Any with `/rename` | Yes | Title match ✓ | Title match ✓ |
 | `claude -n "name"` | Yes (`-n` sets title) | Title match ✓ | Title match ✓ |
 | `claude -r "title"` | Yes (resume by title) | Title match ✓ | Title match ✓ |
@@ -424,7 +424,7 @@ Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of sessio
 | `claude` or `claude -r` (picker), `/rename`'d but not yet exited | Yes (but detection wrong without cross-ref) | Cross-reference fixes detection ✓ → Title match ✓ | Detection wrong → may click wrong item |
 | `claude` or `claude -r` (picker), never `/rename`'d | No | **Unsolvable** | cwd fallback ✗ |
 
-**Key difference**: iTerm2 has TTY matching as fallback — when detection has the correct PID, it can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty/cmux lack per-tab TTY, so without a custom title + same cwd, they fall back to cwd matching which may switch to the wrong tab.
+**Key difference**: iTerm2 and Terminal.app have TTY matching as fallback — when detection has the correct PID, they can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty/cmux lack per-tab TTY, so without a custom title + same cwd, they fall back to cwd matching which may switch to the wrong tab.
 
 **Detection with `sessions/` (v1.0.44+)**: Most cases are resolved by direct sessionId matching against history.jsonl. Cross-reference only needed after `/clear` (sessionId mismatch) with multiple same-cwd sessions — a rare combination. The "unsolvable" case (no `/rename` + same cwd) is now limited to cross-reference fallback scenarios, not the primary detection path.
 
