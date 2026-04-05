@@ -134,12 +134,23 @@ Use case: user cd'd to the right place in CodeV terminal but wants the Claude se
 
 ### Command Construction
 
-For all terminal types, the launch command is:
+For terminal-based launch, the command is:
 ```bash
 cd "<project-path>" && claude
 ```
 
 This reuses the same pattern as existing session resume (`cd "<path>" && claude --resume <id>`), just without the `--resume` flag.
+
+For **VS Code** launch, use the URI handler instead (no `cd` needed):
+```bash
+# Open project folder first (if not already open), then launch Claude Code tab
+code "<project-path>"
+open "vscode://anthropic.claude-code/open"
+
+# Or with a pre-filled prompt:
+open "vscode://anthropic.claude-code/open?prompt=<encoded-text>"
+```
+See `docs/vscode-session-support-design.md` Layer 9 for details. Requires Claude Code VS Code extension v2.1.72+.
 
 ### Terminal-Specific Launch
 
@@ -148,6 +159,7 @@ Each terminal already has launch logic in `claude-session-utility.ts`:
 - **Ghostty**: AppleScript `new surface configuration` with `initial input`
 - **cmux**: CLI `new-workspace --command`
 - **Terminal.app**: AppleScript `do script`
+- **VS Code**: `code <path>` + URI handler `vscode://anthropic.claude-code/open`
 - **CodeV**: `terminalInput()` IPC to embedded PTY
 
 The new `launchNewClaudeSession()` function can delegate to these same implementations.
@@ -155,8 +167,8 @@ The new `launchNewClaudeSession()` function can delegate to these same implement
 ### Settings Integration
 
 Uses existing settings:
-- `session-terminal-app`: which terminal to use (iterm2/ghostty/cmux/terminal)
-- `session-terminal-mode`: tab or window
+- `session-terminal-app`: which terminal to use (iterm2/ghostty/cmux/terminal/vscode)
+- `session-terminal-mode`: tab or window (not applicable to VS Code)
 
 No new settings needed for Phase 1. Phase 2's `@terminal` override is per-invocation, not persisted.
 
