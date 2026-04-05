@@ -424,7 +424,8 @@ function SwitcherApp() {
       setAllSessions((prev: any[]) => { const r = updateActive(prev); allSessionsRef.current = r; return r; });
       setSessions((prev: any[]) => {
         const updated = updateActive(prev);
-        return sessionSearchValue.trim() ? filterSessionsLocally(updated, sessionSearchValue) : updated;
+        const search = sessionSearchRef2.current;
+        return search.trim() ? filterSessionsLocally(updated, search) : updated;
       });
 
       if (Object.keys(activeMap).length > 0) {
@@ -465,7 +466,8 @@ function SwitcherApp() {
           setAllSessions((prev: any[]) => { const r = mergeAndCap(prev); allSessionsRef.current = r; return r; });
           setSessions((prev: any[]) => {
             const merged = mergeAndCap(prev);
-            return sessionSearchValue.trim() ? filterSessionsLocally(merged, sessionSearchValue) : merged;
+            const search = sessionSearchRef2.current;
+            return search.trim() ? filterSessionsLocally(merged, search) : merged;
           });
           allVSCode.push(...closedVS);
           // Use pre-loaded assistant responses from closed sessions
