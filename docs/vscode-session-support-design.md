@@ -112,6 +112,26 @@ Characteristics:
 - AI-generated, descriptive (e.g., "Casual greeting and session start")
 - See #104 for applying ai-title fallback to all sessions
 
+### Layer 8: Real-time Preview Refresh
+
+When a session becomes idle (Stop hook → fs.watch → status update):
+1. fs.watch fires (debounced 50ms to avoid 3-6x duplicate triggers on macOS)
+2. Status update sent to renderer with `{status, timestamp}` per session
+3. Renderer compares status timestamp vs last fetch timestamp (avoids unreliable working→idle transition detection)
+4. After 300ms delay (ensures JSONL fully flushed): `refreshSessionPreview()` reads `tail -n 100`
+5. Single tail read extracts both last user message + last assistant message
+6. Updates `assistantResponses`, `lastUserMessage`, `lastTimestamp`, and re-sorts session list
+
+### Layer 9: Launch New Session
+
+```bash
+# Open new Claude Code tab in VS Code
+open "vscode://anthropic.claude-code/open"
+
+# Open with pre-filled prompt
+open "vscode://anthropic.claude-code/open?prompt=help%20me%20review%20this%20PR"
+```
+
 ## Performance
 
 | Operation | Cost | Notes |
@@ -126,6 +146,7 @@ Characteristics:
 | Hooks index write | ~5ms/event | Per hook event, marker file prevents duplicates |
 | Session count | capped at 100 | Sort by timestamp, then slice after merge |
 | Timestamp normalization | +0ms | ISO string → unix ms conversion in reader |
+| Real-time refresh | ~2ms/session | Single tail-100, 300ms delay, debounced fs.watch |
 
 ## VS Code URI Handler Reference
 
