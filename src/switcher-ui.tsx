@@ -346,6 +346,7 @@ function SwitcherApp() {
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>('projects');
   const activeStateRef = useRef<Record<string, number>>({});
+  const allSessionsRef = useRef<any[]>([]);
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -381,6 +382,7 @@ function SwitcherApp() {
       return s;
     });
     setAllSessions(newSessions);
+    allSessionsRef.current = newSessions;
     setSessions(sessionSearchValue.trim() ? filterSessionsLocally(newSessions, sessionSearchValue) : newSessions);
 
     // Step 2: Load last assistant responses for all sessions (first 100)
@@ -417,7 +419,7 @@ function SwitcherApp() {
         updated.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
         return updated;
       };
-      setAllSessions((prev: any[]) => updateActive(prev));
+      setAllSessions((prev: any[]) => { const r = updateActive(prev); allSessionsRef.current = r; return r; });
       setSessions((prev: any[]) => {
         const updated = updateActive(prev);
         return sessionSearchValue.trim() ? filterSessionsLocally(updated, sessionSearchValue) : updated;
@@ -485,7 +487,7 @@ function SwitcherApp() {
           merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
           return merged.slice(0, 100);
         };
-        setAllSessions((prev: any[]) => mergeAndCap(prev));
+        setAllSessions((prev: any[]) => { const r = mergeAndCap(prev); allSessionsRef.current = r; return r; });
         setSessions((prev: any[]) => {
           const merged = mergeAndCap(prev);
           return sessionSearchValue.trim() ? filterSessionsLocally(merged, sessionSearchValue) : merged;
@@ -599,8 +601,9 @@ function SwitcherApp() {
         );
         if (newlyIdle.length > 0) {
           // Re-fetch last assistant response for sessions that just finished
+          const currentSessions = allSessionsRef.current;
           const sessionsToRefresh = newlyIdle.map(([id]) => {
-            const s = allSessions.find((s: any) => s.sessionId === id);
+            const s = currentSessions.find((s: any) => s.sessionId === id);
             return s || { sessionId: id, project: '' };
           }).filter((s: any) => s.project);
           if (sessionsToRefresh.length > 0) {
