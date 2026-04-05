@@ -1101,7 +1101,16 @@ function SwitcherApp() {
                               padding: '1px 4px',
                               textTransform: 'uppercase',
                             }}>
-                              {badge}
+                              <Highlighter
+                                searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                                textToHighlight={badge}
+                                highlightStyle={{
+                                  backgroundColor: 'rgba(200, 200, 200, 0.25)',
+                                  color: '#fff',
+                                  padding: '0 1px',
+                                  borderRadius: '2px',
+                                }}
+                              />
                             </span>
                           ) : null;
                         })()}
