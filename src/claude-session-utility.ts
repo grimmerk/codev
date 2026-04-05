@@ -7,6 +7,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -1309,8 +1310,11 @@ export const launchNewClaudeSession = (
   terminalMode: string = 'tab',
 ): void => {
   if (terminalApp === 'vscode') {
-    const { execFile } = require('child_process');
-    execFile('code', [projectPath], (error: any) => {
+    const { exec, execFile } = require('child_process');
+    // Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
+    const bundleId = getCurrentIDEBundleId();
+    const escapedPath = projectPath.replace(/ /g, '\\ ');
+    exec(`open -b ${bundleId} ${escapedPath}`, (error: any) => {
       if (error) {
         console.error('[launchNewClaudeSession] failed to open VS Code:', error);
         return;
@@ -1336,11 +1340,14 @@ export const launchNewClaudeSession = (
  * For closed sessions: opens the project folder first, then resumes via URI handler.
  */
 export const openSessionInVSCode = (sessionId: string, projectPath?: string): void => {
-  const { execFile } = require('child_process');
+  const { exec, execFile } = require('child_process');
 
   if (projectPath) {
     // Closed session: open project folder first, then resume after a short delay
-    execFile('code', [projectPath], (error: any) => {
+    // Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
+    const bundleId = getCurrentIDEBundleId();
+    const escapedPath = projectPath.replace(/ /g, '\\ ');
+    exec(`open -b ${bundleId} ${escapedPath}`, (error: any) => {
       if (error) {
         console.error('[openSessionInVSCode] failed to open project:', error);
         return;

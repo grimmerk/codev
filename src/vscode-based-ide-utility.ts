@@ -258,6 +258,13 @@ async function deleteVSCodeBasedIDEEntry(
   }
 }
 
+/** Get bundle ID for the current IDE (VS Code or Cursor) */
+export const getCurrentIDEBundleId = (): string => {
+  return currentIDEMode === IDEMode.VSCode
+    ? 'com.microsoft.VSCode'
+    : 'com.todesktop.230313mzl4w4u92';
+};
+
 export const openVSCodeBasedIDE = (
   path: string,
   ifForceReuseWin: boolean = false,
