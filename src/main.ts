@@ -1860,13 +1860,15 @@ ipcMain.handle('get-session-statuses', async () => {
 
   // Scan active sessions that don't have status files yet + cleanup stale ones
   try {
-    const activeMap = await detectActiveSessions();
+    const { activeMap, vscodeSessions } = await detectActiveSessions();
     cleanupStaleStatuses(new Set(activeMap.keys()));
     const allSessions = readClaudeSessions(500); // hoisted out of loop
+    // Merge VS Code sessions for status scanning
+    const allKnown = [...allSessions, ...vscodeSessions];
     const sessionsWithoutStatus = Array.from(activeMap.entries())
       .filter(([sessionId]) => !obj[sessionId])
       .map(([sessionId]) => {
-        const session = allSessions.find((s: any) => s.sessionId === sessionId);
+        const session = allKnown.find((s: any) => s.sessionId === sessionId);
         return session ? { sessionId, project: session.project } : null;
       })
       .filter(Boolean) as { sessionId: string; project: string }[];
@@ -1926,13 +1928,22 @@ ipcMain.handle('search-claude-sessions', (_event, query: string) => {
 });
 
 ipcMain.handle('detect-active-sessions', async () => {
-  const activeMap = await detectActiveSessions();
-  return Object.fromEntries(activeMap);
+  const { activeMap, vscodeSessions, entrypoints } = await detectActiveSessions();
+  return {
+    activeMap: Object.fromEntries(activeMap),
+    vscodeSessions,
+    entrypoints: Object.fromEntries(entrypoints),
+  };
 });
 
-ipcMain.handle('detect-terminal-apps', async (_event, pidMap: Record<string, number>) => {
+ipcMain.handle('detect-terminal-apps', async (_event, pidMap: Record<string, number>, entrypointMap: Record<string, string>) => {
   const results: Record<string, string> = {};
   await Promise.all(Object.entries(pidMap).map(async ([sessionId, pid]) => {
+    // VS Code sessions: return 'vscode' directly without process tree walk
+    if (entrypointMap && entrypointMap[sessionId] === 'claude-vscode') {
+      results[sessionId] = 'vscode';
+      return;
+    }
     results[sessionId] = await detectTerminalApp(pid);
   }));
   return results;

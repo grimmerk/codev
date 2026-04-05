@@ -49,8 +49,12 @@ interface IElectronAPI {
   // Claude Code sessions
   getClaudeSessions: (limit?: number) => Promise<any>;
   searchClaudeSessions: (query: string) => Promise<any>;
-  detectActiveSessions: () => Promise<Record<string, number>>;
-  detectTerminalApps: (pidMap: Record<string, number>) => Promise<Record<string, string>>;
+  detectActiveSessions: () => Promise<{
+    activeMap: Record<string, number>;
+    vscodeSessions: any[];
+    entrypoints: Record<string, string>;
+  }>;
+  detectTerminalApps: (pidMap: Record<string, number>, entrypointMap?: Record<string, string>) => Promise<Record<string, string>>;
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;
   loadSessionEnrichment: (sessions: any[]) => Promise<{ titles: Record<string, string>; branches: Record<string, string>; prLinks: Record<string, { prNumber: number; prUrl: string }> }>;

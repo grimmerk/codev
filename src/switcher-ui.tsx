@@ -389,33 +389,50 @@ function SwitcherApp() {
       }
     });
 
-    // Step 3: Detect active sessions in background (slow, spawns processes)
-    window.electronAPI.detectActiveSessions().then((activeMap: Record<string, number>) => {
+    // Step 3: Detect active sessions in background (spawns processes)
+    window.electronAPI.detectActiveSessions().then((result: any) => {
+      const activeMap: Record<string, number> = result?.activeMap || {};
+      const vscodeSessions: any[] = result?.vscodeSessions || [];
+      const entrypointMap: Record<string, string> = result?.entrypoints || {};
+
       // Save to ref for SWR on next refresh
-      activeStateRef.current = activeMap || {};
+      activeStateRef.current = activeMap;
 
-      const updateActive = (list: any[]) => list.map((s) => ({
-        ...s,
-        isActive: s.sessionId in (activeMap || {}),
-        activePid: (activeMap || {})[s.sessionId],
-      }));
-      setAllSessions((prev: any[]) => updateActive(prev));
-      setSessions((prev: any[]) => updateActive(prev));
-
-      if (activeMap && Object.keys(activeMap).length > 0) {
-
-        // Step 2c: Detect terminal apps for active sessions
-        if (Object.keys(activeMap).length > 0) {
-          window.electronAPI.detectTerminalApps(activeMap).then((apps: Record<string, string>) => {
-            if (apps && Object.keys(apps).length > 0) {
-              setTerminalApps((prev: Record<string, string>) => ({ ...prev, ...apps }));
-            }
-          });
+      const updateActive = (list: any[]) => {
+        // Mark existing sessions as active/inactive
+        const updated = list.map((s: any) => ({
+          ...s,
+          isActive: s.sessionId in activeMap,
+          activePid: activeMap[s.sessionId],
+          entrypoint: entrypointMap[s.sessionId] || s.entrypoint,
+        }));
+        // Merge VS Code sessions that aren't already in the list
+        for (const vs of vscodeSessions) {
+          if (!updated.find((s: any) => s.sessionId === vs.sessionId)) {
+            updated.push({ ...vs, entrypoint: 'claude-vscode' });
+          }
         }
+        // Re-sort by lastTimestamp descending
+        updated.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+        return updated;
+      };
+      setAllSessions((prev: any[]) => updateActive(prev));
+      setSessions((prev: any[]) => {
+        const updated = updateActive(prev);
+        return sessionSearchValue.trim() ? filterSessionsLocally(updated, sessionSearchValue) : updated;
+      });
+
+      if (Object.keys(activeMap).length > 0) {
+        // Detect terminal apps for active sessions (pass entrypoints to skip process tree walk for VS Code)
+        window.electronAPI.detectTerminalApps(activeMap, entrypointMap).then((apps: Record<string, string>) => {
+          if (apps && Object.keys(apps).length > 0) {
+            setTerminalApps((prev: Record<string, string>) => ({ ...prev, ...apps }));
+          }
+        });
       }
     });
 
-    // Step 3: Load custom titles + branches in background
+    // Step 4: Load custom titles + branches in background
     if (result && result.length > 0) {
       window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment) => {
         if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {

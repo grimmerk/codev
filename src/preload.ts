@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getClaudeSessions: (limit?: number) => ipcRenderer.invoke('get-claude-sessions', limit),
   searchClaudeSessions: (query: string) => ipcRenderer.invoke('search-claude-sessions', query),
   detectActiveSessions: () => ipcRenderer.invoke('detect-active-sessions'),
-  detectTerminalApps: (pidMap: Record<string, number>) => ipcRenderer.invoke('detect-terminal-apps', pidMap),
+  detectTerminalApps: (pidMap: Record<string, number>, entrypointMap?: Record<string, string>) => ipcRenderer.invoke('detect-terminal-apps', pidMap, entrypointMap),
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) =>
     ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid, customTitle),
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>
