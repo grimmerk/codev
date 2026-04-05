@@ -388,6 +388,7 @@ function SwitcherApp() {
 
     // Step 2: Load last assistant responses for all sessions (first 100)
     window.electronAPI.loadLastAssistantResponses((result || []).slice(0, 100)).then((responses: Record<string, string>) => {
+      console.log('[fetchSessions] loaded assistant responses:', Object.keys(responses || {}).length);
       if (responses && Object.keys(responses).length > 0) {
         setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
       }
@@ -625,11 +626,15 @@ function SwitcherApp() {
         for (const s of sessionsToRefresh) {
           lastAssistantFetchRef.current[s.sessionId] = now;
         }
-        window.electronAPI.loadLastAssistantResponses(sessionsToRefresh).then((responses: Record<string, string>) => {
-          if (responses && Object.keys(responses).length > 0) {
-            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
-          }
-        });
+        // Small delay to ensure JSONL is fully flushed after Stop hook
+        setTimeout(() => {
+          window.electronAPI.loadLastAssistantResponses(sessionsToRefresh).then((responses: Record<string, string>) => {
+            console.log('[status-refresh] re-fetched assistant responses:', Object.keys(responses).length, 'sessions');
+            if (responses && Object.keys(responses).length > 0) {
+              setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+            }
+          });
+        }, 300);
       }
     });
 
