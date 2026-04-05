@@ -1425,7 +1425,11 @@ function SwitcherApp() {
         }}
         // Custom components
         components={{
-          DropdownIndicator: null,
+          DropdownIndicator: () => (
+            <div style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}>
+              {'\u2318+Enter: New Claude'}
+            </div>
+          ),
           Option: (props) => OptionUI(props, onDeleteClick, (path: string) => {
             window.electronAPI.launchNewClaudeSession(path);
           }),

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.68
+
+- Feat: quick-launch new Claude session from Projects tab
+  - `Cmd+Enter`: launch in default Launch Terminal
+  - `Shift+Enter`: launch in CodeV embedded terminal
+  - `Cmd+Click`: launch in default Launch Terminal
+  - Supports all terminals: iTerm2, Ghostty, Terminal.app, cmux, VS Code, CodeV
+- Feat: Terminal tab "Claude in Terminal" overlay button (launches in external terminal using current cwd)
+- Feat: Launch Terminal + Launch Mode moved to General settings (visible on all tabs)
+- Feat: Settings popup scrollable + no auto-close on outside click
+- Fix: search crash on regex special characters (`+`, `*`, `?`) via `autoEscape`
+- Fix: cold-start extra window for iTerm2/Terminal.app (pgrep detection)
+- Fix: VS Code extra Dock icon (use `open -b bundleId` instead of `code` CLI)
+- Fix: terminal tab rendering flash on tab switch (#99, visibility instead of display)
+- Refactor: shared `runCommandInTerminal` for resume + new session launch
+- Style: title bar renamed to "CodeV"
+
 ## 1.0.67
 
 - Feat: VS Code Claude Code session support — detect, display, switch, resume
