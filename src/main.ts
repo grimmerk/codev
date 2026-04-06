@@ -110,8 +110,6 @@ const showSwitcherWindow = () => {
     const position = getWindowPosition();
     window.setPosition(position.x, position.y, false);
   }
-  // Send app mode to renderer so it can enable/disable drag region
-  window.webContents.send('app-mode-changed', appMode);
   if (window.isMinimized()) {
     window.restore();
   }

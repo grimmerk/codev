@@ -362,6 +362,7 @@ function SwitcherApp() {
   const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
   const [currentAppMode, setCurrentAppMode] = useState('menubar');
   const [modeBanner, setModeBanner] = useState<string | null>(null);
+  const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -667,6 +668,18 @@ function SwitcherApp() {
             });
           });
         }, 300);
+      }
+    });
+
+    // Load shortcut for display
+    window.electronAPI.getShortcuts().then((s: any) => {
+      if (s?.quickSwitcher) {
+        // Convert Electron accelerator to display format
+        const display = s.quickSwitcher
+          .replace('Command', 'Cmd')
+          .replace('Control', 'Ctrl')
+          .replace(/\+/g, '+');
+        setQuickSwitcherShortcut(display);
       }
     });
 
@@ -983,6 +996,11 @@ function SwitcherApp() {
         </div>
         {/* @ts-ignore */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
+          {quickSwitcherShortcut && (
+            <span style={{ fontSize: '10px', color: '#555' }}>
+              {quickSwitcherShortcut}
+            </span>
+          )}
           <div
             style={{
               display: 'flex',
