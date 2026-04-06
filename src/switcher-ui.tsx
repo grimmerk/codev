@@ -361,6 +361,7 @@ function SwitcherApp() {
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
   const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
   const [currentAppMode, setCurrentAppMode] = useState('menubar');
+  const [modeBanner, setModeBanner] = useState<string | null>(null);
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -671,10 +672,23 @@ function SwitcherApp() {
 
     // Listen for app mode changes to enable/disable drag
     window.electronAPI.getAppMode().then((mode: string) => {
-      setCurrentAppMode(mode || 'menubar');
+      const m = mode || 'normal';
+      setCurrentAppMode(m);
+      // Show banner on first launch for new users
+      if (m === 'normal') {
+        setModeBanner('Normal App mode — drag to reposition. Switch to Menu Bar mode in Settings.');
+        setTimeout(() => setModeBanner(null), 6000);
+      }
     });
     window.electronAPI.onAppModeChanged((_event: any, mode: string) => {
       setCurrentAppMode(mode);
+      // Show banner on mode change
+      if (mode === 'normal') {
+        setModeBanner('Switched to Normal App mode — window stays visible and is draggable.');
+      } else {
+        setModeBanner('Switched to Menu Bar mode — window auto-hides. Use Cmd+Ctrl+R to toggle.');
+      }
+      setTimeout(() => setModeBanner(null), 5000);
     });
 
     window.electronAPI.onCheckTerminalAndHide(() => {
@@ -961,6 +975,11 @@ function SwitcherApp() {
             ) : mode === 'terminal' ? '💻' : '📂'}
           </span>
           CodeV
+          {currentAppMode && (
+            <span style={{ fontSize: '10px', color: '#666', fontWeight: 'normal', marginLeft: '6px' }}>
+              {currentAppMode === 'normal' ? 'Normal' : 'Menu Bar'}
+            </span>
+          )}
         </div>
         {/* @ts-ignore */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
@@ -1052,6 +1071,28 @@ function SwitcherApp() {
           }}
         />
       </div>
+
+      {/* Mode change banner */}
+      {modeBanner && (
+        <div style={{
+          padding: '6px 15px',
+          backgroundColor: 'rgba(0, 188, 212, 0.1)',
+          borderBottom: '1px solid rgba(0, 188, 212, 0.2)',
+          fontSize: '11px',
+          color: '#8ecfda',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span>{modeBanner}</span>
+          <span
+            style={{ cursor: 'pointer', color: '#666', marginLeft: '8px' }}
+            onClick={() => setModeBanner(null)}
+          >
+            x
+          </span>
+        </div>
+      )}
 
       {mode !== 'terminal' && (mode === 'sessions' ? (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>

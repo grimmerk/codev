@@ -517,6 +517,11 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     switcherWindow = createSwitcherWindow();
   }
+  // Normal mode: clicking Dock icon shows hidden window
+  const window = getSwitcherWindow();
+  if (window && !window.isVisible()) {
+    showSwitcherWindow();
+  }
 });
 
 /** https://www.electronjs.org/docs/latest/tutorial/ipc */
