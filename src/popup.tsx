@@ -472,7 +472,7 @@ const PopupDefaultExample = ({
             </div>
             {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'terminal' || sessionTerminalApp === 'ghostty') && (
               <div style={rowStyle}>
-                <span style={{ ...labelStyle, paddingLeft: '16px', fontSize: '13px', color: '#aaa' }}>Open In</span>
+                <span style={{ ...labelStyle, paddingLeft: '12px', fontSize: '13px', color: '#aaa' }}>{'\u21B3'} Open In</span>
                 <select
                   value={sessionTerminalMode}
                   onChange={(e) => {
