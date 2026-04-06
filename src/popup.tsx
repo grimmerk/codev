@@ -350,53 +350,6 @@ const PopupDefaultExample = ({
           {settingsTab === 'general' && (
           <div style={{ padding: '4px 0' }}>
             <div style={rowStyle}>
-              <span style={labelStyle}>Default Tab</span>
-              <select
-                value={defaultSwitcherMode}
-                onChange={(e) => {
-                  const mode = e.target.value;
-                  setDefaultSwitcherMode(mode);
-                  window.electronAPI.setDefaultSwitcherMode(mode);
-                }}
-                style={selectStyle}
-              >
-                <option value="projects">Projects</option>
-                <option value="sessions">Sessions</option>
-                <option value="terminal">Terminal</option>
-              </select>
-            </div>
-            <div style={rowStyle}>
-              <span style={labelStyle}>App Mode</span>
-              <select
-                value={appModeState}
-                onChange={(e) => {
-                  const mode = e.target.value;
-                  setAppModeState(mode);
-                  window.electronAPI.setAppMode(mode);
-                }}
-                style={selectStyle}
-              >
-                <option value="normal">Normal App</option>
-                <option value="menubar">Menu Bar</option>
-              </select>
-            </div>
-            <div style={rowStyle}>
-              <span style={labelStyle}>Left-Click</span>
-              <select
-                value={leftClickBehavior}
-                onChange={(e) => {
-                  const behavior = e.target.value;
-                  setLeftClickBehavior(behavior);
-                  window.electronAPI.setLeftClickBehavior(behavior);
-                }}
-                style={selectStyle}
-              >
-                <option value="switcher_window">Quick Switcher</option>
-                <option value="ai_assistant">AI Insight Chat</option>
-                <option value="pure_chat">AI Smart Chat</option>
-              </select>
-            </div>
-            <div style={rowStyle}>
               <span style={labelStyle}>Launch at Login</span>
               <label
                 style={{
@@ -439,9 +392,55 @@ const PopupDefaultExample = ({
                 />
               </label>
             </div>
-            {switcherMode !== 'sessions' && (
-              <div style={{ ...rowStyle, gap: '8px' }}>
-                <span style={labelStyle}>Working Dir</span>
+            <div style={rowStyle}>
+              <span style={labelStyle}>App Mode</span>
+              <select
+                value={appModeState}
+                onChange={(e) => {
+                  const mode = e.target.value;
+                  setAppModeState(mode);
+                  window.electronAPI.setAppMode(mode);
+                }}
+                style={selectStyle}
+              >
+                <option value="normal">Normal App</option>
+                <option value="menubar">Menu Bar</option>
+              </select>
+            </div>
+            <div style={rowStyle}>
+              <span style={labelStyle}>Left-Click <span style={{ fontSize: '9px', color: '#666' }}>(tray)</span></span>
+              <select
+                value={leftClickBehavior}
+                onChange={(e) => {
+                  const behavior = e.target.value;
+                  setLeftClickBehavior(behavior);
+                  window.electronAPI.setLeftClickBehavior(behavior);
+                }}
+                style={selectStyle}
+              >
+                <option value="switcher_window">Quick Switcher</option>
+                <option value="ai_assistant">AI Insight Chat</option>
+                <option value="pure_chat">AI Smart Chat</option>
+              </select>
+            </div>
+            <div style={rowStyle}>
+              <span style={labelStyle}>Default Tab</span>
+              <select
+                value={defaultSwitcherMode}
+                onChange={(e) => {
+                  const mode = e.target.value;
+                  setDefaultSwitcherMode(mode);
+                  window.electronAPI.setDefaultSwitcherMode(mode);
+                }}
+                style={selectStyle}
+              >
+                <option value="projects">Projects</option>
+                <option value="sessions">Sessions</option>
+                <option value="terminal">Terminal</option>
+              </select>
+            </div>
+            <div style={{ ...rowStyle, gap: '8px' }}>
+              <span style={labelStyle}>Working Dir <span style={{ fontSize: '9px', color: '#666' }}>(projects/term)</span></span>
                 <div style={{ color: '#aaa', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>
                   {workingFolderPath || 'None'}
                 </div>
@@ -452,10 +451,9 @@ const PopupDefaultExample = ({
                 >
                   📁
                 </button>
-              </div>
-            )}
+            </div>
             <div style={rowStyle}>
-              <span style={labelStyle}>Launch Terminal</span>
+              <span style={labelStyle}>Launch Terminal <span style={{ fontSize: '9px', color: '#666' }}>(sessions)</span></span>
               <select
                 value={sessionTerminalApp}
                 onChange={(e) => {
@@ -466,7 +464,7 @@ const PopupDefaultExample = ({
                 style={selectStyle}
               >
                 <option value="iterm2">iTerm2</option>
-                <option value="terminal">Terminal</option>
+                <option value="terminal">Terminal.app</option>
                 <option value="ghostty">Ghostty</option>
                 <option value="cmux">cmux</option>
                 <option value="vscode">VS Code</option>
@@ -474,7 +472,7 @@ const PopupDefaultExample = ({
             </div>
             {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'terminal' || sessionTerminalApp === 'ghostty') && (
               <div style={rowStyle}>
-                <span style={labelStyle}>Launch Mode</span>
+                <span style={labelStyle}>Launch Mode <span style={{ fontSize: '9px', color: '#666' }}>(tab/window)</span></span>
                 <select
                   value={sessionTerminalMode}
                   onChange={(e) => {
@@ -490,7 +488,7 @@ const PopupDefaultExample = ({
               </div>
             )}
             <div style={{ ...rowStyle, gap: '6px' }}>
-              <span style={labelStyle}>IDE</span>
+              <span style={labelStyle}>IDE <span style={{ fontSize: '9px', color: '#666' }}>(projects)</span></span>
               <select
                 value={idePreference}
                 onChange={(e) => {
@@ -687,19 +685,6 @@ const PopupDefaultExample = ({
               </div>
             ))}
             <div style={{ borderTop: '1px solid #333', marginTop: '8px', paddingTop: '6px' }}>
-              <span style={{ fontSize: '11px', color: '#666' }}>Claude Session Launch</span>
-              {[
-                { keys: '\u2318+Enter', label: 'New Claude Session' },
-                { keys: '\u21E7+Enter', label: 'New Claude (CodeV Term)' },
-                { keys: '\u2318+Click', label: 'New Claude Session' },
-              ].map((row) => (
-                <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-                  <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
-                  <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ borderTop: '1px solid #333', marginTop: '6px', paddingTop: '6px' }}>
               <span style={{ fontSize: '11px', color: '#666' }}>Tab Switching</span>
               {[
                 { keys: 'Tab', label: 'Projects \u2194 Sessions' },
@@ -708,6 +693,19 @@ const PopupDefaultExample = ({
                 { keys: '\u2318+1/2/3', label: 'Jump to Tab' },
               ].map((row) => (
                 <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
+                  <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ borderTop: '1px solid #333', marginTop: '6px', paddingTop: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#666' }}>Claude Session Launch <span style={{ color: '#555' }}>(in Projects)</span></span>
+              {[
+                { keys: '\u2318+Enter', label: 'New Claude Session' },
+                { keys: '\u21E7+Enter', label: 'New Claude (CodeV Term)' },
+                { keys: '\u2318+Click', label: 'New Claude Session' },
+              ].map((row) => (
+                <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
                   <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
                   <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
                 </div>
