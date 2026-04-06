@@ -11,10 +11,10 @@ Quick switcher for VS Code/Cursor projects, Claude Code session manager with liv
 Press `⌃+⌘+R` or click the menu bar icon to launch the Quick Switcher. Search and select a project to open or switch to it in VS Code or Cursor — even if the IDE is not running yet. In Normal App mode, the window stays visible for monitoring; in Menu Bar mode, it works like Spotlight.
 
 - **Recent projects** (white items): your latest VS Code/Cursor folders, workspaces, and recently opened files — read directly from IDE data, no extension required
-- **Working folder items** (green items): first-level subfolders found by scanning a folder you choose (Settings → Working Directory)
+- **Working folder items** (green items): first-level subfolders found by scanning a folder you choose (Settings → General → Working Dir)
 - **Git branch display**: shows the current branch for each recently opened project
 - Multi-word search across project names, paths, and branch names
-- Supports VS Code and Cursor — switch between them in Settings → IDE Preference
+- Supports VS Code and Cursor — switch between them in Settings → General → IDE
 - Remove items from the recent list by hovering and clicking "x"
 - **Quick-launch Claude session**: `⌘+Enter` to launch a new Claude Code session in the configured terminal, `⇧+Enter` to launch in CodeV's embedded terminal, `⌘+Click` as mouse alternative
 
@@ -46,7 +46,7 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same technology as VS Code's integrated terminal). Press `⌃+⌘+T` from anywhere (global shortcut) or `⌘+3` when CodeV is in foreground to open it.
 
 - Pre-spawned on app start for instant access
-- Default working directory: Settings → Working Directory (fallback to home)
+- Default working directory: Settings → General → Working Dir (fallback to home)
 - Terminal state preserved when switching tabs
 - `⌘+K` clears screen, `Shift+Enter` for multi-line input (Claude Code compatible)
 - `Cmd+←/→` jumps to beginning/end of line
@@ -54,7 +54,7 @@ CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same tec
 
 ### App Mode
 
-CodeV supports two window modes, configurable in Settings → App Mode:
+CodeV supports two window modes, configurable in Settings → General → App Mode:
 
 | | Normal App (default) | Menu Bar |
 |--|--|--|
