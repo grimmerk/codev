@@ -1367,7 +1367,7 @@ const isVSCodeProjectOpen = (projectPath: string): boolean => {
  * Resolves when lock file with matching workspaceFolders + alive PID is found,
  * or after timeout (fallback).
  */
-const waitForVSCodeExtensionReady = (projectPath: string, timeoutMs = 8000, intervalMs = 300): Promise<void> => {
+const waitForVSCodeExtensionReady = (projectPath: string, timeoutMs = 5000, intervalMs = 250): Promise<void> => {
   return new Promise((resolve) => {
     // Quick check — maybe it's already ready
     if (isVSCodeProjectOpen(projectPath)) { resolve(); return; }
