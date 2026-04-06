@@ -8,7 +8,7 @@ Quick switcher for VS Code/Cursor projects, Claude Code session manager with liv
 
 ### Quick Switcher for VS Code / Cursor Projects
 
-Spotlight-like quick open: press `⌃+⌘+R` or click the menu bar icon to launch the Quick Switcher. Search and select a project to open or switch to it in VS Code or Cursor — even if the IDE is not running yet.
+Press `⌃+⌘+R` or click the menu bar icon to launch the Quick Switcher. Search and select a project to open or switch to it in VS Code or Cursor — even if the IDE is not running yet. In Normal App mode, the window stays visible for monitoring; in Menu Bar mode, it works like Spotlight.
 
 - **Recent projects** (white items): your latest VS Code/Cursor folders, workspaces, and recently opened files — read directly from IDE data, no extension required
 - **Working folder items** (green items): first-level subfolders found by scanning a folder you choose (Settings → Working Directory)
@@ -51,6 +51,22 @@ CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same tec
 - `⌘+K` clears screen, `Shift+Enter` for multi-line input (Claude Code compatible)
 - `Cmd+←/→` jumps to beginning/end of line
 - **"Claude in Terminal" button**: launches a new Claude Code session in the configured external terminal using the current working directory
+
+### App Mode
+
+CodeV supports two window modes, configurable in Settings → App Mode:
+
+| | Normal App (default) | Menu Bar |
+|--|--|--|
+| **Dock** | Visible | Hidden |
+| **On blur** | Stays visible | Auto-hides |
+| **Window position** | Remembers last position, draggable | Centers on screen each time |
+| **On startup** | Shows window | Hidden until shortcut/tray click |
+| **`⌃+⌘+R`** | Toggle show/hide | Toggle show/hide |
+| **Click Dock icon** | Shows hidden window | N/A |
+| **Best for** | Dashboard / monitoring (keep in corner) | Quick access (spotlight-like) |
+
+**Real-time updates when unfocused (Normal mode):** Status dots, final assistant/user messages, and session order update via fs.watch — no need to re-focus. New sessions and full list refresh only occur on re-focus.
 
 ### Tab Switching
 
