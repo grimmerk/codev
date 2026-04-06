@@ -1703,6 +1703,8 @@ const trayToggleEvtHandler = async () => {
     if (registered) {
       await settings.set(`shortcut-${key}`, accelerator);
       await syncTrayShortcuts();
+      // Notify switcher window to update shortcut display
+      switcherWindow?.webContents.send('shortcuts-updated', await getCurrentShortcuts());
       return { success: true };
     } else {
       // Re-register the old shortcut since the new one failed
@@ -1718,6 +1720,8 @@ const trayToggleEvtHandler = async () => {
     }
     await registerAllShortcuts();
     await syncTrayShortcuts();
+    // Notify switcher window to update shortcut display
+    switcherWindow?.webContents.send('shortcuts-updated', DEFAULT_SHORTCUTS);
     return DEFAULT_SHORTCUTS;
   });
 })();

@@ -32,6 +32,7 @@ interface IElectronAPI {
   getAppMode: () => Promise<string>;
   setAppMode: (mode: string) => void;
   onAppModeChanged: (callback: IpcCallback) => void;
+  onShortcutsUpdated: (callback: IpcCallback) => void;
 
   // Session terminal settings
   getSessionTerminalApp: () => Promise<string>;

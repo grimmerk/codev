@@ -693,6 +693,12 @@ function SwitcherApp() {
         setTimeout(() => setModeBanner(null), 6000);
       }
     });
+    window.electronAPI.onShortcutsUpdated((_event: any, s: any) => {
+      if (s?.quickSwitcher) {
+        const display = s.quickSwitcher.replace('Command', 'Cmd').replace('Control', 'Ctrl').replace(/\+/g, '+');
+        setQuickSwitcherShortcut(display);
+      }
+    });
     window.electronAPI.onAppModeChanged((_event: any, mode: string) => {
       setCurrentAppMode(mode);
       // Show banner on mode change
