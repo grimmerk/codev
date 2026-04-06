@@ -136,6 +136,26 @@ open "vscode://anthropic.claude-code/open"
 open "vscode://anthropic.claude-code/open?prompt=help%20me%20review%20this%20PR"
 ```
 
+### VS Code-specific handling (differences from terminals)
+
+VS Code sessions require fundamentally different handling from terminal sessions at every layer:
+
+| Layer | Terminals (iTerm2/Ghostty/cmux/Terminal.app) | VS Code |
+|-------|----------------------------------------------|---------|
+| **Detection** | `history.jsonl` (append-only log) | JSONL scan + hooks index (not in `history.jsonl`) |
+| **Active detection** | Process tree walk → terminal type | `entrypoint: "claude-vscode"` in session JSON |
+| **Status** | Same hooks, same status files | Same hooks, same status files (via `$CLAUDE_CODE_ENTRYPOINT` env var) |
+| **Switch (active)** | AppleScript / CLI per-terminal | URI handler `vscode://...?session=<UUID>` |
+| **Resume (closed)** | `cd <path> && claude --resume <id>` in new tab | `open -b` + IDE lock file polling + URI handler |
+| **Window focus** | AppleScript per-terminal | `open -b bundleId projectPath` (macOS `open` with bundle ID) |
+| **Readiness detection** | Not needed (terminal is always ready) | Poll `~/.claude/ide/*.lock` for extension ready |
+| **Restore conflict** | N/A (terminals don't restore session tabs) | VS Code restores Claude Code tabs → skip URI handler for active sessions to avoid duplicate |
+| **Title** | `/rename` custom title | `ai-title` (auto-generated, no `/rename` support) |
+| **User message** | Direct text | Filter `<ide_opened_file>` context blocks |
+| **Same-cwd ambiguity** | TTY/title cross-reference | N/A — UUID-based URI handler is precise |
+| **Dock icon** | N/A | Use `open -b bundleId` instead of `code` CLI to avoid extra icon |
+| **Cold start timing** | Immediate (terminal launches fast) | Adaptive: lock file poll (250ms × max 20) + 1.5s post-ready delay |
+
 ## Performance
 
 | Operation | Cost | Notes |
