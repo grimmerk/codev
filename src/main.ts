@@ -105,11 +105,13 @@ const showSwitcherWindow = () => {
     window = switcherWindow;
   }
 
-  // Menu bar mode: always center on screen. Normal mode: keep last position.
   if (appMode === 'menubar') {
+    // Menu bar mode: always center on screen
     const position = getWindowPosition();
     window.setPosition(position.x, position.y, false);
   }
+  // Send app mode to renderer so it can enable/disable drag region
+  window.webContents.send('app-mode-changed', appMode);
   if (window.isMinimized()) {
     window.restore();
   }
@@ -1080,6 +1082,10 @@ const trayToggleEvtHandler = async () => {
   }
 
   switcherWindow = createSwitcherWindow();
+  // Normal mode: show window immediately on startup
+  if (appMode === 'normal') {
+    showSwitcherWindow();
+  }
   if (isDebug) {
     console.log('when ready');
   }
@@ -1312,7 +1318,8 @@ const trayToggleEvtHandler = async () => {
     } else {
       const window = getSwitcherWindow();
       
-      if (window && window.isVisible() && !window.isMinimized()) {
+      if (appMode === 'menubar' && window && window.isVisible() && !window.isMinimized()) {
+        // Menu bar mode: toggle hide
         if (isDebug) {
           console.log('Switcher window visible, hiding it');
         }
@@ -1965,6 +1972,11 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
     app.dock.hide();
   } else {
     app.dock.show();
+  }
+  // Notify renderer to update drag region
+  const window = getSwitcherWindow();
+  if (window) {
+    window.webContents.send('app-mode-changed', newMode);
   }
 });
 

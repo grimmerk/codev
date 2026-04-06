@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateStatus: (callback: any) => ipcRenderer.on('update-status', callback),
   getAppMode: () => ipcRenderer.invoke('get-app-mode'),
   setAppMode: (mode: string) => ipcRenderer.send('set-app-mode', mode),
+  onAppModeChanged: (callback: any) => ipcRenderer.on('app-mode-changed', callback),
   getSessionTerminalApp: () => ipcRenderer.invoke('get-session-terminal-app'),
   setSessionTerminalApp: (app: string) => ipcRenderer.send('set-session-terminal-app', app),
   getSessionTerminalMode: () => ipcRenderer.invoke('get-session-terminal-mode'),

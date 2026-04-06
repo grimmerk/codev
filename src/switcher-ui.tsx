@@ -360,6 +360,7 @@ function SwitcherApp() {
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
   const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
+  const [currentAppMode, setCurrentAppMode] = useState('menubar');
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -668,6 +669,14 @@ function SwitcherApp() {
       }
     });
 
+    // Listen for app mode changes to enable/disable drag
+    window.electronAPI.getAppMode().then((mode: string) => {
+      setCurrentAppMode(mode || 'menubar');
+    });
+    window.electronAPI.onAppModeChanged((_event: any, mode: string) => {
+      setCurrentAppMode(mode);
+    });
+
     window.electronAPI.onCheckTerminalAndHide(() => {
       if (modeRef.current === 'terminal') {
         window.electronAPI.hideApp();
@@ -907,7 +916,7 @@ function SwitcherApp() {
           borderBottom: '1px solid #333',
           backgroundColor: '#252525',
           // @ts-ignore — Electron-specific CSS property for frameless window dragging
-          WebkitAppRegion: 'drag',
+          WebkitAppRegion: currentAppMode === 'normal' ? 'drag' : undefined,
         }}
       >
         <div
