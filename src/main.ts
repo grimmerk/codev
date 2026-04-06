@@ -1294,6 +1294,12 @@ const trayToggleEvtHandler = async () => {
   }
 
   tray = new TrayGenerator(switcherWindow, title, trayToggleEvtHandler);
+  tray.getAppMode = () => appMode;
+  tray.onToggleAppMode = () => {
+    const newMode = appMode === 'normal' ? 'menubar' : 'normal';
+    // Reuse the same logic as the IPC handler
+    require('electron').ipcMain.emit('set-app-mode', {}, newMode);
+  };
 
   // https://www.electronjs.org/docs/latest/tutorial/keyboard-shortcuts#global-shortcuts
 
