@@ -1043,9 +1043,10 @@ export const openSession = async (
   }
 
   // Check if this is an active VS Code session — switch via URI handler
+  // Always pass projectPath so the correct VS Code window gets focused first
   const entrypoint = cachedEntrypoints?.get(sessionId);
   if (isActive && entrypoint === 'claude-vscode') {
-    openSessionInVSCode(sessionId);
+    openSessionInVSCode(sessionId, projectPath);
     return;
   }
 
@@ -1401,17 +1402,20 @@ export const openSessionInVSCode = (sessionId: string, projectPath?: string): vo
   const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
 
   if (!projectPath) {
-    // Active session: directly switch via URI handler
+    // No project path (shouldn't happen normally) — try URI handler directly
     execFile('open', [uri], (error: any) => {
       if (error) console.error('[openSessionInVSCode] failed:', error);
     });
     return;
   }
 
-  // Closed session: check if VS Code already has this project open
+  // Check if VS Code already has this project open (extension ready)
   if (isVSCodeProjectOpen(projectPath)) {
-    // Project already open + extension ready → instant URI handler
-    execFile('open', [uri]);
+    // Focus the correct window first, then instant URI handler
+    const bundleId = getCurrentIDEBundleId();
+    execFile('open', ['-b', bundleId, projectPath], () => {
+      execFile('open', [uri]);
+    });
     return;
   }
 
