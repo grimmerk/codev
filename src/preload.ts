@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate: () => ipcRenderer.send('install-update'),
   getUpdateStatus: () => ipcRenderer.invoke('get-update-status'),
   onUpdateStatus: (callback: any) => ipcRenderer.on('update-status', callback),
+  getAppMode: () => ipcRenderer.invoke('get-app-mode'),
+  setAppMode: (mode: string) => ipcRenderer.send('set-app-mode', mode),
   getSessionTerminalApp: () => ipcRenderer.invoke('get-session-terminal-app'),
   setSessionTerminalApp: (app: string) => ipcRenderer.send('set-session-terminal-app', app),
   getSessionTerminalMode: () => ipcRenderer.invoke('get-session-terminal-mode'),

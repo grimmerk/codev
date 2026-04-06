@@ -81,6 +81,9 @@ let serverProcess: any;
 const WIN_WIDTH = 800;
 const WIN_HEIGHT = 600;
 
+// App mode: 'normal' (dock visible, no auto-hide) or 'menubar' (hidden dock, auto-hide on blur)
+let appMode: 'normal' | 'menubar' = 'normal'; // default to normal for new users
+
 const getWindowPosition = () => {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.workAreaSize;
@@ -95,19 +98,23 @@ const getWindowPosition = () => {
 // NOTE: setVisibleOnAllWorkspaces is needed ?
 const showSwitcherWindow = () => {
   let window = getSwitcherWindow();
-  
+
   if (!window) {
     // Recreate window if it has been destroyed
     switcherWindow = createSwitcherWindow();
     window = switcherWindow;
   }
-  
-  const position = getWindowPosition();
-  window.setPosition(position.x, position.y, false);
+
+  // Menu bar mode: always center on screen. Normal mode: keep last position.
+  if (appMode === 'menubar') {
+    const position = getWindowPosition();
+    window.setPosition(position.x, position.y, false);
+  }
+  if (window.isMinimized()) {
+    window.restore();
+  }
   window.show();
-  // mainWindow.setVisibleOnAllWorkspaces(true);
   window.focus();
-  // mainWindow.setVisibleOnAllWorkspaces(false);
 };
 
 const showAIAssistantWindow = () => {
@@ -253,11 +260,17 @@ const getSwitcherWindow = () => {
 const hideSwitcherWindow = () => {
   const window = getSwitcherWindow();
   if (window) {
-    window.hide();
+    if (appMode === 'normal') {
+      window.minimize();
+    } else {
+      window.hide();
+    }
   }
 };
 
 const onBlur = (event: any) => {
+  // Normal mode: don't auto-hide on blur
+  if (appMode === 'normal') return;
   hideSwitcherWindow();
 };
 
@@ -1016,6 +1029,12 @@ const trayToggleEvtHandler = async () => {
 (async () => {
   await app.whenReady();
 
+  // Load app mode setting early (before window creation)
+  appMode = ((await settings.get('app-mode')) as 'normal' | 'menubar') || 'normal';
+  if (appMode === 'menubar') {
+    app.dock.hide();
+  }
+
   // Auto-update: check for updates via update.electronjs.org (non-MAS only)
   if (!isMAS()) {
     try {
@@ -1293,7 +1312,7 @@ const trayToggleEvtHandler = async () => {
     } else {
       const window = getSwitcherWindow();
       
-      if (window && window.isVisible()) {
+      if (window && window.isVisible() && !window.isMinimized()) {
         if (isDebug) {
           console.log('Switcher window visible, hiding it');
         }
@@ -1934,6 +1953,21 @@ ipcMain.handle('get-session-statuses', async () => {
   return obj;
 });
 
+ipcMain.handle('get-app-mode', async () => {
+  return appMode;
+});
+
+ipcMain.on('set-app-mode', async (_event, mode: string) => {
+  const newMode = mode === 'menubar' ? 'menubar' : 'normal';
+  await settings.set('app-mode', newMode);
+  appMode = newMode;
+  if (newMode === 'menubar') {
+    app.dock.hide();
+  } else {
+    app.dock.show();
+  }
+});
+
 ipcMain.handle('get-session-terminal-app', async () => {
   return (await settings.get('session-terminal-app')) || 'iterm2';
 });
@@ -2077,4 +2111,4 @@ ipcMain.handle('detect-active-ide-projects', async () => {
   return Array.from(folderNames);
 });
 
-app.dock.hide();
+// app.dock.hide() moved to async init block (after settings loaded)

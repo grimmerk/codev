@@ -64,6 +64,7 @@ const PopupDefaultExample = ({
     useState('switcher_window');
   const [isMASBuild, setIsMASBuild] = useState(false);
   const [sessionStatusHooks, setSessionStatusHooks] = useState(true);
+  const [appModeState, setAppModeState] = useState('normal');
   const [ideDataAccessGranted, setIdeDataAccessGranted] = useState(false);
   const [shortcuts, setShortcuts] = useState({
     quickSwitcher: 'Command+Control+R',
@@ -80,6 +81,9 @@ const PopupDefaultExample = ({
   useEffect(() => {
     window.electronAPI.getAppVersion().then((version: string) => {
       setAppVersion(version);
+    });
+    window.electronAPI.getAppMode().then((mode: string) => {
+      setAppModeState(mode || 'normal');
     });
     window.electronAPI.getSessionTerminalApp().then((app: string) => {
       setSessionTerminalApp(app || 'iterm2');
@@ -336,6 +340,21 @@ const PopupDefaultExample = ({
                 <option value="projects">Projects</option>
                 <option value="sessions">Sessions</option>
                 <option value="terminal">Terminal</option>
+              </select>
+            </div>
+            <div style={rowStyle}>
+              <span style={labelStyle}>App Mode</span>
+              <select
+                value={appModeState}
+                onChange={(e) => {
+                  const mode = e.target.value;
+                  setAppModeState(mode);
+                  window.electronAPI.setAppMode(mode);
+                }}
+                style={selectStyle}
+              >
+                <option value="normal">Normal App</option>
+                <option value="menubar">Menu Bar</option>
               </select>
             </div>
             <div style={rowStyle}>

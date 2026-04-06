@@ -906,6 +906,8 @@ function SwitcherApp() {
           padding: '10px 15px',
           borderBottom: '1px solid #333',
           backgroundColor: '#252525',
+          // @ts-ignore — Electron-specific CSS property for frameless window dragging
+          WebkitAppRegion: 'drag',
         }}
       >
         <div
@@ -951,7 +953,8 @@ function SwitcherApp() {
           </span>
           CodeV
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* @ts-ignore */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
           <div
             style={{
               display: 'flex',
