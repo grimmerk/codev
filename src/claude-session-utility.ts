@@ -1414,7 +1414,10 @@ export const openSessionInVSCode = (sessionId: string, projectPath?: string): vo
     // Focus the correct window first, then instant URI handler
     const bundleId = getCurrentIDEBundleId();
     execFile('open', ['-b', bundleId, projectPath], () => {
-      execFile('open', [uri]);
+      // Small delay to let VS Code window fully focus before URI handler
+      setTimeout(() => {
+        execFile('open', [uri]);
+      }, 500);
     });
     return;
   }
