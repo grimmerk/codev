@@ -363,6 +363,7 @@ function SwitcherApp() {
   const [currentAppMode, setCurrentAppMode] = useState('menubar');
   const [modeBanner, setModeBanner] = useState<string | null>(null);
   const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
+  const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -674,40 +675,44 @@ function SwitcherApp() {
     // Load shortcut for display
     window.electronAPI.getShortcuts().then((s: any) => {
       if (s?.quickSwitcher) {
-        // Convert Electron accelerator to display format
         const display = s.quickSwitcher
           .replace('Command', 'Cmd')
           .replace('Control', 'Ctrl')
           .replace(/\+/g, '+');
         setQuickSwitcherShortcut(display);
+        shortcutDisplay = display;
       }
     });
 
+    const showBanner = (msg: string, durationMs = 5000) => {
+      if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+      setModeBanner(msg);
+      bannerTimeoutRef.current = setTimeout(() => setModeBanner(null), durationMs);
+    };
+
     // Listen for app mode changes to enable/disable drag
+    let shortcutDisplay = ''; // will be set by getShortcuts
     window.electronAPI.getAppMode().then((mode: string) => {
       const m = mode || 'normal';
       setCurrentAppMode(m);
-      // Show banner on first launch for new users
       if (m === 'normal') {
-        setModeBanner('Normal App mode — drag to reposition. Switch to Menu Bar mode in Settings.');
-        setTimeout(() => setModeBanner(null), 6000);
+        showBanner('Normal App mode — drag to reposition. Switch to Menu Bar mode in Settings.', 6000);
       }
     });
     window.electronAPI.onShortcutsUpdated((_event: any, s: any) => {
       if (s?.quickSwitcher) {
-        const display = s.quickSwitcher.replace('Command', 'Cmd').replace('Control', 'Ctrl').replace(/\+/g, '+');
-        setQuickSwitcherShortcut(display);
+        shortcutDisplay = s.quickSwitcher.replace('Command', 'Cmd').replace('Control', 'Ctrl').replace(/\+/g, '+');
+        setQuickSwitcherShortcut(shortcutDisplay);
       }
     });
     window.electronAPI.onAppModeChanged((_event: any, mode: string) => {
       setCurrentAppMode(mode);
-      // Show banner on mode change
+      const key = shortcutDisplay || 'Cmd+Ctrl+R';
       if (mode === 'normal') {
-        setModeBanner('Switched to Normal App mode — window stays visible and is draggable.');
+        showBanner('Switched to Normal App mode — window stays visible and is draggable.');
       } else {
-        setModeBanner('Switched to Menu Bar mode — window auto-hides. Use Cmd+Ctrl+R to toggle.');
+        showBanner(`Switched to Menu Bar mode — window auto-hides. Use ${key} to toggle.`);
       }
-      setTimeout(() => setModeBanner(null), 5000);
     });
 
     window.electronAPI.onCheckTerminalAndHide(() => {

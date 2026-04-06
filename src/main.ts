@@ -1081,9 +1081,10 @@ const trayToggleEvtHandler = async () => {
   }
 
   switcherWindow = createSwitcherWindow();
-  // Normal mode: show window immediately on startup
+  // Normal mode: show window after bootstrap (server must be ready for API calls)
   if (appMode === 'normal') {
-    showSwitcherWindow();
+    // Delay show to ensure bootstrap() has completed (runs earlier in this block)
+    setTimeout(() => showSwitcherWindow(), 100);
   }
   if (isDebug) {
     console.log('when ready');
@@ -1973,7 +1974,7 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
   if (newMode === 'menubar') {
     app.dock.hide();
   } else {
-    app.dock.show();
+    await app.dock.show();
   }
   // Notify renderer to update drag region
   const window = getSwitcherWindow();

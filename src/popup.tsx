@@ -327,7 +327,15 @@ const PopupDefaultExample = ({
             {(['general', 'sessions', 'shortcuts'] as const).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setSettingsTab(tab)}
+                onClick={() => {
+                  // Resume any paused shortcut when switching away from Shortcuts tab
+                  if (editingShortcut) {
+                    window.electronAPI.resumeShortcut(editingShortcut);
+                    setEditingShortcut(null);
+                    setShortcutError('');
+                  }
+                  setSettingsTab(tab);
+                }}
                 style={{
                   padding: '6px 12px',
                   fontSize: '12px',
