@@ -945,7 +945,7 @@ function SwitcherApp() {
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '10px 15px',
+          padding: '8px 15px',
           borderBottom: '1px solid #333',
           backgroundColor: '#252525',
           // @ts-ignore — Electron-specific CSS property for frameless window dragging
