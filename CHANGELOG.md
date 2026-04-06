@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.71
+
+- Fix: use `setActivationPolicy` instead of `app.dock.hide/show` for proper Dock behavior
+  - Normal mode: Dock icon with running dot + App Switcher
+  - Menu bar mode: no Dock icon (clean accessory mode)
+  - No Dock icon flash on app launch (LSUIElement=true kept)
+- Feat: tray right-click menu mode toggle (Switch to Normal/Menu Bar Mode)
+
 ## 1.0.70
 
 - Feat: Normal App mode — window stays visible, shows in Dock, draggable
