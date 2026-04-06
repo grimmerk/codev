@@ -262,11 +262,7 @@ const getSwitcherWindow = () => {
 const hideSwitcherWindow = () => {
   const window = getSwitcherWindow();
   if (window) {
-    if (appMode === 'normal') {
-      window.minimize();
-    } else {
-      window.hide();
-    }
+    window.hide();
   }
 };
 
@@ -1318,8 +1314,7 @@ const trayToggleEvtHandler = async () => {
     } else {
       const window = getSwitcherWindow();
       
-      if (appMode === 'menubar' && window && window.isVisible() && !window.isMinimized()) {
-        // Menu bar mode: toggle hide
+      if (window && window.isVisible() && !window.isMinimized()) {
         if (isDebug) {
           console.log('Switcher window visible, hiding it');
         }
@@ -1977,6 +1972,11 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
   const window = getSwitcherWindow();
   if (window) {
     window.webContents.send('app-mode-changed', newMode);
+    // Re-center when switching to menu bar mode
+    if (newMode === 'menubar') {
+      const position = getWindowPosition();
+      window.setPosition(position.x, position.y, false);
+    }
   }
 });
 
