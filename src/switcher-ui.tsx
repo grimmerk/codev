@@ -994,11 +994,14 @@ function SwitcherApp() {
             ) : mode === 'terminal' ? '💻' : '📂'}
           </span>
           CodeV
-          {currentAppMode && (
-            <span style={{ fontSize: '10px', color: '#666', fontWeight: 'normal', marginLeft: '6px' }}>
-              {currentAppMode === 'normal' ? 'Normal' : 'Menu Bar'}
-            </span>
-          )}
+          <span style={{ display: 'inline-flex', flexDirection: 'column', marginLeft: '8px', lineHeight: 1.2 }}>
+            <span style={{ fontSize: '11px', color: '#888', fontWeight: 'normal' }}>Dev Hub</span>
+            {currentAppMode && (
+              <span style={{ fontSize: '9px', color: '#555', fontWeight: 'normal' }}>
+                {currentAppMode === 'normal' ? 'normal mode' : 'menu bar mode'}
+              </span>
+            )}
+          </span>
         </div>
         {/* @ts-ignore */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
