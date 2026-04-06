@@ -65,6 +65,7 @@ const PopupDefaultExample = ({
   const [isMASBuild, setIsMASBuild] = useState(false);
   const [sessionStatusHooks, setSessionStatusHooks] = useState(true);
   const [appModeState, setAppModeState] = useState('normal');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'sessions' | 'shortcuts'>('general');
   const [ideDataAccessGranted, setIdeDataAccessGranted] = useState(false);
   const [shortcuts, setShortcuts] = useState({
     quickSwitcher: 'Command+Control+R',
@@ -321,11 +322,33 @@ const PopupDefaultExample = ({
             </span>
           </div>
 
-          {/* General settings (always visible) */}
-          <div style={{ padding: '4px 0', borderBottom: '1px solid #333' }}>
-            <div style={{ ...rowStyle, padding: '4px 16px' }}>
-              <span style={{ ...labelStyle, fontSize: '11px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>General</span>
-            </div>
+          {/* Settings tabs */}
+          <div style={{ display: 'flex', borderBottom: '1px solid #333', padding: '0 16px' }}>
+            {(['general', 'sessions', 'shortcuts'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setSettingsTab(tab)}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  border: 'none',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  backgroundColor: 'transparent',
+                  color: settingsTab === tab ? THEME.primary : '#888',
+                  borderBottom: settingsTab === tab ? `2px solid ${THEME.primary}` : '2px solid transparent',
+                  transition: 'color 0.2s',
+                  textTransform: 'capitalize' as const,
+                }}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* General tab */}
+          {settingsTab === 'general' && (
+          <div style={{ padding: '4px 0' }}>
             <div style={rowStyle}>
               <span style={labelStyle}>Default Tab</span>
               <select
@@ -466,175 +489,140 @@ const PopupDefaultExample = ({
                 </select>
               </div>
             )}
-          </div>
-
-          {/* Projects settings (only in Projects tab) */}
-          {switcherMode === 'projects' && (
-            <div style={{ padding: '4px 0', borderBottom: '1px solid #333' }}>
-              <div style={{ ...rowStyle, padding: '4px 16px' }}>
-                <span style={{ ...labelStyle, fontSize: '11px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Projects</span>
-              </div>
-              <div style={{ ...rowStyle, gap: '6px' }}>
-                <span style={labelStyle}>IDE</span>
-                <select
-                  value={idePreference}
-                  onChange={(e) => {
-                    const ide = e.target.value;
-                    setIdePreference(ide);
-                    window.electronAPI.notifyIDEPreferenceChanged(ide);
-                    if (isMASBuild) {
-                      window.electronAPI.checkIDEDataAccess(ide).then((granted: boolean) => {
-                        setIdeDataAccessGranted(granted);
-                      });
-                    }
-                  }}
-                  style={selectStyle}
-                >
-                  <option value="VSCode">VS Code</option>
-                  <option value="Cursor">Cursor</option>
-                </select>
-                {isMASBuild && (
-                  <button
-                    onClick={() => window.electronAPI.openIDEDataSelector(idePreference)}
-                    style={{
-                      backgroundColor: ideDataAccessGranted ? '#28a745' : THEME.primary,
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '3px',
-                      padding: '3px 6px',
-                      fontSize: '10px',
-                      cursor: 'pointer',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {ideDataAccessGranted ? '✓' : 'Grant'}
-                  </button>
-                )}
-              </div>
-              <div style={{ padding: '4px 16px 2px' }}>
-                <span style={{ fontSize: '11px', color: '#666' }}>Claude Session Launch</span>
-                {[
-                  { keys: '\u2318+Enter', label: 'New Claude Session' },
-                  { keys: '\u21E7+Enter', label: 'New Claude (CodeV Term)' },
-                  { keys: '\u2318+Click', label: 'New Claude Session' },
-                ].map((row) => (
-                  <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
-                    <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
-                    <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Sessions settings (only in Sessions tab) */}
-          {switcherMode === 'sessions' && (
-            <div style={{ padding: '4px 0', borderBottom: '1px solid #333' }}>
-              <div style={{ ...rowStyle, padding: '4px 16px' }}>
-                <span style={{ ...labelStyle, fontSize: '11px', color: '#888', textTransform: 'uppercase' as const, letterSpacing: '0.5px' }}>Sessions</span>
-              </div>
-              <div style={rowStyle}>
-                <span style={labelStyle} title="User prompt display mode. Assistant response (◀ blue text) always shown.">Session Preview</span>
-                <select
-                  value={sessionDisplayMode}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSessionDisplayMode(val);
-                    window.electronAPI.setSessionDisplayMode(val);
-                    if (saveCallback) saveCallback('sessionDisplayMode', val);
-                  }}
-                  style={selectStyle}
-                >
-                  <option value="first">First User Prompt</option>
-                  <option value="last">Last User Prompt</option>
-                  <option value="both">First + Last</option>
-                </select>
-              </div>
-              <div style={{ padding: '0 16px 2px', fontSize: '9px', color: '#555' }}>
-                ◀ Assistant response always shown
-              </div>
-              <div style={rowStyle}>
-                <span style={labelStyle} title="Uses Claude Code hooks to detect session state">Session Status <span style={{ fontSize: '10px', color: '#888' }}>(hooks)</span></span>
-                <label
+            <div style={{ ...rowStyle, gap: '6px' }}>
+              <span style={labelStyle}>IDE</span>
+              <select
+                value={idePreference}
+                onChange={(e) => {
+                  const ide = e.target.value;
+                  setIdePreference(ide);
+                  window.electronAPI.notifyIDEPreferenceChanged(ide);
+                  if (isMASBuild) {
+                    window.electronAPI.checkIDEDataAccess(ide).then((granted: boolean) => {
+                      setIdeDataAccessGranted(granted);
+                    });
+                  }
+                }}
+                style={selectStyle}
+              >
+                <option value="VSCode">VS Code</option>
+                <option value="Cursor">Cursor</option>
+              </select>
+              {isMASBuild && (
+                <button
+                  onClick={() => window.electronAPI.openIDEDataSelector(idePreference)}
                   style={{
-                    position: 'relative',
-                    display: 'inline-block',
-                    width: '40px',
-                    height: '22px',
+                    backgroundColor: ideDataAccessGranted ? '#28a745' : THEME.primary,
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '3px',
+                    padding: '3px 6px',
+                    fontSize: '10px',
                     cursor: 'pointer',
+                    flexShrink: 0,
                   }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={sessionStatusHooks}
-                    onChange={(e) => {
-                      const enabled = e.target.checked;
-                      setSessionStatusHooks(enabled);
-                      window.electronAPI.setSessionStatusHooksEnabled(enabled);
-                    }}
-                    style={{ opacity: 0, width: 0, height: 0 }}
-                  />
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      backgroundColor: sessionStatusHooks ? THEME.primary : '#555',
-                      borderRadius: '11px',
-                      transition: 'background-color 0.2s',
-                    }}
-                  />
-                  <span
-                    style={{
-                      position: 'absolute',
-                      top: '2px',
-                      left: sessionStatusHooks ? '20px' : '2px',
-                      width: '18px',
-                      height: '18px',
-                      backgroundColor: '#fff',
-                      borderRadius: '50%',
-                      transition: 'left 0.2s',
-                    }}
-                  />
-                </label>
-              </div>
+                  {ideDataAccessGranted ? '✓' : 'Grant'}
+                </button>
+              )}
             </div>
+            <div style={{ ...rowStyle, gap: '8px' }}>
+              <span style={labelStyle}>Working Dir</span>
+              <div style={{ color: '#aaa', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>
+                {workingFolderPath || 'None'}
+              </div>
+              <button
+                onClick={() => openFolderSelector()}
+                style={{ backgroundColor: 'transparent', border: '1px solid #555', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px', color: THEME.text.primary, flexShrink: 0 }}
+                title="Change Folder"
+              >
+                📁
+              </button>
+            </div>
+          </div>
           )}
 
-          {/* Shortcuts section */}
-          <div
-            style={{
-              borderTop: '1px solid #333',
-              padding: '10px 16px',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '6px',
-              }}
-            >
-              <span
+          {/* Sessions tab */}
+          {settingsTab === 'sessions' && (
+          <div style={{ padding: '4px 0' }}>
+            <div style={rowStyle}>
+              <span style={labelStyle} title="User prompt display mode. Assistant response (◀ blue text) always shown.">Session Preview</span>
+              <select
+                value={sessionDisplayMode}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSessionDisplayMode(val);
+                  window.electronAPI.setSessionDisplayMode(val);
+                  if (saveCallback) saveCallback('sessionDisplayMode', val);
+                }}
+                style={selectStyle}
+              >
+                <option value="first">First User Prompt</option>
+                <option value="last">Last User Prompt</option>
+                <option value="both">First + Last</option>
+              </select>
+            </div>
+            <div style={{ padding: '0 16px 2px', fontSize: '9px', color: '#555' }}>
+              ◀ Assistant response always shown
+            </div>
+            <div style={rowStyle}>
+              <span style={labelStyle} title="Uses Claude Code hooks to detect session state">Session Status <span style={{ fontSize: '10px', color: '#888' }}>(hooks)</span></span>
+              <label
                 style={{
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: THEME.text.secondary,
+                  position: 'relative',
+                  display: 'inline-block',
+                  width: '40px',
+                  height: '22px',
+                  cursor: 'pointer',
                 }}
               >
-                Shortcuts
-              </span>
+                <input
+                  type="checkbox"
+                  checked={sessionStatusHooks}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setSessionStatusHooks(enabled);
+                    window.electronAPI.setSessionStatusHooksEnabled(enabled);
+                  }}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: sessionStatusHooks ? THEME.primary : '#555',
+                    borderRadius: '11px',
+                    transition: 'background-color 0.2s',
+                  }}
+                />
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left: sessionStatusHooks ? '20px' : '2px',
+                    width: '18px',
+                    height: '18px',
+                    backgroundColor: '#fff',
+                    borderRadius: '50%',
+                    transition: 'left 0.2s',
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+          )}
+
+          {/* Shortcuts tab */}
+          {settingsTab === 'shortcuts' && (
+          <div style={{ padding: '10px 16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: THEME.text.secondary }}>Global Shortcuts</span>
               <span
                 onClick={handleResetShortcuts}
-                style={{
-                  fontSize: '11px',
-                  color: '#888',
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                }}
+                style={{ fontSize: '11px', color: '#888', cursor: 'pointer', textDecoration: 'underline' }}
               >
                 Reset
               </span>
@@ -672,34 +660,18 @@ const PopupDefaultExample = ({
                     {shortcutError || 'Press keys...'}
                   </div>
                 ) : (
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      color: THEME.text.secondary,
-                      fontFamily: 'monospace',
-                    }}
-                  >
+                  <span style={{ fontSize: '12px', color: THEME.text.secondary, fontFamily: 'monospace' }}>
                     {acceleratorToDisplay(shortcuts[row.key as keyof typeof shortcuts])}
                   </span>
                 )}
-                <span
-                  style={{
-                    fontSize: '12px',
-                    color: THEME.text.secondary,
-                    flex: 1,
-                  }}
-                >
-                  {row.label}
-                </span>
+                <span style={{ fontSize: '12px', color: THEME.text.secondary, flex: 1 }}>{row.label}</span>
                 <span
                   onClick={() => {
                     if (editingShortcut === row.key) {
-                      // Cancel editing — resume the shortcut
                       window.electronAPI.resumeShortcut(row.key);
                       setEditingShortcut(null);
                       setShortcutError('');
                     } else {
-                      // Start editing — pause the shortcut so it doesn't trigger
                       if (editingShortcut) {
                         window.electronAPI.resumeShortcut(editingShortcut);
                       }
@@ -708,17 +680,25 @@ const PopupDefaultExample = ({
                       setShortcutError('');
                     }
                   }}
-                  style={{
-                    fontSize: '11px',
-                    color: editingShortcut === row.key ? '#e05252' : THEME.primary,
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  }}
+                  style={{ fontSize: '11px', color: editingShortcut === row.key ? '#e05252' : THEME.primary, cursor: 'pointer', flexShrink: 0 }}
                 >
                   {editingShortcut === row.key ? 'Cancel' : 'Edit'}
                 </span>
               </div>
             ))}
+            <div style={{ borderTop: '1px solid #333', marginTop: '8px', paddingTop: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#666' }}>Claude Session Launch</span>
+              {[
+                { keys: '\u2318+Enter', label: 'New Claude Session' },
+                { keys: '\u21E7+Enter', label: 'New Claude (CodeV Term)' },
+                { keys: '\u2318+Click', label: 'New Claude Session' },
+              ].map((row) => (
+                <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+                  <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
+                  <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
+                </div>
+              ))}
+            </div>
             <div style={{ borderTop: '1px solid #333', marginTop: '6px', paddingTop: '6px' }}>
               <span style={{ fontSize: '11px', color: '#666' }}>Tab Switching</span>
               {[
@@ -734,6 +714,7 @@ const PopupDefaultExample = ({
               ))}
             </div>
           </div>
+          )}
 
         </div>
       )}
