@@ -2,6 +2,8 @@
 
 Quick switcher for VS Code/Cursor projects, Claude Code session manager with live status indicators, and built-in terminal.
 
+**Download:** [Latest release (notarized DMG)](https://github.com/grimmerk/codev/releases/latest) · [Mac App Store](https://apps.apple.com/us/app/switchv/id1663612397) (v1.0.33, does not include Claude Code sessions or git branch features)
+
 ## Features
 
 ### Quick Switcher for VS Code / Cursor Projects
@@ -14,8 +16,7 @@ Spotlight-like quick open: press `⌃+⌘+R` or click the menu bar icon to launc
 - Multi-word search across project names, paths, and branch names
 - Supports VS Code and Cursor — switch between them in Settings → IDE Preference
 - Remove items from the recent list by hovering and clicking "x"
-
-**Download:** [Latest release (notarized DMG)](https://github.com/grimmerk/codev/releases/latest) · [Mac App Store](https://apps.apple.com/us/app/switchv/id1663612397) (v1.0.33, does not include Claude Code sessions or git branch features)
+- **Quick-launch Claude session**: `⌘+Enter` to launch a new Claude Code session in the configured terminal, `⇧+Enter` to launch in CodeV's embedded terminal, `⌘+Click` as mouse alternative
 
 ### Claude Code Session Switching
 
@@ -38,6 +39,7 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 | Terminal.app | Title match → TTY fallback | AppleScript `do script` | Built-in macOS terminal; same TTY accuracy as iTerm2 |
 | Ghostty | Title match → cwd fallback | AppleScript new tab/window | Needs `/rename` for same-cwd. **Note:** Ghostty may not support `⌘+V` (paste) and `⌘+Z` (undo) in CodeV's search bar by default — add `keybind = super+v=paste_from_clipboard` and `keybind = super+z=undo` to `~/.config/ghostty/config` ([ghostty#10749](https://github.com/ghostty-org/ghostty/issues/10749#issuecomment-4131892831)) |
 | cmux | Title match → TTY fallback | CLI new-workspace | Same as iTerm2 (requires cmux v0.63+); requires socket access in cmux Settings (`automation` or `allowAll`) |
+| VS Code | URI handler (session-level) | `open -b` + URI handler | Requires Claude Code VS Code extension v2.1.72+; `[VSCODE]` badge on active sessions |
 
 ### Embedded Terminal
 
@@ -48,8 +50,9 @@ CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same tec
 - Terminal state preserved when switching tabs
 - `⌘+K` clears screen, `Shift+Enter` for multi-line input (Claude Code compatible)
 - `Cmd+←/→` jumps to beginning/end of line
+- **"Claude in Terminal" button**: launches a new Claude Code session in the configured external terminal using the current working directory
 
-**Tab switching shortcuts:**
+### Tab Switching
 
 | Shortcut | Action |
 |----------|--------|
