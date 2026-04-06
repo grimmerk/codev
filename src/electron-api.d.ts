@@ -28,6 +28,12 @@ interface IElectronAPI {
   getUpdateStatus: () => Promise<{ status: string; releaseName?: string; error?: string } | null>;
   onUpdateStatus: (callback: IpcCallback) => void;
 
+  // App mode
+  getAppMode: () => Promise<string>;
+  setAppMode: (mode: string) => void;
+  onAppModeChanged: (callback: IpcCallback) => void;
+  onShortcutsUpdated: (callback: IpcCallback) => void;
+
   // Session terminal settings
   getSessionTerminalApp: () => Promise<string>;
   setSessionTerminalApp: (app: string) => void;

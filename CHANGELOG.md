@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.70
+
+- Feat: Normal App mode — window stays visible, shows in Dock, draggable
+  - Toggle in Settings: Normal App (default for new users) / Menu Bar
+  - Instant switching, no restart needed
+  - `Cmd+Ctrl+R` toggles show/hide in both modes
+  - Title bar shows "Dev Hub" sub-title + mode indicator + shortcut key
+  - Banner on first launch and mode switch (auto-dismiss)
+  - Clicking Dock icon shows hidden window
+- Feat: Settings UI redesigned with tabs (General / Sessions / Shortcuts)
+  - All settings visible without scrolling
+  - No more content changing based on active main tab
+  - Hints on context-specific settings (projects/sessions/tray)
+- Style: Terminal renamed to Terminal.app in Launch Terminal dropdown
+- Style: title bar padding reduced for tighter layout
+
 ## 1.0.69
 
 - Feat: adaptive VS Code resume via IDE lock file polling

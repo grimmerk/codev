@@ -360,6 +360,10 @@ function SwitcherApp() {
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
   const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
+  const [currentAppMode, setCurrentAppMode] = useState('menubar');
+  const [modeBanner, setModeBanner] = useState<string | null>(null);
+  const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
+  const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -668,6 +672,49 @@ function SwitcherApp() {
       }
     });
 
+    // Load shortcut for display
+    window.electronAPI.getShortcuts().then((s: any) => {
+      if (s?.quickSwitcher) {
+        const display = s.quickSwitcher
+          .replace('Command', 'Cmd')
+          .replace('Control', 'Ctrl')
+          .replace(/\+/g, '+');
+        setQuickSwitcherShortcut(display);
+        shortcutDisplay = display;
+      }
+    });
+
+    const showBanner = (msg: string, durationMs = 5000) => {
+      if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+      setModeBanner(msg);
+      bannerTimeoutRef.current = setTimeout(() => setModeBanner(null), durationMs);
+    };
+
+    // Listen for app mode changes to enable/disable drag
+    let shortcutDisplay = ''; // will be set by getShortcuts
+    window.electronAPI.getAppMode().then((mode: string) => {
+      const m = mode || 'normal';
+      setCurrentAppMode(m);
+      if (m === 'normal') {
+        showBanner('Normal App mode — drag to reposition. Switch to Menu Bar mode in Settings.', 6000);
+      }
+    });
+    window.electronAPI.onShortcutsUpdated((_event: any, s: any) => {
+      if (s?.quickSwitcher) {
+        shortcutDisplay = s.quickSwitcher.replace('Command', 'Cmd').replace('Control', 'Ctrl').replace(/\+/g, '+');
+        setQuickSwitcherShortcut(shortcutDisplay);
+      }
+    });
+    window.electronAPI.onAppModeChanged((_event: any, mode: string) => {
+      setCurrentAppMode(mode);
+      const key = shortcutDisplay || 'Cmd+Ctrl+R';
+      if (mode === 'normal') {
+        showBanner('Switched to Normal App mode — window stays visible and is draggable.');
+      } else {
+        showBanner(`Switched to Menu Bar mode — window auto-hides. Use ${key} to toggle.`);
+      }
+    });
+
     window.electronAPI.onCheckTerminalAndHide(() => {
       if (modeRef.current === 'terminal') {
         window.electronAPI.hideApp();
@@ -903,9 +950,11 @@ function SwitcherApp() {
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '10px 15px',
+          padding: '8px 15px',
           borderBottom: '1px solid #333',
           backgroundColor: '#252525',
+          // @ts-ignore — Electron-specific CSS property for frameless window dragging
+          WebkitAppRegion: currentAppMode === 'normal' ? 'drag' : undefined,
         }}
       >
         <div
@@ -950,8 +999,22 @@ function SwitcherApp() {
             ) : mode === 'terminal' ? '💻' : '📂'}
           </span>
           CodeV
+          <span style={{ display: 'inline-flex', flexDirection: 'column', marginLeft: '8px', lineHeight: 1.2 }}>
+            <span style={{ fontSize: '11px', color: '#888', fontWeight: 'normal' }}>Dev Hub</span>
+            {currentAppMode && (
+              <span style={{ fontSize: '9px', color: '#555', fontWeight: 'normal' }}>
+                {currentAppMode === 'normal' ? 'normal mode' : 'menu bar mode'}
+              </span>
+            )}
+          </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* @ts-ignore */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
+          {quickSwitcherShortcut && (
+            <span style={{ fontSize: '10px', color: '#555' }}>
+              {quickSwitcherShortcut}
+            </span>
+          )}
           <div
             style={{
               display: 'flex',
@@ -1040,6 +1103,28 @@ function SwitcherApp() {
           }}
         />
       </div>
+
+      {/* Mode change banner */}
+      {modeBanner && (
+        <div style={{
+          padding: '6px 15px',
+          backgroundColor: 'rgba(0, 188, 212, 0.1)',
+          borderBottom: '1px solid rgba(0, 188, 212, 0.2)',
+          fontSize: '11px',
+          color: '#8ecfda',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span>{modeBanner}</span>
+          <span
+            style={{ cursor: 'pointer', color: '#666', marginLeft: '8px' }}
+            onClick={() => setModeBanner(null)}
+          >
+            x
+          </span>
+        </div>
+      )}
 
       {mode !== 'terminal' && (mode === 'sessions' ? (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
