@@ -1311,16 +1311,21 @@ export const launchNewClaudeSession = (
 ): void => {
   if (terminalApp === 'vscode') {
     const { execFile } = require('child_process');
-    // Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
+    if (isVSCodeProjectOpen(projectPath)) {
+      // Project already open → instant
+      execFile('open', ['vscode://anthropic.claude-code/open']);
+      return;
+    }
+    // Launch VS Code, poll for extension ready, then open new session
     const bundleId = getCurrentIDEBundleId();
     execFile('open', ['-b', bundleId, projectPath], (error: any) => {
       if (error) {
         console.error('[launchNewClaudeSession] failed to open VS Code:', error);
         return;
       }
-      setTimeout(() => {
+      waitForVSCodeExtensionReady(projectPath).then(() => {
         execFile('open', ['vscode://anthropic.claude-code/open']);
-      }, 2000);
+      });
     });
     return;
   }
@@ -1334,37 +1339,93 @@ export const launchNewClaudeSession = (
 };
 
 /**
+ * Check if VS Code has a specific project open by reading IDE lock files.
+ * Lock files are created by Claude Code extension per VS Code window.
+ * Returns true if a lock file with matching workspaceFolders + alive PID exists.
+ */
+const isVSCodeProjectOpen = (projectPath: string): boolean => {
+  const ideDir = path.join(os.homedir(), '.claude', 'ide');
+  if (!fs.existsSync(ideDir)) return false;
+  try {
+    for (const file of fs.readdirSync(ideDir)) {
+      if (!file.endsWith('.lock')) continue;
+      try {
+        const content = JSON.parse(fs.readFileSync(path.join(ideDir, file), 'utf-8'));
+        if (!content.pid || !content.workspaceFolders) continue;
+        const hasFolder = content.workspaceFolders.some((f: string) => f === projectPath);
+        if (!hasFolder) continue;
+        // Verify PID is alive
+        try { process.kill(content.pid, 0); return true; } catch { /* dead PID */ }
+      } catch {}
+    }
+  } catch {}
+  return false;
+};
+
+/**
+ * Poll IDE lock files until a matching project appears (extension ready).
+ * Resolves when lock file with matching workspaceFolders + alive PID is found,
+ * or after timeout (fallback).
+ */
+const waitForVSCodeExtensionReady = (projectPath: string, timeoutMs = 8000, intervalMs = 300): Promise<void> => {
+  return new Promise((resolve) => {
+    // Quick check — maybe it's already ready
+    if (isVSCodeProjectOpen(projectPath)) { resolve(); return; }
+
+    // If IDE lock dir doesn't exist, lock file mechanism may not be available
+    // Fall back to fixed 2s delay instead of waiting 8s
+    const ideDir = path.join(os.homedir(), '.claude', 'ide');
+    if (!fs.existsSync(ideDir)) {
+      setTimeout(resolve, 2000);
+      return;
+    }
+
+    const startTime = Date.now();
+    const timer = setInterval(() => {
+      if (isVSCodeProjectOpen(projectPath) || Date.now() - startTime > timeoutMs) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, intervalMs);
+  });
+};
+
+/**
  * Open a Claude Code session in VS Code via URI handler.
- * For active sessions: switches to the existing session tab.
- * For closed sessions: opens the project folder first, then resumes via URI handler.
+ * - Active sessions: instant switch via URI handler.
+ * - Closed sessions (VS Code has project open): instant URI handler.
+ * - Closed sessions (project not open): opens project, polls for extension ready, then URI handler.
  */
 export const openSessionInVSCode = (sessionId: string, projectPath?: string): void => {
   const { execFile } = require('child_process');
+  const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
 
-  if (projectPath) {
-    // Closed session: open project folder first, then resume after a short delay
-    // Use `open -b` with bundle ID to avoid extra Dock icon (vs `code` CLI)
-    const bundleId = getCurrentIDEBundleId();
-    execFile('open', ['-b', bundleId, projectPath], (error: any) => {
-      if (error) {
-        console.error('[openSessionInVSCode] failed to open project:', error);
-        return;
-      }
-      // Wait for VS Code to open the workspace before resuming session
-      setTimeout(() => {
-        const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
-        execFile('open', [uri]);
-      }, 2000);
-    });
-  } else {
+  if (!projectPath) {
     // Active session: directly switch via URI handler
-    const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
     execFile('open', [uri], (error: any) => {
-      if (error) {
-        console.error('[openSessionInVSCode] failed:', error);
-      }
+      if (error) console.error('[openSessionInVSCode] failed:', error);
     });
+    return;
   }
+
+  // Closed session: check if VS Code already has this project open
+  if (isVSCodeProjectOpen(projectPath)) {
+    // Project already open + extension ready → instant URI handler
+    execFile('open', [uri]);
+    return;
+  }
+
+  // Project not open → launch VS Code, poll for extension ready, then URI handler
+  const bundleId = getCurrentIDEBundleId();
+  execFile('open', ['-b', bundleId, projectPath], (error: any) => {
+    if (error) {
+      console.error('[openSessionInVSCode] failed to open project:', error);
+      return;
+    }
+    waitForVSCodeExtensionReady(projectPath).then(() => {
+      execFile('open', [uri]);
+    });
+  });
 };
 
 /**
