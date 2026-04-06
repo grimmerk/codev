@@ -453,7 +453,7 @@ const PopupDefaultExample = ({
                 </button>
             </div>
             <div style={rowStyle}>
-              <span style={labelStyle}>Launch Terminal</span>
+              <span style={labelStyle}>Launch Terminal <span style={{ fontSize: '9px', color: '#666' }}>(projects/sessions)</span></span>
               <select
                 value={sessionTerminalApp}
                 onChange={(e) => {
@@ -472,7 +472,7 @@ const PopupDefaultExample = ({
             </div>
             {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'terminal' || sessionTerminalApp === 'ghostty') && (
               <div style={rowStyle}>
-                <span style={labelStyle}>Open In <span style={{ fontSize: '9px', color: '#666' }}>(new tab/window)</span></span>
+                <span style={labelStyle}>Open In</span>
                 <select
                   value={sessionTerminalMode}
                   onChange={(e) => {
