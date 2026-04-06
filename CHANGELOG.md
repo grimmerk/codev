@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.69
+
+- Feat: adaptive VS Code resume via IDE lock file polling
+  - Replaces fixed 2s delay with `~/.claude/ide/*.lock` detection
+  - Already-open project: instant (~0.5s vs ~2s before)
+  - Cold start: adaptive poll + 1.5s post-ready delay
+- Fix: duplicate Claude Code tab on VS Code window restore (cases 3, 5, 7)
+  - Active sessions skip URI handler when project needs to be opened
+  - Closed sessions wait for extension ready before URI handler
+- Fix: resume not opening session tab when project window already open (case 2)
+- Fix: active VS Code session switching to wrong window
+
 ## 1.0.68
 
 - Feat: quick-launch new Claude session from Projects tab

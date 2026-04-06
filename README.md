@@ -39,7 +39,7 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 | Terminal.app | Title match → TTY fallback | AppleScript `do script` | Built-in macOS terminal; same TTY accuracy as iTerm2 |
 | Ghostty | Title match → cwd fallback | AppleScript new tab/window | Needs `/rename` for same-cwd. **Note:** Ghostty may not support `⌘+V` (paste) and `⌘+Z` (undo) in CodeV's search bar by default — add `keybind = super+v=paste_from_clipboard` and `keybind = super+z=undo` to `~/.config/ghostty/config` ([ghostty#10749](https://github.com/ghostty-org/ghostty/issues/10749#issuecomment-4131892831)) |
 | cmux | Title match → TTY fallback | CLI new-workspace | Same as iTerm2 (requires cmux v0.63+); requires socket access in cmux Settings (`automation` or `allowAll`) |
-| VS Code | URI handler (session-level) | `open -b` + URI handler | Requires Claude Code VS Code extension v2.1.72+; `[VSCODE]` badge on active sessions |
+| VS Code | URI handler (session-level) | `open -b` + URI handler | Requires Claude Code VS Code extension v2.1.72+; `[VSCODE]` badge on active sessions; adaptive resume via IDE lock file polling (~0.5s if project already open) |
 
 ### Embedded Terminal
 

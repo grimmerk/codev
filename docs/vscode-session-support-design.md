@@ -64,18 +64,22 @@ Verified behavior:
 
 ### Layer 4: Resume (closed sessions)
 
-Two-step process for VS Code resume:
-1. Open project folder: `code "<projectPath>"`
-2. After 2s delay (for VS Code to load workspace): URI handler `vscode://anthropic.claude-code/open?session=<UUID>`
+Adaptive resume via IDE lock file polling (PR #109):
+1. Check `~/.claude/ide/*.lock` for matching project + alive PID
+2. If project already open → focus window + 500ms delay + URI handler (~0.5s)
+3. If project not open → `open -b bundleId projectPath` + poll lock files (250ms interval, 5s timeout) + 1.5s post-ready delay + URI handler
+4. Active sessions + project not open → only `open -b` (skip URI handler, let VS Code restore handle tab)
+5. Fallback to fixed 2s delay if `~/.claude/ide/` doesn't exist
 
 If the user's Launch Terminal is not set to VS Code, closed sessions resume in the default terminal (standard behavior).
 
 Measured latency:
 | Scenario | Time |
 |----------|------|
-| Active session switch | Instant |
-| Resume in already-open VS Code project | ~1-2s |
-| Resume in new VS Code project | ~3-5s |
+| Active session switch (project open) | ~0.5s |
+| Resume in already-open VS Code project | ~0.5s |
+| Resume, project closed, VS Code open | ~2.5s |
+| Resume, VS Code cold start | ~3-4s |
 
 ### Layer 5: Settings
 
@@ -132,6 +136,26 @@ open "vscode://anthropic.claude-code/open"
 open "vscode://anthropic.claude-code/open?prompt=help%20me%20review%20this%20PR"
 ```
 
+### VS Code-specific handling (differences from terminals)
+
+VS Code sessions require fundamentally different handling from terminal sessions at every layer:
+
+| Layer | Terminals (iTerm2/Ghostty/cmux/Terminal.app) | VS Code |
+|-------|----------------------------------------------|---------|
+| **Detection** | `history.jsonl` (append-only log) | JSONL scan + hooks index (not in `history.jsonl`) |
+| **Active detection** | Process tree walk → terminal type | `entrypoint: "claude-vscode"` in session JSON |
+| **Status** | Same hooks, same status files | Same hooks, same status files (via `$CLAUDE_CODE_ENTRYPOINT` env var) |
+| **Switch (active)** | AppleScript / CLI per-terminal | URI handler `vscode://...?session=<UUID>` |
+| **Resume (closed)** | `cd <path> && claude --resume <id>` in new tab | `open -b` + IDE lock file polling + URI handler |
+| **Window focus** | AppleScript per-terminal | `open -b bundleId projectPath` (macOS `open` with bundle ID) |
+| **Readiness detection** | Not needed (terminal is always ready) | Poll `~/.claude/ide/*.lock` for extension ready |
+| **Restore conflict** | N/A (terminals don't restore session tabs) | VS Code restores Claude Code tabs → skip URI handler for active sessions to avoid duplicate |
+| **Title** | `/rename` custom title | `ai-title` (auto-generated, no `/rename` support) |
+| **User message** | Direct text | Filter `<ide_opened_file>` context blocks |
+| **Same-cwd ambiguity** | TTY/title cross-reference | N/A — UUID-based URI handler is precise |
+| **Dock icon** | N/A | Use `open -b bundleId` instead of `code` CLI to avoid extra icon |
+| **Cold start timing** | Immediate (terminal launches fast) | Adaptive: lock file poll (250ms × max 20) + 1.5s post-ready delay |
+
 ## Performance
 
 | Operation | Cost | Notes |
@@ -142,7 +166,8 @@ open "vscode://anthropic.claude-code/open?prompt=help%20me%20review%20this%20PR"
 | head/tail read per session | ~5-10ms | Parallel head-20 + tail-100 + grep-c |
 | ai-title grep | +~1ms/session | Parallel with existing greps |
 | URI handler switch | instant | Single `open` command |
-| URI handler resume | ~1-5s | `code <path>` + 2s delay + URI handler |
+| URI handler resume (project open) | ~0.5s | Lock file detect + 500ms + URI handler |
+| URI handler resume (project not open) | ~2.5-4s | `open -b` + poll + 1.5s delay + URI handler |
 | Hooks index write | ~5ms/event | Per hook event, marker file prevents duplicates |
 | Session count | capped at 100 | Sort by timestamp, then slice after merge |
 | Timestamp normalization | +0ms | ISO string → unix ms conversion in reader |
@@ -164,7 +189,7 @@ First call shows a permission dialog in VS Code. User can check "Do not ask me a
 
 1. **Closed sessions not in `history.jsonl`**: Workaround via JSONL scan + hooks index. Upstream fix may come via [#24579](https://github.com/anthropics/claude-code/issues/24579).
 2. **No `/rename` in VS Code**: Use `ai-title` as fallback ([#33165](https://github.com/anthropics/claude-code/issues/33165)).
-3. **Resume delay**: 2s fixed delay for workspace loading. Could be optimized by detecting if project is already open.
+3. **Resume delay**: ~~2s fixed delay for workspace loading.~~ Replaced by IDE lock file polling (PR #109). Already-open projects are instant (~0.5s). Cold start uses adaptive poll + 1.5s post-ready delay.
 4. **URI handler one-time dialog**: First use requires user to click "Allow" in VS Code.
 5. **JSONL timestamp format**: VS Code uses ISO strings, CLI uses unix ms. Normalized at read time.
 
