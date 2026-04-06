@@ -472,7 +472,7 @@ const PopupDefaultExample = ({
             </div>
             {(sessionTerminalApp === 'iterm2' || sessionTerminalApp === 'terminal' || sessionTerminalApp === 'ghostty') && (
               <div style={rowStyle}>
-                <span style={labelStyle}>Launch Mode <span style={{ fontSize: '9px', color: '#666' }}>(tab/window)</span></span>
+                <span style={labelStyle}>Launch Mode</span>
                 <select
                   value={sessionTerminalMode}
                   onChange={(e) => {
@@ -523,19 +523,6 @@ const PopupDefaultExample = ({
                   {ideDataAccessGranted ? '✓' : 'Grant'}
                 </button>
               )}
-            </div>
-            <div style={{ ...rowStyle, gap: '8px' }}>
-              <span style={labelStyle}>Working Dir</span>
-              <div style={{ color: '#aaa', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>
-                {workingFolderPath || 'None'}
-              </div>
-              <button
-                onClick={() => openFolderSelector()}
-                style={{ backgroundColor: 'transparent', border: '1px solid #555', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer', fontSize: '12px', color: THEME.text.primary, flexShrink: 0 }}
-                title="Change Folder"
-              >
-                📁
-              </button>
             </div>
           </div>
           )}
