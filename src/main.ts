@@ -1081,11 +1081,6 @@ const trayToggleEvtHandler = async () => {
   }
 
   switcherWindow = createSwitcherWindow();
-  // Normal mode: show window after bootstrap (server must be ready for API calls)
-  if (appMode === 'normal') {
-    // Delay show to ensure bootstrap() has completed (runs earlier in this block)
-    setTimeout(() => showSwitcherWindow(), 100);
-  }
   if (isDebug) {
     console.log('when ready');
   }
@@ -1279,6 +1274,11 @@ const trayToggleEvtHandler = async () => {
 
   // Load user settings
   await loadUserSettings();
+
+  // Normal mode: show window after bootstrap + settings loaded (server ready for API calls)
+  if (appMode === 'normal') {
+    showSwitcherWindow();
+  }
 
   let title = '';
   if (!isDebug) {

@@ -328,6 +328,7 @@ const PopupDefaultExample = ({
               <button
                 key={tab}
                 onClick={() => {
+                  if (tab === settingsTab) return;
                   // Resume any paused shortcut when switching away from Shortcuts tab
                   if (editingShortcut) {
                     window.electronAPI.resumeShortcut(editingShortcut);
