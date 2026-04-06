@@ -1046,7 +1046,7 @@ export const openSession = async (
   // Always pass projectPath so the correct VS Code window gets focused first
   const entrypoint = cachedEntrypoints?.get(sessionId);
   if (isActive && entrypoint === 'claude-vscode') {
-    openSessionInVSCode(sessionId, projectPath);
+    openSessionInVSCode(sessionId, projectPath, true);
     return;
   }
 
@@ -1394,15 +1394,16 @@ const waitForVSCodeExtensionReady = (projectPath: string, timeoutMs = 5000, inte
 /**
  * Open a Claude Code session in VS Code via URI handler.
  * - Active sessions: instant switch via URI handler.
- * - Closed sessions (VS Code has project open): instant URI handler.
- * - Closed sessions (project not open): opens project, polls for extension ready, then URI handler.
+ * - Active + project open: focus window + URI handler (instant switch).
+ * - Active + project not open: just open -b (let VS Code restore handle the session tab).
+ * - Closed + project open: focus window + 500ms delay + URI handler.
+ * - Closed + project not open: open -b + poll extension ready + 500ms delay + URI handler.
  */
-export const openSessionInVSCode = (sessionId: string, projectPath?: string): void => {
+export const openSessionInVSCode = (sessionId: string, projectPath?: string, isActiveSession = false): void => {
   const { execFile } = require('child_process');
   const uri = `vscode://anthropic.claude-code/open?session=${sessionId}`;
 
   if (!projectPath) {
-    // No project path (shouldn't happen normally) — try URI handler directly
     execFile('open', [uri], (error: any) => {
       if (error) console.error('[openSessionInVSCode] failed:', error);
     });
@@ -1411,10 +1412,9 @@ export const openSessionInVSCode = (sessionId: string, projectPath?: string): vo
 
   // Check if VS Code already has this project open (extension ready)
   if (isVSCodeProjectOpen(projectPath)) {
-    // Focus the correct window first, then instant URI handler
+    // Focus the correct window, then URI handler after short delay
     const bundleId = getCurrentIDEBundleId();
     execFile('open', ['-b', bundleId, projectPath], () => {
-      // Small delay to let VS Code window fully focus before URI handler
       setTimeout(() => {
         execFile('open', [uri]);
       }, 500);
@@ -1422,15 +1422,27 @@ export const openSessionInVSCode = (sessionId: string, projectPath?: string): vo
     return;
   }
 
-  // Project not open → launch VS Code, poll for extension ready, then URI handler
+  // Project not open → need to open it
   const bundleId = getCurrentIDEBundleId();
   execFile('open', ['-b', bundleId, projectPath], (error: any) => {
     if (error) {
       console.error('[openSessionInVSCode] failed to open project:', error);
       return;
     }
+
+    if (isActiveSession) {
+      // Active session: VS Code restore will reopen the session tab automatically.
+      // Don't fire URI handler — it would create a duplicate.
+      return;
+    }
+
+    // Closed session: poll for extension ready, then URI handler to resume
+    // Extra 1.5s delay after extension ready to let VS Code finish restoring
+    // session tabs (avoids duplicate if tab was restored by VS Code)
     waitForVSCodeExtensionReady(projectPath).then(() => {
-      execFile('open', [uri]);
+      setTimeout(() => {
+        execFile('open', [uri]);
+      }, 1500);
     });
   });
 };
