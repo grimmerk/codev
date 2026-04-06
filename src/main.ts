@@ -1032,9 +1032,11 @@ const trayToggleEvtHandler = async () => {
 
   // Load app mode setting early (before window creation)
   appMode = ((await settings.get('app-mode')) as 'normal' | 'menubar') || 'normal';
-  if (appMode === 'menubar') {
-    app.dock.hide();
+  if (appMode === 'normal') {
+    app.setActivationPolicy('regular');
   }
+  // LSUIElement=true in Info.plist starts as accessory (no dock icon).
+  // 'regular' adds dock icon + running dot + App Switcher.
 
   // Auto-update: check for updates via update.electronjs.org (non-MAS only)
   if (!isMAS()) {
@@ -1292,6 +1294,12 @@ const trayToggleEvtHandler = async () => {
   }
 
   tray = new TrayGenerator(switcherWindow, title, trayToggleEvtHandler);
+  tray.getAppMode = () => appMode;
+  tray.onToggleAppMode = () => {
+    const newMode = appMode === 'normal' ? 'menubar' : 'normal';
+    // Reuse the same logic as the IPC handler
+    require('electron').ipcMain.emit('set-app-mode', {}, newMode);
+  };
 
   // https://www.electronjs.org/docs/latest/tutorial/keyboard-shortcuts#global-shortcuts
 
@@ -1972,9 +1980,14 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
   await settings.set('app-mode', newMode);
   appMode = newMode;
   if (newMode === 'menubar') {
-    app.dock.hide();
+    app.setActivationPolicy('accessory');
+    // accessory mode hides all windows — re-show after short delay
+    const win = getSwitcherWindow();
+    if (win) {
+      setTimeout(() => { win.show(); win.focus(); }, 100);
+    }
   } else {
-    await app.dock.show();
+    app.setActivationPolicy('regular');
   }
   // Notify renderer to update drag region
   const window = getSwitcherWindow();
@@ -2131,4 +2144,4 @@ ipcMain.handle('detect-active-ide-projects', async () => {
   return Array.from(folderNames);
 });
 
-// app.dock.hide() moved to async init block (after settings loaded)
+// Dock visibility managed via app.setActivationPolicy() (see set-app-mode handler)

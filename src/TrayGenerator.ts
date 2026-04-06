@@ -21,6 +21,8 @@ export class TrayGenerator {
   tray: Tray;
   attachedWindow: BrowserWindow;
   onTrayClickCallback: any;
+  onToggleAppMode: (() => void) | null = null;
+  getAppMode: (() => string) | null = null;
   title: string;
   shortcuts: ShortcutSettings = {
     quickSwitcher: 'Command+Control+R',
@@ -83,7 +85,17 @@ export class TrayGenerator {
       },
     ];
 
+    const currentMode = this.getAppMode ? this.getAppMode() : 'normal';
+    const modeLabel = currentMode === 'normal' ? 'Switch to Menu Bar Mode' : 'Switch to Normal App Mode';
+
     const menu: any = [
+      {
+        label: modeLabel,
+        click: () => {
+          if (this.onToggleAppMode) this.onToggleAppMode();
+        },
+      },
+      { type: 'separator' },
       {
         label: 'Settings',
         submenu: settingsItems,
