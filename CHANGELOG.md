@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.72
+
+- Fix: window-toggle actions bring window to front when covered by another app (Normal mode)
+  - `Cmd+Ctrl+R` (Quick Switcher), `Cmd+Ctrl+T` (Terminal), and tray left-click
+  - Previously: visible-but-unfocused first press hid the window
+  - Now: visible+unfocused → focus to top; visible+focused → hide (or toggle Terminal tab)
+  - Menu bar mode unaffected (`onBlur` auto-hide makes the state unreachable)
+
 ## 1.0.71
 
 - Fix: use `setActivationPolicy` instead of `app.dock.hide/show` for proper Dock behavior
