@@ -1002,12 +1002,24 @@ const trayToggleEvtHandler = async () => {
       showSwitcherWindow();
     } else {
       const window = getSwitcherWindow();
-      
-      if (window && window.isVisible()) {
-        if (isDebug) {
-          console.log('is visible, to hide');
+
+      if (window && window.isVisible() && !window.isMinimized()) {
+        if (window.isFocused()) {
+          if (isDebug) {
+            console.log('is visible and focused, to hide');
+          }
+          hideSwitcherWindow();
+        } else {
+          // Visible but covered by another app — bring to front instead of hiding
+          if (isDebug) {
+            console.log('is visible but unfocused, bringing to front');
+          }
+          if (appMode === 'normal') {
+            app.focus({ steal: true });
+          }
+          window.show();
+          window.focus();
         }
-        hideSwitcherWindow();
       } else if (window) {
         if (isDebug) {
           console.log('is not visible, to show');
@@ -1638,9 +1650,19 @@ const trayToggleEvtHandler = async () => {
       switcherWindow = createSwitcherWindow();
     }
     const window = getSwitcherWindow();
-    if (window && window.isVisible()) {
-      // If already showing Terminal tab, hide; otherwise switch to Terminal
-      window.webContents.send('check-terminal-and-hide');
+    if (window && window.isVisible() && !window.isMinimized()) {
+      if (window.isFocused()) {
+        // If already showing Terminal tab, hide; otherwise switch to Terminal
+        window.webContents.send('check-terminal-and-hide');
+      } else {
+        // Visible but covered — bring to front and switch to Terminal tab
+        if (appMode === 'normal') {
+          app.focus({ steal: true });
+        }
+        window.show();
+        window.focus();
+        window.webContents.send('switch-to-terminal');
+      }
     } else if (window) {
       window.webContents.send('switch-to-terminal');
       showSwitcherWindow();
