@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.72
+
+- Fix: `Cmd+Ctrl+R` brings window to front when covered by another app
+  - Previously: visible-but-unfocused first press hid the window
+  - Now: visible+unfocused → focus to top; visible+focused → hide
+
 ## 1.0.71
 
 - Fix: use `setActivationPolicy` instead of `app.dock.hide/show` for proper Dock behavior

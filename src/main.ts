@@ -1327,10 +1327,22 @@ const trayToggleEvtHandler = async () => {
       const window = getSwitcherWindow();
       
       if (window && window.isVisible() && !window.isMinimized()) {
-        if (isDebug) {
-          console.log('Switcher window visible, hiding it');
+        if (window.isFocused()) {
+          if (isDebug) {
+            console.log('Switcher window visible and focused, hiding it');
+          }
+          hideSwitcherWindow();
+        } else {
+          // Visible but covered by another app — bring to top instead of hiding
+          if (isDebug) {
+            console.log('Switcher window visible but unfocused, bringing to front');
+          }
+          if (appMode === 'normal') {
+            app.focus({ steal: true });
+          }
+          window.show();
+          window.focus();
         }
-        hideSwitcherWindow();
       } else if (window) {
         if (isDebug) {
           console.log('Switcher window exists but hidden, showing it');
