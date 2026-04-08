@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.73
+
+- Feat: embedded terminal search (`Cmd+F`)
+  - Search overlay with previous/next/close buttons and match counter
+  - `Enter` for next match, `Shift+Enter` for previous, `Escape` to close
+  - Powered by `@xterm/addon-search`
+
 ## 1.0.72
 
 - Fix: window-toggle actions bring window to front when covered by another app (Normal mode)
