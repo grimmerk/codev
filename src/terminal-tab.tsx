@@ -34,6 +34,7 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
+  const searchResultDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const spawnedRef = useRef(false);
   const initializedRef = useRef(false);
@@ -92,7 +93,7 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
     term.loadAddon(searchAddon);
     term.open(termRef.current);
 
-    searchAddon.onDidChangeResults((result) => {
+    searchResultDisposableRef.current = searchAddon.onDidChangeResults((result) => {
       setSearchResult(result);
     });
 
@@ -169,6 +170,14 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
     xtermRef.current.focus();
   }, [visible]);
 
+  // Dispose search result listener on unmount
+  useEffect(() => {
+    return () => {
+      searchResultDisposableRef.current?.dispose();
+      searchResultDisposableRef.current = null;
+    };
+  }, []);
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#1e1e1e' }}>
       <div
@@ -203,6 +212,7 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
             type="text"
             value={searchQuery}
             placeholder="Find"
+            aria-label="Find in terminal"
             onChange={(e) => {
               setSearchQuery(e.target.value);
               findNext(e.target.value);
@@ -231,6 +241,7 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
             onBlur={(e) => { e.currentTarget.style.borderColor = '#3c3c3c'; }}
           />
           <span
+            aria-live="polite"
             style={{
               minWidth: '52px',
               textAlign: 'center',
@@ -240,13 +251,18 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
           >
             {searchQuery
               ? searchResult && searchResult.resultCount > 0
-                ? `${searchResult.resultIndex + 1} of ${searchResult.resultCount}`
+                ? // resultIndex is -1 when matches exceed the highlight limit (default 1000).
+                  // Show just the count in that case, otherwise show "current of total".
+                  searchResult.resultIndex < 0
+                  ? `${searchResult.resultCount}+ results`
+                  : `${searchResult.resultIndex + 1} of ${searchResult.resultCount}`
                 : 'No results'
               : ''}
           </span>
           <button
             onClick={() => findPrevious(searchQuery)}
             title="Previous match (Shift+Enter)"
+            aria-label="Previous match"
             style={searchButtonStyle}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#3c3c3c'; }}
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
@@ -256,6 +272,7 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
           <button
             onClick={() => findNext(searchQuery)}
             title="Next match (Enter)"
+            aria-label="Next match"
             style={searchButtonStyle}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#3c3c3c'; }}
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
@@ -265,6 +282,7 @@ const TerminalTab = ({ visible, onLaunchExternal }: { visible: boolean; onLaunch
           <button
             onClick={closeSearch}
             title="Close (Escape)"
+            aria-label="Close search"
             style={searchButtonStyle}
             onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#3c3c3c'; }}
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
