@@ -1487,13 +1487,8 @@ function SwitcherApp() {
             .split(' ')
             .filter((sub: string) => sub)
             .map((w: string) => homePrefix && w.startsWith(homePrefix) ? '~/' + w.slice(homePrefix.length) : w);
-          // For path-like tokens (e.g. "~/git/codev"), split into segments
-          // so name and path Highlighters can each match their portion
+          // For name Highlighter: extract last path segment so "~/git/codev" highlights "codev"
           const nameSearchWords = searchWords.map((w: string) => w.includes('/') ? w.split('/').pop() || w : w);
-          const pathSearchWords = searchWords.map((w: string) => {
-            const idx = w.lastIndexOf('/');
-            return idx > 0 ? w.slice(0, idx) : w;
-          });
           const pathPart = shortenPath(label?.slice(0, label.lastIndexOf('/')));
           let name = label?.slice(label.lastIndexOf('/') + 1);
           name = name?.replace(/\.code-workspace/, ' (Workspace)');
@@ -1562,7 +1557,7 @@ function SwitcherApp() {
                 textAlign: 'right',
               }}>
                 <Highlighter
-                  searchWords={pathSearchWords}
+                  searchWords={searchWords}
                   autoEscape
                   textToHighlight={pathPart}
                   highlightStyle={{
