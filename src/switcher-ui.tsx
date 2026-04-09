@@ -170,13 +170,12 @@ const acceleratorToSymbols = (acc: string): string =>
 
 let _homeDir = '';
 let _homePrefix = '';
-const getHomeDir = (): string => {
-  if (!_homeDir) {
-    _homeDir = window.electronAPI?.getHomeDir?.() || '';
-    _homePrefix = _homeDir ? _homeDir + '/' : '';
-  }
-  return _homeDir;
-};
+// Fetch home dir async on load, cache for sync access
+window.electronAPI?.getHomeDir?.().then((dir: string) => {
+  _homeDir = dir || '';
+  _homePrefix = _homeDir ? _homeDir + '/' : '';
+});
+const getHomeDir = (): string => _homeDir;
 
 /** Replace /Users/<user>/ with ~/ for display */
 const shortenPath = (p: string): string => {
@@ -1483,10 +1482,18 @@ function SwitcherApp() {
         ) => {
           const home = getHomeDir();
           const homePrefix = home ? home + '/' : '';
+          // Normalize search words: replace home dir prefix with ~/
           const searchWords = (searchInput ?? '')
             .split(' ')
             .filter((sub: string) => sub)
             .map((w: string) => homePrefix && w.startsWith(homePrefix) ? '~/' + w.slice(homePrefix.length) : w);
+          // For path-like tokens (e.g. "~/git/codev"), split into segments
+          // so name and path Highlighters can each match their portion
+          const nameSearchWords = searchWords.map((w: string) => w.includes('/') ? w.split('/').pop() || w : w);
+          const pathSearchWords = searchWords.map((w: string) => {
+            const idx = w.lastIndexOf('/');
+            return idx > 0 ? w.slice(0, idx) : w;
+          });
           const pathPart = shortenPath(label?.slice(0, label.lastIndexOf('/')));
           let name = label?.slice(label.lastIndexOf('/') + 1);
           name = name?.replace(/\.code-workspace/, ' (Workspace)');
@@ -1519,7 +1526,7 @@ function SwitcherApp() {
               </div>
               <div style={nameStyle}>
                 <Highlighter
-                  searchWords={searchWords}
+                  searchWords={nameSearchWords}
                   autoEscape
                   textToHighlight={name}
                   highlightStyle={{
@@ -1555,7 +1562,7 @@ function SwitcherApp() {
                 textAlign: 'right',
               }}>
                 <Highlighter
-                  searchWords={searchWords}
+                  searchWords={pathSearchWords}
                   autoEscape
                   textToHighlight={pathPart}
                   highlightStyle={{

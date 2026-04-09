@@ -619,8 +619,8 @@ ipcMain.on('search-working-folder', (event, path: string) => {
   }
 });
 
-ipcMain.on('get-home-dir', (event) => {
-  event.returnValue = require('os').homedir();
+ipcMain.handle('get-home-dir', () => {
+  return require('os').homedir();
 });
 
 ipcMain.on('hide-app', (event) => {

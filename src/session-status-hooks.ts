@@ -259,7 +259,7 @@ export const watchStatusDir = (
 /**
  * Scan active sessions' JSONL files to determine initial status
  * (for sessions started before CodeV or before hooks were installed).
- * Reads last ~50 lines of each session's JSONL to check:
+ * Reads last ~15 lines of each session's JSONL to check:
  * - Pending AskUserQuestion tool use → needs-attention
  * - Last assistant message with stop_reason "end_turn" → idle
  * - Otherwise → working
@@ -294,7 +294,7 @@ export const scanInitialStatuses = async (
     const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
     if (!fs.existsSync(jsonlPath)) return;
 
-    // Read last 50 lines
+    // Read last 15 lines
     const tail = await tailFile(jsonlPath);
     if (!tail.trim()) return;
 
