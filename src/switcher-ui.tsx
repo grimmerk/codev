@@ -168,96 +168,27 @@ const acceleratorToSymbols = (acc: string): string =>
     .replace(/Shift/g, '⇧')
     .replace(/\+/g, '');
 
-const HOME_DIR = window.electronAPI.getHomeDir();
-const HOME_PREFIX = HOME_DIR + '/';
+let _homeDir = '';
+let _homePrefix = '';
+const getHomeDir = (): string => {
+  if (!_homeDir) {
+    _homeDir = window.electronAPI?.getHomeDir?.() || '';
+    _homePrefix = _homeDir ? _homeDir + '/' : '';
+  }
+  return _homeDir;
+};
 
 /** Replace /Users/<user>/ with ~/ for display */
 const shortenPath = (p: string): string => {
-  if (p === HOME_DIR) return '~';
-  return p?.startsWith(HOME_PREFIX) ? '~/' + p.slice(HOME_PREFIX.length) : p;
+  const home = getHomeDir();
+  if (!home) return p;
+  if (p === home) return '~';
+  const prefix = _homePrefix;
+  return p?.startsWith(prefix) ? '~/' + p.slice(prefix.length) : p;
 };
 
-const formatOptionLabel = (
-  {
-    value,
-    label,
-    everOpened,
-  }: { value: string; label: string; everOpened: boolean },
-  { inputValue }: { inputValue: string },
-) => {
-  // Split input into search words
-  const searchWords = (inputValue ?? '')
-    .split(' ')
-    .filter((sub: string) => sub);
-
-  // Extract path and name, shorten parent path for display
-  const rawParent = label?.slice(0, label.lastIndexOf('/'));
-  const parentPath = shortenPath(rawParent);
-  let name = label?.slice(label.lastIndexOf('/') + 1);
-  name = name?.replace(/\.code-workspace/, ' (Workspace)');
-
-  // Determine styles based on whether the item has been opened
-  const nameStyle: any = {
-    fontWeight: '500',
-    fontSize: '15px', // Increased font size
-    minWidth: '180px', // Fixed width for project names for better alignment
-    paddingRight: '10px',
-  };
-
-  const pathStyle: any = {
-    fontSize: '14px', // Increased font size
-    color: THEME.text.secondary,
-    flex: 1,
-    textOverflow: 'ellipsis',
-    overflow: 'hidden',
-    whiteSpace: 'nowrap',
-  };
-
-  if (!everOpened) {
-    nameStyle.color = THEME.text.newItem;
-  } else {
-    nameStyle.color = THEME.text.primary;
-  }
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '2px 0',
-        width: '100%',
-        height: '30px', // Increased height for better readability
-      }}
-    >
-      <div style={nameStyle}>
-        <Highlighter
-          searchWords={searchWords}
-          autoEscape
-          textToHighlight={name}
-          highlightStyle={{
-            backgroundColor: 'rgba(0, 188, 212, 0.2)',
-            color: '#fff',
-            padding: '0 2px',
-            borderRadius: '2px',
-          }}
-        />
-      </div>
-      <div style={pathStyle}>
-        <Highlighter
-          searchWords={searchWords}
-          autoEscape
-          textToHighlight={parentPath}
-          highlightStyle={{
-            backgroundColor: 'rgba(0, 188, 212, 0.1)',
-            color: '#ccc',
-            padding: '0 2px',
-            borderRadius: '2px',
-          }}
-        />
-      </div>
-    </div>
-  );
-};
+// Note: the unused formatOptionLabel was removed — the inline version
+// in the Select component (with branch display + IDE dot) is the one used.
 
 export interface SelectInputOptionInterface {
   readonly value: string;
@@ -936,10 +867,11 @@ function SwitcherApp() {
     for (const subInput of inputArray) {
       if (!subInput) continue;
       // Expand ~ to home dir so "~/git/codev" matches "/Users/grimmer/git/codev"
-      const expanded = subInput.startsWith('~/')
-        ? HOME_PREFIX.toLowerCase() + subInput.slice(2)
-        : subInput === '~'
-          ? HOME_DIR.toLowerCase()
+      const home = getHomeDir();
+      const expanded = subInput.startsWith('~/') && home
+        ? (home + '/').toLowerCase() + subInput.slice(2)
+        : subInput === '~' && home
+          ? home.toLowerCase()
           : subInput;
       if (!target?.includes(expanded)) {
         return false;
@@ -1552,7 +1484,7 @@ function SwitcherApp() {
           const searchWords = (searchInput ?? '')
             .split(' ')
             .filter((sub: string) => sub);
-          const pathPart = label?.slice(0, label.lastIndexOf('/'));
+          const pathPart = shortenPath(label?.slice(0, label.lastIndexOf('/')));
           let name = label?.slice(label.lastIndexOf('/') + 1);
           name = name?.replace(/\.code-workspace/, ' (Workspace)');
           const branch = projectBranches[value];
