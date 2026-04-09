@@ -410,7 +410,7 @@ const createSettingsWindow = (
   return settingsWindow;
 };
 
-const createSwitcherWindow = (): BrowserWindow => {
+const createSwitcherWindow = (initialMode?: string): BrowserWindow => {
   // Create the browser window.
   const window = new BrowserWindow({
     // maximizable: false,
@@ -431,7 +431,9 @@ const createSwitcherWindow = (): BrowserWindow => {
   });
 
   // and load the index.html of the app.
-  window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY);
+  // Pass initial mode via hash so renderer can use it synchronously (no async IPC)
+  const hash = initialMode ? `#mode=${initialMode}` : '';
+  window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY + hash);
 
   // Open external links in default browser
   const { shell } = require('electron');
@@ -1098,7 +1100,8 @@ const trayToggleEvtHandler = async () => {
     }
   }
 
-  switcherWindow = createSwitcherWindow();
+  const defaultSwitcherMode = ((await settings.get('default-switcher-mode')) as string) || 'projects';
+  switcherWindow = createSwitcherWindow(defaultSwitcherMode);
   if (isDebug) {
     console.log('when ready');
   }

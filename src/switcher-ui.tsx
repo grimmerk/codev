@@ -283,7 +283,14 @@ function SwitcherApp() {
     }
   };
 
-  const [mode, setMode] = useState<SwitcherMode>('projects');
+  // Read initial mode from URL hash (set by main process) to avoid flash
+  const initialMode = (() => {
+    const hash = window.location.hash; // e.g. #mode=sessions
+    const match = hash.match(/mode=(\w+)/);
+    const m = match?.[1];
+    return (m === 'sessions' || m === 'terminal') ? m : 'projects';
+  })();
+  const [mode, setMode] = useState<SwitcherMode>(initialMode);
   const [inputValue, setInputValue] = useState('');
   const [sessionSearchValue, setSessionSearchValue] = useState('');
   const [selectedOptions, setSelectedOptions] = useState([]);
@@ -304,7 +311,7 @@ function SwitcherApp() {
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
-  const modeRef = useRef<SwitcherMode>('projects');
+  const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
@@ -548,6 +555,11 @@ function SwitcherApp() {
       modeRef.current = 'terminal';
       setMode('terminal');
     });
+
+    // If initial mode is sessions (from URL hash), fetch sessions immediately
+    if (initialMode === 'sessions') {
+      fetchClaudeSessions();
+    }
 
     // Session status updates from hooks (fs.watch)
     window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
