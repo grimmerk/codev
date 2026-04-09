@@ -1190,9 +1190,9 @@ function SwitcherApp() {
                       const status = sessionStatuses[session.sessionId];
                       const color = status === 'working' ? '#E8956A'
                         : status === 'idle' ? '#66BB6A'
-                        : status === 'needs-attention' ? '#FFA726'
+                        : status === 'needs-attention' ? '#F06856'
                         : '#CE93D8'; // no status data yet
-                      const animation = status === 'working' ? 'statusPulse 2s ease-in-out infinite'
+                      const animation = status === 'working' ? 'statusPulse 2.5s ease-in-out infinite'
                         : status === 'needs-attention' ? 'statusBlink 1s ease-in-out infinite'
                         : 'none';
                       return <span style={{
@@ -1481,9 +1481,12 @@ function SwitcherApp() {
           { value, label, everOpened }: { value: string; label: string; everOpened: boolean },
           { inputValue: searchInput }: { inputValue: string },
         ) => {
+          const home = getHomeDir();
+          const homePrefix = home ? home + '/' : '';
           const searchWords = (searchInput ?? '')
             .split(' ')
-            .filter((sub: string) => sub);
+            .filter((sub: string) => sub)
+            .map((w: string) => homePrefix && w.startsWith(homePrefix) ? '~/' + w.slice(homePrefix.length) : w);
           const pathPart = shortenPath(label?.slice(0, label.lastIndexOf('/')));
           let name = label?.slice(label.lastIndexOf('/') + 1);
           name = name?.replace(/\.code-workspace/, ' (Workspace)');

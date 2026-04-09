@@ -8,7 +8,9 @@
 - Style: project paths display `~/` instead of `/Users/<user>/`
 - Style: shortcut display uses macOS symbols (`⌃⌘R` instead of `Cmd+Ctrl+R`)
 - Feat: clicking shortcut in title bar opens Settings → Shortcuts tab
-- Feat: project search supports `~/` prefix and full path matching
+- Feat: project search supports `~/` prefix and full path matching (with highlight)
+- Style: needs-attention dot changed from orange `#FFA726` to warm red `#F06856` for better distinction from working
+- Style: working pulse animation slowed from 2s to 2.5s
 
 ## 1.0.73
 
