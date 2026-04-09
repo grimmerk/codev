@@ -159,6 +159,24 @@ const THEME = {
 };
 
 /** Enhanced option label formatter - horizontal layout for higher information density */
+/** Convert Electron accelerator to macOS symbol string (e.g. "Command+Control+R" → "⌃⌘R") */
+const acceleratorToSymbols = (acc: string): string =>
+  acc
+    .replace(/Command/g, '⌘')
+    .replace(/Control/g, '⌃')
+    .replace(/Alt/g, '⌥')
+    .replace(/Shift/g, '⇧')
+    .replace(/\+/g, '');
+
+const HOME_DIR = window.electronAPI.getHomeDir();
+const HOME_PREFIX = HOME_DIR + '/';
+
+/** Replace /Users/<user>/ with ~/ for display */
+const shortenPath = (p: string): string => {
+  if (p === HOME_DIR) return '~';
+  return p?.startsWith(HOME_PREFIX) ? '~/' + p.slice(HOME_PREFIX.length) : p;
+};
+
 const formatOptionLabel = (
   {
     value,
@@ -172,8 +190,9 @@ const formatOptionLabel = (
     .split(' ')
     .filter((sub: string) => sub);
 
-  // Extract path and name
-  const path = label?.slice(0, label.lastIndexOf('/'));
+  // Extract path and name, shorten parent path for display
+  const rawParent = label?.slice(0, label.lastIndexOf('/'));
+  const parentPath = shortenPath(rawParent);
   let name = label?.slice(label.lastIndexOf('/') + 1);
   name = name?.replace(/\.code-workspace/, ' (Workspace)');
 
@@ -227,7 +246,7 @@ const formatOptionLabel = (
         <Highlighter
           searchWords={searchWords}
           autoEscape
-          textToHighlight={path}
+          textToHighlight={parentPath}
           highlightStyle={{
             backgroundColor: 'rgba(0, 188, 212, 0.1)',
             color: '#ccc',
@@ -363,6 +382,7 @@ function SwitcherApp() {
   const [currentAppMode, setCurrentAppMode] = useState('menubar');
   const [modeBanner, setModeBanner] = useState<string | null>(null);
   const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
+  const [settingsOpenToTab, setSettingsOpenToTab] = useState<'general' | 'sessions' | 'shortcuts' | null>(null);
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateWorkingPathUIAndList = async (path: string) => {
@@ -675,10 +695,7 @@ function SwitcherApp() {
     // Load shortcut for display
     window.electronAPI.getShortcuts().then((s: any) => {
       if (s?.quickSwitcher) {
-        const display = s.quickSwitcher
-          .replace('Command', 'Cmd')
-          .replace('Control', 'Ctrl')
-          .replace(/\+/g, '+');
+        const display = acceleratorToSymbols(s.quickSwitcher);
         setQuickSwitcherShortcut(display);
         shortcutDisplay = display;
       }
@@ -701,13 +718,13 @@ function SwitcherApp() {
     });
     window.electronAPI.onShortcutsUpdated((_event: any, s: any) => {
       if (s?.quickSwitcher) {
-        shortcutDisplay = s.quickSwitcher.replace('Command', 'Cmd').replace('Control', 'Ctrl').replace(/\+/g, '+');
+        shortcutDisplay = acceleratorToSymbols(s.quickSwitcher);
         setQuickSwitcherShortcut(shortcutDisplay);
       }
     });
     window.electronAPI.onAppModeChanged((_event: any, mode: string) => {
       setCurrentAppMode(mode);
-      const key = shortcutDisplay || 'Cmd+Ctrl+R';
+      const key = shortcutDisplay || '⌃⌘R';
       if (mode === 'normal') {
         showBanner('Switched to Normal App mode — window stays visible and is draggable.');
       } else {
@@ -903,33 +920,32 @@ function SwitcherApp() {
     },
     input: string,
   ) => {
-    // console.log("filterOptions:", candidate?.data)
-    let allFound = true;
+    if (!input) return true;
 
     let target: string;
     try {
       const branch = projectBranches[candidate?.value] || '';
-      target = (candidate?.value + ' ' + branch).toLowerCase();
+      // Include both full path and ~/shortened path for matching
+      const shortPath = shortenPath(candidate?.value);
+      target = (candidate?.value + ' ' + shortPath + ' ' + branch).toLowerCase();
     } catch (err) {
       console.log('target:', candidate);
     }
 
-    if (input) {
-      const inputArray = input.toLowerCase().split(' ');
-      for (const subInput of inputArray) {
-        if (subInput) {
-          if (!target?.includes(subInput)) {
-            allFound = false;
-            break;
-          }
-        }
+    const inputArray = input.toLowerCase().split(' ');
+    for (const subInput of inputArray) {
+      if (!subInput) continue;
+      // Expand ~ to home dir so "~/git/codev" matches "/Users/grimmer/git/codev"
+      const expanded = subInput.startsWith('~/')
+        ? HOME_PREFIX.toLowerCase() + subInput.slice(2)
+        : subInput === '~'
+          ? HOME_DIR.toLowerCase()
+          : subInput;
+      if (!target?.includes(expanded)) {
+        return false;
       }
-    } else {
-      return true;
     }
-
-    // false means all filtered (not match)
-    return allFound;
+    return true;
   };
 
   return (
@@ -1011,7 +1027,13 @@ function SwitcherApp() {
         {/* @ts-ignore */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
           {quickSwitcherShortcut && (
-            <span style={{ fontSize: '10px', color: '#555' }}>
+            <span
+              onClick={() => setSettingsOpenToTab('shortcuts')}
+              title="Click to customize shortcuts"
+              style={{ fontSize: '10px', color: '#555', cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#555'; }}
+            >
               {quickSwitcherShortcut}
             </span>
           )}
@@ -1075,6 +1097,8 @@ function SwitcherApp() {
           <PopupDefaultExample
             workingFolderPath={workingFolderPath}
             switcherMode={mode}
+            openToTab={settingsOpenToTab}
+            onOpenToTabConsumed={() => setSettingsOpenToTab(null)}
             saveCallback={(key: string, value: string) => {
               if (key === 'sessionDisplayMode') {
                 setSessionDisplayMode(value);

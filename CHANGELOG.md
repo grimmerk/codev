@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.74
+
+- Fix: session status dot stuck on purple for sessions with large responses (#116)
+  - `tail -n 50` on large JSONL files exceeded `execFile` maxBuffer (1MB)
+  - Reduced to 15 lines + raised maxBuffer to 5MB
+- Style: project paths display `~/` instead of `/Users/<user>/`
+- Style: shortcut display uses macOS symbols (`⌃⌘R` instead of `Cmd+Ctrl+R`)
+- Feat: clicking shortcut in title bar opens Settings → Shortcuts tab
+- Feat: project search supports `~/` prefix and full path matching
+
 ## 1.0.73
 
 - Feat: embedded terminal search (`Cmd+F`)

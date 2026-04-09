@@ -891,7 +891,10 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
           if (!pid || !sessionId) continue;
 
           // Verify process is still alive
-          try { process.kill(pid, 0); } catch { continue; }
+          try { process.kill(pid, 0); } catch {
+            console.log(`[detect-active] PID ${pid} (${sessionId}) not alive, skipping`);
+            continue;
+          }
 
           entrypoints.set(sessionId, entrypoint);
 
@@ -924,17 +927,22 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
               activeMap.set(sessionId, pid);
             } else if (cwd) {
               // sessionId not in history — find session by cwd
+              console.log(`[detect-active] PID ${pid} sessionId ${sessionId} not in history.jsonl, trying cwd match (${cwd})`);
               const cwdCandidates = allSessions.filter(s => s.project === cwd && !activeMap.has(s.sessionId));
               if (cwdCandidates.length === 1) {
                 activeMap.set(cwdCandidates[0].sessionId, pid);
               } else if (cwdCandidates.length > 1) {
                 // Multiple same-cwd candidates — queue for cross-reference
                 needsCrossRef.push({ pid, cwd, candidates: cwdCandidates });
+              } else {
+                console.log(`[detect-active] PID ${pid} sessionId ${sessionId}: no cwd match found`);
               }
+            } else {
+              console.log(`[detect-active] PID ${pid} sessionId ${sessionId}: not in history and no cwd`);
             }
           }
-        } catch {
-          // skip malformed files
+        } catch (err) {
+          console.error(`[detect-active] Error processing session file ${file}:`, err);
         }
       }
 
@@ -954,8 +962,8 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
     if (!fs.existsSync(sessionsDir)) {
       await detectActiveSessionsLegacy(activeMap);
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    console.error('[detect-active] Error in detectActiveSessions:', err);
   }
 
   cachedActiveMap = activeMap;

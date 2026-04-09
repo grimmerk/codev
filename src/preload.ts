@@ -4,6 +4,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getHomeDir: () => ipcRenderer.sendSync('get-home-dir'),
   invokeVSCode: (path: string, option: string) =>
     ipcRenderer.send('invoke-vscode', path, option),
 
