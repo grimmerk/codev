@@ -410,7 +410,7 @@ const createSettingsWindow = (
   return settingsWindow;
 };
 
-const createSwitcherWindow = (): BrowserWindow => {
+const createSwitcherWindow = (initialMode?: string): BrowserWindow => {
   // Create the browser window.
   const window = new BrowserWindow({
     // maximizable: false,
@@ -431,7 +431,9 @@ const createSwitcherWindow = (): BrowserWindow => {
   });
 
   // and load the index.html of the app.
-  window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY);
+  // Pass initial mode via hash so renderer can use it synchronously (no async IPC)
+  const hash = initialMode ? `#mode=${initialMode}` : '';
+  window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY + hash);
 
   // Open external links in default browser
   const { shell } = require('electron');
@@ -617,6 +619,10 @@ ipcMain.on('search-working-folder', (event, path: string) => {
   if (window) {
     window.webContents.send('working-folder-iterated', returnPathlist);
   }
+});
+
+ipcMain.handle('get-home-dir', () => {
+  return require('os').homedir();
 });
 
 ipcMain.on('hide-app', (event) => {
@@ -1094,7 +1100,8 @@ const trayToggleEvtHandler = async () => {
     }
   }
 
-  switcherWindow = createSwitcherWindow();
+  const defaultSwitcherMode = ((await settings.get('default-switcher-mode')) as string) || 'projects';
+  switcherWindow = createSwitcherWindow(defaultSwitcherMode);
   if (isDebug) {
     console.log('when ready');
   }
@@ -1980,6 +1987,10 @@ ipcMain.handle('get-session-statuses', async () => {
   // Scan active sessions that don't have status files yet + cleanup stale ones
   try {
     const { activeMap, vscodeSessions } = await detectActiveSessions();
+    if (isDebug) {
+      console.log('[session-status] activeMap keys:', Array.from(activeMap.keys()));
+      console.log('[session-status] status files:', Object.keys(obj));
+    }
     cleanupStaleStatuses(new Set(activeMap.keys()));
     const allSessions = readClaudeSessions(500); // hoisted out of loop
     // Merge VS Code sessions for status scanning
@@ -1988,25 +1999,44 @@ ipcMain.handle('get-session-statuses', async () => {
       .filter(([sessionId]) => !obj[sessionId])
       .map(([sessionId]) => {
         const session = allKnown.find((s: any) => s.sessionId === sessionId);
+        if (!session && isDebug) {
+          console.log(`[session-status] active session ${sessionId} not found in allKnown (${allKnown.length} sessions)`);
+        }
         return session ? { sessionId, project: session.project } : null;
       })
       .filter(Boolean) as { sessionId: string; project: string }[];
 
     if (sessionsWithoutStatus.length > 0) {
+      if (isDebug) {
+        console.log('[session-status] scanning', sessionsWithoutStatus.length, 'sessions without status:', sessionsWithoutStatus.map(s => s.sessionId));
+      }
       const scanned = await scanInitialStatuses(sessionsWithoutStatus);
+      if (isDebug) {
+        console.log('[session-status] scan results:', Array.from(scanned.entries()));
+      }
       scanned.forEach((v, k) => {
         obj[k] = { status: v, timestamp: Math.floor(Date.now() / 1000) };
         // Persist scanned status to file so fs.watch treats all statuses uniformly
         writeStatusFile(k, v as string);
       });
     }
-  } catch {}
+  } catch (err) {
+    console.error('[session-status] Error during status scan:', err);
+  }
 
   return obj;
 });
 
 ipcMain.handle('get-app-mode', async () => {
   return appMode;
+});
+
+ipcMain.handle('get-banner-seen', async () => {
+  return await settings.get('normal-mode-banner-seen');
+});
+
+ipcMain.on('set-banner-seen', async () => {
+  await settings.set('normal-mode-banner-seen', true);
 });
 
 ipcMain.on('set-app-mode', async (_event, mode: string) => {

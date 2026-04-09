@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.74
+
+- Fix: session status dot stuck on purple for sessions with large responses (#116)
+  - `tail -n 50` on large JSONL files exceeded `execFile` maxBuffer (1MB)
+  - Reduced to 15 lines + raised maxBuffer to 5MB
+- Fix: eliminate tab flash on startup (default tab now passed via URL hash)
+- Style: project paths display `~/` instead of `/Users/<user>/`
+- Style: shortcut display uses macOS symbols (`⌘⌃R` instead of `Cmd+Ctrl+R`)
+- Style: needs-attention dot changed from orange `#FFA726` to warm red `#F06856`
+- Style: working pulse animation slowed from 2s to 2.5s
+- Style: normal mode banner only shown on first launch
+- Feat: clicking shortcut in title bar opens Settings → Shortcuts tab
+- Feat: project search supports `~/` prefix and full path matching (with highlight)
+
 ## 1.0.73
 
 - Feat: embedded terminal search (`Cmd+F`)

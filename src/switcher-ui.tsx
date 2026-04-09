@@ -159,86 +159,35 @@ const THEME = {
 };
 
 /** Enhanced option label formatter - horizontal layout for higher information density */
-const formatOptionLabel = (
-  {
-    value,
-    label,
-    everOpened,
-  }: { value: string; label: string; everOpened: boolean },
-  { inputValue }: { inputValue: string },
-) => {
-  // Split input into search words
-  const searchWords = (inputValue ?? '')
-    .split(' ')
-    .filter((sub: string) => sub);
+/** Convert Electron accelerator to macOS symbol string (e.g. "Command+Control+R" → "⌃⌘R") */
+const acceleratorToSymbols = (acc: string): string =>
+  acc
+    .replace(/Command/g, '⌘')
+    .replace(/Control/g, '⌃')
+    .replace(/Alt/g, '⌥')
+    .replace(/Shift/g, '⇧')
+    .replace(/\+/g, '');
 
-  // Extract path and name
-  const path = label?.slice(0, label.lastIndexOf('/'));
-  let name = label?.slice(label.lastIndexOf('/') + 1);
-  name = name?.replace(/\.code-workspace/, ' (Workspace)');
+let _homeDir = '';
+let _homePrefix = '';
+// Fetch home dir async on load, cache for sync access
+window.electronAPI?.getHomeDir?.().then((dir: string) => {
+  _homeDir = dir || '';
+  _homePrefix = _homeDir ? _homeDir + '/' : '';
+});
+const getHomeDir = (): string => _homeDir;
 
-  // Determine styles based on whether the item has been opened
-  const nameStyle: any = {
-    fontWeight: '500',
-    fontSize: '15px', // Increased font size
-    minWidth: '180px', // Fixed width for project names for better alignment
-    paddingRight: '10px',
-  };
-
-  const pathStyle: any = {
-    fontSize: '14px', // Increased font size
-    color: THEME.text.secondary,
-    flex: 1,
-    textOverflow: 'ellipsis',
-    overflow: 'hidden',
-    whiteSpace: 'nowrap',
-  };
-
-  if (!everOpened) {
-    nameStyle.color = THEME.text.newItem;
-  } else {
-    nameStyle.color = THEME.text.primary;
-  }
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '2px 0',
-        width: '100%',
-        height: '30px', // Increased height for better readability
-      }}
-    >
-      <div style={nameStyle}>
-        <Highlighter
-          searchWords={searchWords}
-          autoEscape
-          textToHighlight={name}
-          highlightStyle={{
-            backgroundColor: 'rgba(0, 188, 212, 0.2)',
-            color: '#fff',
-            padding: '0 2px',
-            borderRadius: '2px',
-          }}
-        />
-      </div>
-      <div style={pathStyle}>
-        <Highlighter
-          searchWords={searchWords}
-          autoEscape
-          textToHighlight={path}
-          highlightStyle={{
-            backgroundColor: 'rgba(0, 188, 212, 0.1)',
-            color: '#ccc',
-            padding: '0 2px',
-            borderRadius: '2px',
-          }}
-        />
-      </div>
-    </div>
-  );
+/** Replace /Users/<user>/ with ~/ for display */
+const shortenPath = (p: string): string => {
+  const home = getHomeDir();
+  if (!home) return p;
+  if (p === home) return '~';
+  const prefix = _homePrefix;
+  return p?.startsWith(prefix) ? '~/' + p.slice(prefix.length) : p;
 };
+
+// Note: the unused formatOptionLabel was removed — the inline version
+// in the Select component (with branch display + IDE dot) is the one used.
 
 export interface SelectInputOptionInterface {
   readonly value: string;
@@ -334,7 +283,14 @@ function SwitcherApp() {
     }
   };
 
-  const [mode, setMode] = useState<SwitcherMode>('projects');
+  // Read initial mode from URL hash (set by main process) to avoid flash
+  const initialMode = (() => {
+    const hash = window.location.hash; // e.g. #mode=sessions
+    const match = hash.match(/mode=(\w+)/);
+    const m = match?.[1];
+    return (m === 'sessions' || m === 'terminal') ? m : 'projects';
+  })();
+  const [mode, setMode] = useState<SwitcherMode>(initialMode);
   const [inputValue, setInputValue] = useState('');
   const [sessionSearchValue, setSessionSearchValue] = useState('');
   const [selectedOptions, setSelectedOptions] = useState([]);
@@ -355,7 +311,7 @@ function SwitcherApp() {
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
-  const modeRef = useRef<SwitcherMode>('projects');
+  const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
@@ -363,6 +319,7 @@ function SwitcherApp() {
   const [currentAppMode, setCurrentAppMode] = useState('menubar');
   const [modeBanner, setModeBanner] = useState<string | null>(null);
   const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
+  const [settingsOpenToTab, setSettingsOpenToTab] = useState<'general' | 'sessions' | 'shortcuts' | null>(null);
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateWorkingPathUIAndList = async (path: string) => {
@@ -599,6 +556,11 @@ function SwitcherApp() {
       setMode('terminal');
     });
 
+    // If initial mode is sessions (from URL hash), fetch sessions immediately
+    if (initialMode === 'sessions') {
+      fetchClaudeSessions();
+    }
+
     // Session status updates from hooks (fs.watch)
     window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
       if (!rawStatuses) return;
@@ -675,10 +637,7 @@ function SwitcherApp() {
     // Load shortcut for display
     window.electronAPI.getShortcuts().then((s: any) => {
       if (s?.quickSwitcher) {
-        const display = s.quickSwitcher
-          .replace('Command', 'Cmd')
-          .replace('Control', 'Ctrl')
-          .replace(/\+/g, '+');
+        const display = acceleratorToSymbols(s.quickSwitcher);
         setQuickSwitcherShortcut(display);
         shortcutDisplay = display;
       }
@@ -696,18 +655,24 @@ function SwitcherApp() {
       const m = mode || 'normal';
       setCurrentAppMode(m);
       if (m === 'normal') {
-        showBanner('Normal App mode — drag to reposition. Switch to Menu Bar mode in Settings.', 6000);
+        // Only show the startup banner once (first launch)
+        window.electronAPI.getBannerSeen().then((seen: boolean) => {
+          if (!seen) {
+            showBanner('Normal App mode — drag to reposition. Switch to Menu Bar mode in Settings.', 6000);
+            window.electronAPI.setBannerSeen();
+          }
+        });
       }
     });
     window.electronAPI.onShortcutsUpdated((_event: any, s: any) => {
       if (s?.quickSwitcher) {
-        shortcutDisplay = s.quickSwitcher.replace('Command', 'Cmd').replace('Control', 'Ctrl').replace(/\+/g, '+');
+        shortcutDisplay = acceleratorToSymbols(s.quickSwitcher);
         setQuickSwitcherShortcut(shortcutDisplay);
       }
     });
     window.electronAPI.onAppModeChanged((_event: any, mode: string) => {
       setCurrentAppMode(mode);
-      const key = shortcutDisplay || 'Cmd+Ctrl+R';
+      const key = shortcutDisplay || '⌃⌘R';
       if (mode === 'normal') {
         showBanner('Switched to Normal App mode — window stays visible and is draggable.');
       } else {
@@ -903,33 +868,35 @@ function SwitcherApp() {
     },
     input: string,
   ) => {
-    // console.log("filterOptions:", candidate?.data)
-    let allFound = true;
+    if (!input) return true;
 
     let target: string;
     try {
       const branch = projectBranches[candidate?.value] || '';
-      target = (candidate?.value + ' ' + branch).toLowerCase();
+      // Include both full path and ~/shortened path for matching
+      const shortPath = shortenPath(candidate?.value);
+      target = (candidate?.value + ' ' + shortPath + ' ' + branch).toLowerCase();
     } catch (err) {
       console.log('target:', candidate);
     }
 
-    if (input) {
-      const inputArray = input.toLowerCase().split(' ');
-      for (const subInput of inputArray) {
-        if (subInput) {
-          if (!target?.includes(subInput)) {
-            allFound = false;
-            break;
-          }
-        }
+    const inputArray = input.toLowerCase().split(' ');
+    for (const rawSubInput of inputArray) {
+      // Strip trailing slash for matching (e.g. "~/git/" → "~/git")
+      const subInput = rawSubInput.endsWith('/') ? rawSubInput.slice(0, -1) : rawSubInput;
+      if (!subInput) continue;
+      // Expand ~ to home dir so "~/git/codev" matches "/Users/grimmer/git/codev"
+      const home = getHomeDir();
+      const expanded = subInput.startsWith('~/') && home
+        ? (home + '/').toLowerCase() + subInput.slice(2)
+        : subInput === '~' && home
+          ? home.toLowerCase()
+          : subInput;
+      if (!target?.includes(expanded)) {
+        return false;
       }
-    } else {
-      return true;
     }
-
-    // false means all filtered (not match)
-    return allFound;
+    return true;
   };
 
   return (
@@ -1011,7 +978,13 @@ function SwitcherApp() {
         {/* @ts-ignore */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
           {quickSwitcherShortcut && (
-            <span style={{ fontSize: '10px', color: '#555' }}>
+            <span
+              onClick={() => setSettingsOpenToTab('shortcuts')}
+              title="Click to customize shortcuts"
+              style={{ fontSize: '10px', color: '#555', cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#555'; }}
+            >
               {quickSwitcherShortcut}
             </span>
           )}
@@ -1075,6 +1048,8 @@ function SwitcherApp() {
           <PopupDefaultExample
             workingFolderPath={workingFolderPath}
             switcherMode={mode}
+            openToTab={settingsOpenToTab}
+            onOpenToTabConsumed={() => setSettingsOpenToTab(null)}
             saveCallback={(key: string, value: string) => {
               if (key === 'sessionDisplayMode') {
                 setSessionDisplayMode(value);
@@ -1234,9 +1209,9 @@ function SwitcherApp() {
                       const status = sessionStatuses[session.sessionId];
                       const color = status === 'working' ? '#E8956A'
                         : status === 'idle' ? '#66BB6A'
-                        : status === 'needs-attention' ? '#FFA726'
+                        : status === 'needs-attention' ? '#F06856'
                         : '#CE93D8'; // no status data yet
-                      const animation = status === 'working' ? 'statusPulse 2s ease-in-out infinite'
+                      const animation = status === 'working' ? 'statusPulse 2.5s ease-in-out infinite'
                         : status === 'needs-attention' ? 'statusBlink 1s ease-in-out infinite'
                         : 'none';
                       return <span style={{
@@ -1525,10 +1500,24 @@ function SwitcherApp() {
           { value, label, everOpened }: { value: string; label: string; everOpened: boolean },
           { inputValue: searchInput }: { inputValue: string },
         ) => {
+          const home = getHomeDir();
+          const homePrefix = home ? home + '/' : '';
+          // Normalize search words: replace home dir prefix with ~/, strip trailing /
           const searchWords = (searchInput ?? '')
             .split(' ')
-            .filter((sub: string) => sub);
-          const pathPart = label?.slice(0, label.lastIndexOf('/'));
+            .filter((sub: string) => sub)
+            .map((w: string) => home && w === home ? '~' : homePrefix && w.startsWith(homePrefix) ? '~/' + w.slice(homePrefix.length) : w)
+            .map((w: string) => w.endsWith('/') ? w.slice(0, -1) : w)
+            .filter((w: string) => w);
+          // Split path tokens into individual segments for highlighting both name and path columns.
+          // E.g. "~/git/fred-ff-test-token" → ['~', 'git', 'fred-ff-test-token', '~/git/fred-ff-test-token']
+          // Both Highlighters get all segments, so each column highlights whatever matches.
+          const allSegments = searchWords.flatMap((w: string) =>
+            w.includes('/') ? [...w.split('/').filter(Boolean), w] : [w]
+          );
+          // Deduplicate
+          const highlightWords = [...new Set(allSegments)];
+          const pathPart = shortenPath(label?.slice(0, label.lastIndexOf('/')));
           let name = label?.slice(label.lastIndexOf('/') + 1);
           name = name?.replace(/\.code-workspace/, ' (Workspace)');
           const branch = projectBranches[value];
@@ -1560,7 +1549,7 @@ function SwitcherApp() {
               </div>
               <div style={nameStyle}>
                 <Highlighter
-                  searchWords={searchWords}
+                  searchWords={highlightWords}
                   autoEscape
                   textToHighlight={name}
                   highlightStyle={{
@@ -1596,7 +1585,7 @@ function SwitcherApp() {
                 textAlign: 'right',
               }}>
                 <Highlighter
-                  searchWords={searchWords}
+                  searchWords={highlightWords}
                   autoEscape
                   textToHighlight={pathPart}
                   highlightStyle={{

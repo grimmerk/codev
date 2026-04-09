@@ -46,11 +46,15 @@ const PopupDefaultExample = ({
   saveCallback,
   openCallback,
   switcherMode,
+  openToTab,
+  onOpenToTabConsumed,
 }: {
   workingFolderPath?: string;
   saveCallback?: (key: string, value: string) => void;
   openCallback?: any;
   switcherMode?: string;
+  openToTab?: 'general' | 'sessions' | 'shortcuts' | null;
+  onOpenToTabConsumed?: () => void;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
@@ -141,6 +145,15 @@ const PopupDefaultExample = ({
       });
     }
   }, [isOpen]);
+
+  // Allow parent to open Settings on a specific tab
+  useEffect(() => {
+    if (openToTab) {
+      setSettingsTab(openToTab);
+      setIsOpen(true);
+      onOpenToTabConsumed?.();
+    }
+  }, [openToTab]);
 
   const handleLaunchAtLoginChange = (checked: boolean) => {
     setLaunchAtLogin(checked);

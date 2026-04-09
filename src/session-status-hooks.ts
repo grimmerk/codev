@@ -259,7 +259,7 @@ export const watchStatusDir = (
 /**
  * Scan active sessions' JSONL files to determine initial status
  * (for sessions started before CodeV or before hooks were installed).
- * Reads last ~50 lines of each session's JSONL to check:
+ * Reads last ~15 lines of each session's JSONL to check:
  * - Pending AskUserQuestion tool use → needs-attention
  * - Last assistant message with stop_reason "end_turn" → idle
  * - Otherwise → working
@@ -270,7 +270,11 @@ export const scanInitialStatuses = async (
   const { execFile } = require('child_process');
   const tailFile = (filePath: string): Promise<string> =>
     new Promise((resolve) => {
-      execFile('tail', ['-n', '50', filePath], { encoding: 'utf-8', timeout: 3000 }, (err: any, stdout: string) => {
+      // Use 15 lines (not 50) — large assistant messages can make 50 lines > 1MB,
+      // exceeding execFile's maxBuffer and silently failing.
+      // The last ~5-10 lines are usually system entries; assistant entry is typically within 15.
+      execFile('tail', ['-n', '15', filePath], { encoding: 'utf-8', timeout: 3000, maxBuffer: 5 * 1024 * 1024 }, (err: any, stdout: string) => {
+        if (err) console.error(`[session-status] tailFile error for ${path.basename(filePath)}:`, err.message || err);
         resolve(err ? '' : stdout);
       });
     });
@@ -290,7 +294,7 @@ export const scanInitialStatuses = async (
     const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
     if (!fs.existsSync(jsonlPath)) return;
 
-    // Read last 50 lines
+    // Read last 15 lines
     const tail = await tailFile(jsonlPath);
     if (!tail.trim()) return;
 
@@ -359,10 +363,15 @@ export const cleanupStaleStatuses = (activeSessionIds: Set<string>): void => {
       if (!file.endsWith('.json')) continue;
       const sessionId = file.replace('.json', '');
       if (!activeSessionIds.has(sessionId)) {
-        try { fs.unlinkSync(path.join(STATUS_DIR, file)); } catch {}
+        console.log(`[session-status] cleanup: removing stale status file ${file}`);
+        try { fs.unlinkSync(path.join(STATUS_DIR, file)); } catch (err) {
+          console.error(`[session-status] cleanup: failed to delete ${file}:`, err);
+        }
       }
     }
-  } catch {}
+  } catch (err) {
+    console.error('[session-status] cleanup error:', err);
+  }
 };
 
 /**
@@ -375,7 +384,9 @@ export const writeStatusFile = (sessionId: string, status: string): void => {
     const targetFile = path.join(STATUS_DIR, `${sessionId}.json`);
     fs.writeFileSync(tmpFile, JSON.stringify({ status, timestamp: Math.floor(Date.now() / 1000), cwd: '' }));
     fs.renameSync(tmpFile, targetFile);
-  } catch {}
+  } catch (err) {
+    console.error(`[session-status] writeStatusFile failed for ${sessionId}:`, err);
+  }
 };
 
 export { STATUS_DIR, HOOK_SCRIPT_PATH };
