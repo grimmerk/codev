@@ -881,7 +881,9 @@ function SwitcherApp() {
     }
 
     const inputArray = input.toLowerCase().split(' ');
-    for (const subInput of inputArray) {
+    for (const rawSubInput of inputArray) {
+      // Strip trailing slash for matching (e.g. "~/git/" → "~/git")
+      const subInput = rawSubInput.endsWith('/') ? rawSubInput.slice(0, -1) : rawSubInput;
       if (!subInput) continue;
       // Expand ~ to home dir so "~/git/codev" matches "/Users/grimmer/git/codev"
       const home = getHomeDir();
