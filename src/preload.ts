@@ -5,6 +5,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getHomeDir: () => ipcRenderer.invoke('get-home-dir'),
+  getBannerSeen: () => ipcRenderer.invoke('get-banner-seen'),
+  setBannerSeen: () => ipcRenderer.send('set-banner-seen'),
   invokeVSCode: (path: string, option: string) =>
     ipcRenderer.send('invoke-vscode', path, option),
 

@@ -2028,6 +2028,14 @@ ipcMain.handle('get-app-mode', async () => {
   return appMode;
 });
 
+ipcMain.handle('get-banner-seen', async () => {
+  return await settings.get('normal-mode-banner-seen');
+});
+
+ipcMain.on('set-banner-seen', async () => {
+  await settings.set('normal-mode-banner-seen', true);
+});
+
 ipcMain.on('set-app-mode', async (_event, mode: string) => {
   const newMode = mode === 'menubar' ? 'menubar' : 'normal';
   await settings.set('app-mode', newMode);

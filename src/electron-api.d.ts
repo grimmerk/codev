@@ -5,6 +5,8 @@ type IpcCallback = (event: Electron.IpcRendererEvent, ...args: any[]) => void;
 interface IElectronAPI {
   // App actions
   getHomeDir: () => Promise<string>;
+  getBannerSeen: () => Promise<boolean>;
+  setBannerSeen: () => void;
   invokeVSCode: (path: string, option: string) => void;
   hideApp: () => void;
   openFolderSelector: () => void;

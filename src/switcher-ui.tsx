@@ -644,10 +644,12 @@ function SwitcherApp() {
       setCurrentAppMode(m);
       if (m === 'normal') {
         // Only show the startup banner once (first launch)
-        if (!localStorage.getItem('normal-mode-banner-seen')) {
-          showBanner('Normal App mode — drag to reposition. Switch to Menu Bar mode in Settings.', 6000);
-          localStorage.setItem('normal-mode-banner-seen', '1');
-        }
+        window.electronAPI.getBannerSeen().then((seen: boolean) => {
+          if (!seen) {
+            showBanner('Normal App mode — drag to reposition. Switch to Menu Bar mode in Settings.', 6000);
+            window.electronAPI.setBannerSeen();
+          }
+        });
       }
     });
     window.electronAPI.onShortcutsUpdated((_event: any, s: any) => {
