@@ -68,6 +68,7 @@ interface IElectronAPI {
   refreshSessionPreview: (sessions: any[]) => Promise<Record<string, { lastUserMessage: string; lastAssistantMessage: string }>>;
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => void;
   launchNewClaudeSession: (projectPath: string) => void;
+  launchNewClaudeSessionWorktree: (projectPath: string, worktreeName: string) => void;
   launchNewClaudeSessionInCodev: (projectPath: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;
   loadSessionEnrichment: (sessions: any[]) => Promise<{ titles: Record<string, string>; branches: Record<string, string>; prLinks: Record<string, { prNumber: number; prUrl: string }> }>;

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.75
+
+- Feat: Launch new Claude session as a git worktree from the Projects tab
+  - Press `⌘+Shift+Enter` on a project → dialog asks for branch name (optional)
+  - With a name: runs `claude -w "<name>" -n "<name>"` in the configured terminal
+  - Without a name: behaves like the existing `⌘+Enter` (normal session)
+  - The `-n` flag also sets a custom title so Ghostty's title-match can locate
+    the right tab when switching back (Ghostty has no per-tab TTY exposure).
+- Feat: worktree-aware session display
+  - Worktree session paths (`<repo>/.claude/worktrees/<name>`) now show the
+    parent repo name (e.g., `codev`) with a small `WT` badge, instead of the
+    worktree folder name (e.g., `test-worktree-4`).
+  - New `parseWorktreePath()` helper + `isWorktree` / `parentRepo` fields on
+    `ClaudeSession`.
+- Fix: Ghostty session-switching no longer "jumps to the wrong window" on
+  match miss
+  - The `activate` AppleScript call is now inside the success branch, so we
+    don't bring Ghostty forward when no matching tab is found.
+  - Benefits all session switches, not just worktrees.
+
 ## 1.0.74
 
 - Fix: session status dot stuck on purple for sessions with large responses (#116)

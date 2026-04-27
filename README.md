@@ -17,6 +17,7 @@ Press `⌃+⌘+R` or click the menu bar icon to launch the Quick Switcher. Searc
 - Supports VS Code and Cursor — switch between them in Settings → General → IDE
 - Remove items from the recent list by hovering and clicking "x"
 - **Quick-launch Claude session**: `⌘+Enter` to launch a new Claude Code session in the configured terminal, `⇧+Enter` to launch in CodeV's embedded terminal, `⌘+Click` as mouse alternative
+- **Launch as git worktree**: `⌘+Shift+Enter` opens a small dialog where you enter a branch name. CodeV launches `claude -w "<name>" -n "<name>"` so Claude creates a fresh worktree at `<repo>/.claude/worktrees/<name>`. Leaving the name empty falls back to a normal session. Worktree sessions show the parent project name with a `WT` badge in the Sessions list.
 
 ### Claude Code Session Switching
 

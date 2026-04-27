@@ -269,7 +269,7 @@ const formatRelativeTime = (timestamp: string): string => {
 let loadTimes = 0;
 function SwitcherApp() {
   const optionPress = useRef(false);
-  const launchClaudeRef = useRef<'external' | 'codev' | null>(null);
+  const launchClaudeRef = useRef<'external' | 'codev' | 'worktree' | null>(null);
 
   const ref = useRef(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
@@ -312,6 +312,9 @@ function SwitcherApp() {
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>(initialMode);
+  const [worktreeDialog, setWorktreeDialog] = useState<{ projectPath: string; projectName: string } | null>(null);
+  const [worktreeBranch, setWorktreeBranch] = useState('');
+  const worktreeInputRef = useRef<HTMLInputElement>(null);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
@@ -1239,6 +1242,25 @@ function SwitcherApp() {
                             }}
                           />
                         </span>
+                        {session.isWorktree && (
+                          <span
+                            title="Git worktree session"
+                            style={{
+                              marginLeft: '6px',
+                              fontSize: '9px',
+                              color: '#c4b5fd',
+                              border: '1px solid #7c6bb5',
+                              borderRadius: '3px',
+                              padding: '1px 4px',
+                              textTransform: 'uppercase',
+                              backgroundColor: 'rgba(124, 107, 181, 0.12)',
+                              letterSpacing: '0.5px',
+                              fontWeight: '600',
+                            }}
+                          >
+                            WT
+                          </span>
+                        )}
                         {customTitles[session.sessionId] && (
                           <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
                             {' '}* <Highlighter
@@ -1460,10 +1482,13 @@ function SwitcherApp() {
             }
           }
           // Cmd+Enter or Shift+Enter: launch new Claude session
+          // Cmd+Shift+Enter: open worktree dialog
           // Set flag so onChange knows to launch instead of opening IDE
           // Clear on every keypress to prevent stale ref if onChange didn't fire
           launchClaudeRef.current = null;
-          if (evt.key === 'Enter' && (evt.metaKey || evt.shiftKey)) {
+          if (evt.key === 'Enter' && evt.metaKey && evt.shiftKey) {
+            launchClaudeRef.current = 'worktree';
+          } else if (evt.key === 'Enter' && (evt.metaKey || evt.shiftKey)) {
             launchClaudeRef.current = evt.shiftKey ? 'codev' : 'external';
           }
         }}
@@ -1473,7 +1498,12 @@ function SwitcherApp() {
         onChange={(evt: any) => {
           const launchMode = launchClaudeRef.current;
           launchClaudeRef.current = null;
-          if (launchMode === 'codev') {
+          if (launchMode === 'worktree') {
+            const name = evt.value?.split('/').pop() || evt.value;
+            setWorktreeDialog({ projectPath: evt.value, projectName: name });
+            setWorktreeBranch('');
+            setTimeout(() => worktreeInputRef.current?.focus(), 0);
+          } else if (launchMode === 'codev') {
             window.electronAPI.launchNewClaudeSessionInCodev(evt.value);
           } else if (launchMode === 'external') {
             window.electronAPI.launchNewClaudeSession(evt.value);
@@ -1489,7 +1519,7 @@ function SwitcherApp() {
         components={{
           DropdownIndicator: () => (
             <div style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}>
-              {'\u2318+Enter: New Claude'}
+              {'\u2318+Shift+Enter: Worktree  \u2318+Enter: New Claude'}
             </div>
           ),
           Option: (props) => OptionUI(props, onDeleteClick, (path: string) => {
@@ -1649,6 +1679,122 @@ function SwitcherApp() {
       />
       </div>
       ))}
+      {/* Worktree launch dialog */}
+      {worktreeDialog && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setWorktreeDialog(null); }}
+        >
+          <div style={{
+            backgroundColor: '#2a2a2a',
+            borderRadius: '8px',
+            padding: '20px',
+            width: '400px',
+            border: '1px solid #444',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+          }}>
+            <div style={{ fontSize: '15px', fontWeight: '600', color: '#eee', marginBottom: '4px' }}>
+              New Claude Session
+            </div>
+            <div style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>
+              {worktreeDialog.projectName}
+            </div>
+
+            <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '6px' }}>
+              Branch name <span style={{ color: '#666' }}>(optional — creates a worktree)</span>
+            </div>
+            <input
+              ref={worktreeInputRef}
+              type="text"
+              value={worktreeBranch}
+              onChange={(e) => setWorktreeBranch(e.target.value)}
+              placeholder="e.g. fix/login-bug"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setWorktreeDialog(null);
+                } else if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (worktreeBranch.trim()) {
+                    window.electronAPI.launchNewClaudeSessionWorktree(
+                      worktreeDialog.projectPath,
+                      worktreeBranch.trim(),
+                    );
+                  } else {
+                    window.electronAPI.launchNewClaudeSession(worktreeDialog.projectPath);
+                  }
+                  setWorktreeDialog(null);
+                }
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                backgroundColor: '#3c3c3c',
+                border: '1px solid #555',
+                borderRadius: '4px',
+                color: '#eee',
+                fontSize: '13px',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = '#00BCD4'; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = '#555'; }}
+            />
+            <div style={{ fontSize: '11px', color: '#666', marginTop: '4px', marginBottom: '16px' }}>
+              Leave empty for a normal session (no worktree)
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                onClick={() => setWorktreeDialog(null)}
+                style={{
+                  padding: '6px 16px',
+                  backgroundColor: 'transparent',
+                  border: '1px solid #555',
+                  borderRadius: '4px',
+                  color: '#aaa',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (worktreeBranch.trim()) {
+                    window.electronAPI.launchNewClaudeSessionWorktree(
+                      worktreeDialog.projectPath,
+                      worktreeBranch.trim(),
+                    );
+                  } else {
+                    window.electronAPI.launchNewClaudeSession(worktreeDialog.projectPath);
+                  }
+                  setWorktreeDialog(null);
+                }}
+                style={{
+                  padding: '6px 16px',
+                  backgroundColor: THEME.primary,
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: '#fff',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                }}
+              >
+                Launch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

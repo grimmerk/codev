@@ -542,6 +542,57 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 - Custom terminal command template
 - Per-terminal PID/TTY matching (pending upstream: Ghostty #11592, cmux #1826)
 
+## Git Worktree Sessions
+
+Claude Code's `claude -w <name>` creates a git worktree at `<repo>/.claude/worktrees/<name>` and starts a session inside it. CodeV exposes this from the Projects tab via `⌘+Shift+Enter`.
+
+### Why we leverage `claude -w` instead of `git worktree add` ourselves
+
+Two approaches were considered:
+
+| Approach | Description | Trade-off |
+|---|---|---|
+| **A. `git worktree add`** (codev manages) | Create worktree at sibling path (`<parent>/<repo>-<branch>`), launch terminal there. claude-control uses this. | Full control, sibling visibility, no auto-cleanup surprise. But we own all lifecycle (cleanup UI, branch conflicts, error handling). |
+| **B. `claude -w <name> -n <name>`** (chosen) | Let Claude CLI create+manage the worktree. Pass `-n` to set a custom title. | Minimal code, leverages Claude CLI features (auto-cleanup, tmux). Relies on `-n` setting tab title for Ghostty switch. |
+
+We chose **B** because codev is Claude-Code-focused (claude-control is multi-tool, so they need their own implementation). Claude CLI's worktree lifecycle (auto-cleanup if clean) is the right default for codev users.
+
+### The `-n` flag and Ghostty switch
+
+`claude -w <name>` alone breaks Ghostty session switching:
+
+- **Worktree terminal cwd = parent repo** (because we `cd <parent> && claude -w <name>`; the shell stays in parent, only the claude process internally cd's into the worktree).
+- **Main session terminal cwd = parent repo** too.
+- Ghostty's AppleScript `working directory of term` reports the shell's cwd → both terminals report the same cwd → AppleScript "first match wins" focuses the wrong tab.
+
+Fix: pass `-n <name>` so Claude CLI sets a custom title. Codev's existing AppleScript title-match (Layer 1) finds the correct tab regardless of cwd. Other terminals (iTerm2 / Terminal.app / cmux) use TTY match and were already unaffected.
+
+### AppleScript `activate` timing
+
+Old behavior:
+```applescript
+tell application "Ghostty"
+  activate                  -- always brings Ghostty front
+  ... match logic ...
+  return "not found"
+end tell
+```
+
+When match failed, `activate` had already run, so Ghostty would surface its last-active window — looking like "switched to the wrong tab". Fixed by moving `activate` inside each match success branch.
+
+### Worktree session display
+
+`parseWorktreePath()` recognizes `<repo>/.claude/worktrees/<name>` paths and exposes:
+- `projectName` = parent repo name (e.g., `codev` instead of `test-worktree-4`)
+- `isWorktree` = true → renders a `WT` badge in the Sessions list
+- `parentRepo` = parent repo path (kept for grouping/display logic)
+
+The `project` field still holds the original worktree path so resume / cwd matching continue to work.
+
+### Resume after Claude CLI auto-cleanup
+
+When a `-w` session exits without uncommitted changes, Claude CLI may remove the worktree directory. The session JSONL is stored at `~/.claude/projects/<encoded>/<uuid>.jsonl` (independent of the worktree directory) so `claude --resume <uuid>` still works — the cwd shown in the session header just reflects wherever resume was invoked from. No special handling needed in codev.
+
 ## Technical Decisions
 
 ### TypeScript vs Rust

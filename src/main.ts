@@ -2149,6 +2149,16 @@ ipcMain.on('launch-new-claude-session', async (_event, projectPath: string) => {
   launchNewClaudeSession(projectPath, terminalApp, terminalMode);
 });
 
+ipcMain.on('launch-new-claude-session-worktree', async (_event, projectPath: string, worktreeName: string) => {
+  if (!existsSync(projectPath)) {
+    console.log('[launch-new-claude-session-worktree] path does not exist:', projectPath);
+    return;
+  }
+  const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
+  const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+  launchNewClaudeSession(projectPath, terminalApp, terminalMode, worktreeName);
+});
+
 ipcMain.on('launch-new-claude-session-in-codev', (_event, projectPath: string) => {
   if (!existsSync(projectPath)) {
     console.log('[launch-new-claude-session-in-codev] path does not exist:', projectPath);
