@@ -571,6 +571,10 @@ Fix: pass `-n <name>` so Claude CLI sets a custom title. Codev's existing AppleS
 
 **Future:** once Ghostty exposes per-tab TTY ([ghostty-org/ghostty#11354](https://github.com/ghostty-org/ghostty/pull/11354), merged but not released yet), Ghostty switch can use TTY match like the other terminals. The `-n` flag and the title-match layer become optional at that point — we can drop them or keep them as defense-in-depth.
 
+### AppleScript switch latency
+
+The Ghostty / Terminal.app / iTerm2 switch scripts iterate `windows × tabs × terminals` to find a match. Latency therefore scales with the user's open terminal count. With many windows/tabs (10+ Ghostty tabs, 50+ Terminal.app tabs) `osascript` invocation can be perceptibly slow (hundreds of ms). This is independent of worktree code — it predates this PR. Mitigations to investigate later: cache window IDs by sessionId, short-circuit on first match, or use TTY/PID directly once Ghostty exposes them.
+
 ### AppleScript `activate` timing
 
 Old behavior:
