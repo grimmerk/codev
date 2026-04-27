@@ -552,10 +552,12 @@ Two approaches were considered:
 
 | Approach | Description | Trade-off |
 |---|---|---|
-| **A. `git worktree add`** (codev manages) | Create worktree at sibling path (`<parent>/<repo>-<branch>`), launch terminal there. claude-control uses this. | Full control, sibling visibility, no auto-cleanup surprise. But we own all lifecycle (cleanup UI, branch conflicts, error handling). |
-| **B. `claude -w <name> -n <name>`** (chosen) | Let Claude CLI create+manage the worktree. Pass `-n` to set a custom title. | Minimal code, leverages Claude CLI features (auto-cleanup, tmux). Relies on `-n` setting tab title for Ghostty switch. |
+| **A. `git worktree add`** (codev manages) | Create worktree at sibling path (`<parent>/<repo>-<branch>`), launch terminal there. claude-control uses this. | Full control, sibling visibility, **no IDE/git-GUI clutter inside the parent repo**. But we own all lifecycle (cleanup UI, branch conflicts, error handling). |
+| **B. `claude -w <name> -n <name>`** (chosen) | Let Claude CLI create+manage the worktree. Pass `-n` to set a custom title. | Minimal code, leverages Claude CLI features (auto-cleanup, tmux). **Downside: nested worktree folder visible to VS Code / git GUI** — users may see worktree files in their workspace, accidentally commit them, or include them in cross-repo searches. Mitigation: `.gitignore` `.claude/worktrees/`. |
 
 We chose **B** because codev is Claude-Code-focused (claude-control is multi-tool, so they need their own implementation). Claude CLI's worktree lifecycle (auto-cleanup if clean) is the right default for codev users.
+
+**A and B are not mutually exclusive.** A future iteration could add a setting to choose between them, or fall back to A for users who hit B's limitations (e.g., the IDE-clutter concern).
 
 ### The `-n` flag and Ghostty switch
 
@@ -566,6 +568,8 @@ We chose **B** because codev is Claude-Code-focused (claude-control is multi-too
 - Ghostty's AppleScript `working directory of term` reports the shell's cwd → both terminals report the same cwd → AppleScript "first match wins" focuses the wrong tab.
 
 Fix: pass `-n <name>` so Claude CLI sets a custom title. Codev's existing AppleScript title-match (Layer 1) finds the correct tab regardless of cwd. Other terminals (iTerm2 / Terminal.app / cmux) use TTY match and were already unaffected.
+
+**Future:** once Ghostty exposes per-tab TTY ([ghostty-org/ghostty#11354](https://github.com/ghostty-org/ghostty/pull/11354), merged but not released yet), Ghostty switch can use TTY match like the other terminals. The `-n` flag and the title-match layer become optional at that point — we can drop them or keep them as defense-in-depth.
 
 ### AppleScript `activate` timing
 

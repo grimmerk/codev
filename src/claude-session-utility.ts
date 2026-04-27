@@ -41,6 +41,29 @@ export const parseWorktreePath = (
 };
 
 /**
+ * Validate a worktree name before passing it into the launch shell command.
+ * Whitelist: alphanumerics + a few branch-name-safe punctuation chars.
+ * Rejects shell metacharacters ($ ` " ' \ ; | & space etc.) so the name
+ * cannot break out of the quoted argument in `claude -w "<name>" -n "<name>"`.
+ *
+ * Conservative subset of git's branch name rules:
+ * - allows: a-z A-Z 0-9 / - _ . +
+ * - disallows: leading/trailing dot, leading dash, double slash,
+ *   leading/trailing slash, anything else.
+ */
+export const isValidWorktreeName = (name: string): boolean => {
+  if (!name) return false;
+  if (name.length > 100) return false;
+  if (!/^[A-Za-z0-9_./+-]+$/.test(name)) return false;
+  if (name.startsWith('-') || name.startsWith('.')) return false;
+  if (name.startsWith('/') || name.endsWith('/')) return false;
+  if (name.endsWith('.')) return false;
+  if (name.includes('//')) return false;
+  if (name.includes('..')) return false;
+  return true;
+};
+
+/**
  * Compute the display project name. For worktree paths, returns parent repo name.
  */
 export const getProjectDisplayName = (projectPath: string): string => {
@@ -1389,6 +1412,16 @@ export const launchNewClaudeSession = (
   // For worktree sessions: also pass -n so claude sets a custom title
   // (matches the worktree name). This lets AppleScript title-match find the
   // correct terminal tab in Ghostty (which lacks per-tab TTY exposure).
+  // Validate worktreeName to prevent shell injection — it's interpolated
+  // into a string that ends up in `do script "..."` AppleScript and an
+  // interactive shell command.
+  if (worktreeName && !isValidWorktreeName(worktreeName)) {
+    console.error(
+      '[launchNewClaudeSession] rejected invalid worktreeName:',
+      JSON.stringify(worktreeName),
+    );
+    return;
+  }
   const shortCmd = worktreeName
     ? `claude -w "${worktreeName}" -n "${worktreeName}"`
     : 'claude';
