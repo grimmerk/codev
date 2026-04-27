@@ -601,6 +601,24 @@ The `project` field still holds the original worktree path so resume / cwd match
 
 When a `-w` session exits without uncommitted changes, Claude CLI may remove the worktree directory. The session JSONL is stored at `~/.claude/projects/<encoded>/<uuid>.jsonl` (independent of the worktree directory) so `claude --resume <uuid>` still works — the cwd shown in the session header just reflects wherever resume was invoked from. No special handling needed in codev.
 
+### Detection is path-based, not launch-based
+
+`parseWorktreePath()` recognizes any path matching `<repo>/.claude/worktrees/<name>` — regardless of who created the worktree. This means codev shows the `WT` badge for:
+
+- Sessions launched via codev's `⌘+Shift+Enter` (this PR's feature)
+- Sessions where the user manually ran `claude -w <name>` from a terminal
+- Sessions created by other tools (c9watch, older claude-control versions, etc.) that put worktrees in `.claude/worktrees/`
+
+If we ever switch to **Approach A** (codev-managed sibling worktrees at `<parent>/<repo>-<branch>`), the detection path can be expanded to recognize **both** patterns simultaneously — the nested pattern is independent of how new worktrees are created. So switching launch strategy doesn't break detection of pre-existing nested worktrees.
+
+### Future-proofing: when Ghostty exposes per-tab TTY
+
+The `-n` flag (and the title-match layer) is currently the only way to disambiguate Ghostty tabs that share a cwd. Once Ghostty's AppleScript surface exposes per-tab TTY ([ghostty-org/ghostty#11354](https://github.com/ghostty-org/ghostty/pull/11354), merged but unreleased as of v1.0.75), Ghostty switching can use TTY match the same way iTerm2 / Terminal.app / cmux do. At that point:
+
+- The `-n` flag becomes optional — tab disambiguation no longer relies on title
+- Codev should add a Ghostty TTY-match layer (parallel to existing iTerm2 / Terminal.app code)
+- Existing `-n`-set sessions keep working (title match still functions as a Layer 1 fast path)
+
 ## Technical Decisions
 
 ### TypeScript vs Rust
