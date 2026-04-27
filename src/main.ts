@@ -30,6 +30,7 @@ import {
   setLaunchInCodevTerminalCallback,
   launchNewClaudeSession,
   scanClosedVSCodeSessions,
+  isValidWorktreeName,
 } from './claude-session-utility';
 import {
   installHooks,
@@ -2147,6 +2148,21 @@ ipcMain.on('launch-new-claude-session', async (_event, projectPath: string) => {
   const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
   const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
   launchNewClaudeSession(projectPath, terminalApp, terminalMode);
+});
+
+ipcMain.on('launch-new-claude-session-worktree', async (_event, projectPath: string, worktreeName: string) => {
+  if (!existsSync(projectPath)) {
+    console.log('[launch-new-claude-session-worktree] path does not exist:', projectPath);
+    return;
+  }
+  // Validate at IPC boundary (defense in depth) — the renderer also validates.
+  if (!isValidWorktreeName(worktreeName)) {
+    console.error('[launch-new-claude-session-worktree] invalid worktreeName:', JSON.stringify(worktreeName));
+    return;
+  }
+  const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
+  const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+  launchNewClaudeSession(projectPath, terminalApp, terminalMode, worktreeName);
 });
 
 ipcMain.on('launch-new-claude-session-in-codev', (_event, projectPath: string) => {

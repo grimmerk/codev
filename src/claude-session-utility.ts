@@ -11,8 +11,8 @@ import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
 
 export interface ClaudeSession {
   sessionId: string;
-  project: string;         // full path, e.g. /Users/grimmer/git/fred-ff
-  projectName: string;     // folder name, e.g. fred-ff
+  project: string;         // full path, e.g. /Users/grimmer/git/fred-ff or <repo>/.claude/worktrees/<name>
+  projectName: string;     // display name: parent repo name if worktree, else folder name
   firstUserMessage: string;
   lastUserMessage: string;
   lastAssistantMessage?: string; // only loaded for active sessions
@@ -22,7 +22,55 @@ export interface ClaudeSession {
   activePid?: number;
   terminalApp?: string;    // detected terminal: 'iterm2', 'cmux', 'ghostty', 'vscode', etc.
   entrypoint?: string;     // 'cli', 'claude-vscode', etc.
+  isWorktree?: boolean;    // true if project path is <repo>/.claude/worktrees/<name>
+  parentRepo?: string;     // for worktree sessions: the parent repo path
 }
+
+/**
+ * Parse a Claude Code worktree path into parent repo + worktree name.
+ * Returns null if the path is not a worktree path.
+ * E.g. /Users/me/git/codev/.claude/worktrees/fix-bug
+ *   → { parentRepo: '/Users/me/git/codev', worktreeName: 'fix-bug' }
+ */
+export const parseWorktreePath = (
+  p: string,
+): { parentRepo: string; worktreeName: string } | null => {
+  if (!p) return null;
+  const match = p.match(/^(.+)\/\.claude\/worktrees\/([^/]+)\/?$/);
+  return match ? { parentRepo: match[1], worktreeName: match[2] } : null;
+};
+
+/**
+ * Validate a worktree name before passing it into the launch shell command.
+ * Whitelist: alphanumerics + a few branch-name-safe punctuation chars.
+ * Rejects shell metacharacters ($ ` " ' \ ; | & space etc.) so the name
+ * cannot break out of the quoted argument in `claude -w "<name>" -n "<name>"`.
+ *
+ * Conservative subset of git's branch name rules:
+ * - allows: a-z A-Z 0-9 / - _ . +
+ * - disallows: leading/trailing dot, leading dash, double slash,
+ *   leading/trailing slash, anything else.
+ */
+export const isValidWorktreeName = (name: string): boolean => {
+  if (!name) return false;
+  if (name.length > 100) return false;
+  if (!/^[A-Za-z0-9_./+-]+$/.test(name)) return false;
+  if (name.startsWith('-') || name.startsWith('.')) return false;
+  if (name.startsWith('/') || name.endsWith('/')) return false;
+  if (name.endsWith('.')) return false;
+  if (name.includes('//')) return false;
+  if (name.includes('..')) return false;
+  return true;
+};
+
+/**
+ * Compute the display project name. For worktree paths, returns parent repo name.
+ */
+export const getProjectDisplayName = (projectPath: string): string => {
+  const worktree = parseWorktreePath(projectPath);
+  const displayPath = worktree ? worktree.parentRepo : projectPath;
+  return path.basename(displayPath) || displayPath;
+};
 
 export interface ActiveSessionResult {
   activeMap: Map<string, number>;      // sessionId -> pid (all active sessions)
@@ -133,16 +181,22 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
 
     const allSessions = Array.from(bySession.values())
       .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
-      .map((s) => ({
-        sessionId: s.sessionId,
-        project: s.project,
-        projectName: path.basename(s.project) || s.project,
-        firstUserMessage: s.firstDisplay,
-        lastUserMessage: s.lastDisplay,
-        lastTimestamp: s.lastTimestamp,
-        messageCount: s.promptCount,
-        isActive: false,
-      }));
+      .map((s) => {
+        const worktree = parseWorktreePath(s.project);
+        return {
+          sessionId: s.sessionId,
+          project: s.project,
+          projectName: worktree
+            ? path.basename(worktree.parentRepo) || worktree.parentRepo
+            : (path.basename(s.project) || s.project),
+          firstUserMessage: s.firstDisplay,
+          lastUserMessage: s.lastDisplay,
+          lastTimestamp: s.lastTimestamp,
+          messageCount: s.promptCount,
+          isActive: false,
+          ...(worktree && { isWorktree: true, parentRepo: worktree.parentRepo }),
+        };
+      });
 
     cachedSessions = allSessions;
     cacheTimestamp = now;
@@ -825,10 +879,13 @@ export const scanClosedVSCodeSessions = async (
     );
     // Use actual cwd from JSONL content, fall back to hooks index cwd
     const actualCwd = info.cwd || cwd;
+    const worktree = parseWorktreePath(actualCwd);
     sessions.push({
       sessionId,
       project: actualCwd,
-      projectName: path.basename(actualCwd) || actualCwd,
+      projectName: worktree
+        ? path.basename(worktree.parentRepo) || worktree.parentRepo
+        : (path.basename(actualCwd) || actualCwd),
       firstUserMessage: info.firstUserMessage,
       lastUserMessage: info.lastUserMessage,
       lastAssistantMessage: info.lastAssistantMessage,
@@ -836,6 +893,7 @@ export const scanClosedVSCodeSessions = async (
       messageCount: info.messageCount,
       isActive: false,
       entrypoint: 'claude-vscode',
+      ...(worktree && { isWorktree: true, parentRepo: worktree.parentRepo }),
     });
   });
 
@@ -903,12 +961,16 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
             activeMap.set(sessionId, pid);
             // Queue async JSONL read (head/tail in parallel)
             const startedAt = data.startedAt;
+            const activeWorktree = parseWorktreePath(cwd);
             vscodeReadPromises.push(
               readVSCodeSessionFromJSONL(sessionId, cwd, execPromise).then((info) => {
                 vscodeSessions.push({
                   sessionId,
                   project: cwd,
-                  projectName: path.basename(cwd) || cwd,
+                  projectName: activeWorktree
+                    ? path.basename(activeWorktree.parentRepo) || activeWorktree.parentRepo
+                    : (path.basename(cwd) || cwd),
+                  ...(activeWorktree && { isWorktree: true, parentRepo: activeWorktree.parentRepo }),
                   firstUserMessage: info.firstUserMessage,
                   lastUserMessage: info.lastUserMessage,
                   lastAssistantMessage: info.lastAssistantMessage,
@@ -1166,14 +1228,16 @@ export const runCommandInTerminal = (
   switch (terminalApp) {
     case 'ghostty': {
       const tmpScript = '/tmp/codev-ghostty-launch.scpt';
+      // Escape double quotes in claudeCmd for AppleScript string embedding
+      const escapedCmd = claudeCmd.replace(/"/g, '\\"');
       const launchScript = terminalMode === 'window'
         ? `tell application "Ghostty"
-  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${claudeCmd}\\n"}
+  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${escapedCmd}\\n"}
   new window with configuration cfg
   activate
 end tell`
         : `tell application "Ghostty"
-  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${claudeCmd}\\n"}
+  set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${escapedCmd}\\n"}
   if (count windows) > 0 then
     activate
     new tab in front window with configuration cfg
@@ -1317,6 +1381,7 @@ export const launchNewClaudeSession = (
   projectPath: string,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
+  worktreeName?: string,
 ): void => {
   if (terminalApp === 'vscode') {
     const { execFile } = require('child_process');
@@ -1344,7 +1409,24 @@ export const launchNewClaudeSession = (
     }
     return;
   }
-  runCommandInTerminal(`cd "${projectPath}" && claude`, 'claude', projectPath, terminalApp, terminalMode);
+  // For worktree sessions: also pass -n so claude sets a custom title
+  // (matches the worktree name). This lets AppleScript title-match find the
+  // correct terminal tab in Ghostty (which lacks per-tab TTY exposure).
+  // Validate worktreeName to prevent shell injection — it's interpolated
+  // into a string that ends up in `do script "..."` AppleScript and an
+  // interactive shell command.
+  if (worktreeName && !isValidWorktreeName(worktreeName)) {
+    console.error(
+      '[launchNewClaudeSession] rejected invalid worktreeName:',
+      JSON.stringify(worktreeName),
+    );
+    return;
+  }
+  const shortCmd = worktreeName
+    ? `claude -w "${worktreeName}" -n "${worktreeName}"`
+    : 'claude';
+  const fullCmd = `cd "${projectPath}" && ${shortCmd}`;
+  runCommandInTerminal(fullCmd, shortCmd, projectPath, terminalApp, terminalMode);
 };
 
 /**
@@ -1698,7 +1780,9 @@ export const openSessionInGhostty = (
   const { exec } = require('child_process');
 
   if (isActive) {
-    // Two-layer matching: title first (precise), then cwd fallback
+    // Two-layer matching: title first (precise), then cwd fallback.
+    // IMPORTANT: only `activate` after a match is found — otherwise Ghostty
+    // jumps to the last-active window (visually "wrong window") on miss.
     const titleMatch = customTitle
       ? `
   -- Layer 1: title matching
@@ -1706,6 +1790,7 @@ export const openSessionInGhostty = (
     repeat with t in tabs of w
       repeat with term in terminals of t
         if name of term contains "${customTitle.replace(/"/g, '\\"')}" then
+          activate
           focus term
           return "found-by-title"
         end if
@@ -1716,13 +1801,13 @@ export const openSessionInGhostty = (
 
     const tmpScript = '/tmp/codev-ghostty-switch.scpt';
     const switchScript = `tell application "Ghostty"
-  activate
   ${titleMatch}
   -- Layer 2: cwd matching (fallback)
   repeat with w in windows
     repeat with t in tabs of w
       repeat with term in terminals of t
         if working directory of term is "${projectPath}" then
+          activate
           focus term
           return "found-by-cwd"
         end if

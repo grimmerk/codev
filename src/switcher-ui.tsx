@@ -168,6 +168,23 @@ const acceleratorToSymbols = (acc: string): string =>
     .replace(/Shift/g, '⇧')
     .replace(/\+/g, '');
 
+/**
+ * Validate worktree name (mirrors src/claude-session-utility.ts isValidWorktreeName).
+ * Whitelist of branch-name-safe chars; rejects shell metacharacters so the name
+ * cannot break out of the quoted shell argument in `claude -w "<name>" -n "<name>"`.
+ */
+const isValidWorktreeName = (name: string): boolean => {
+  if (!name) return false;
+  if (name.length > 100) return false;
+  if (!/^[A-Za-z0-9_./+-]+$/.test(name)) return false;
+  if (name.startsWith('-') || name.startsWith('.')) return false;
+  if (name.startsWith('/') || name.endsWith('/')) return false;
+  if (name.endsWith('.')) return false;
+  if (name.includes('//')) return false;
+  if (name.includes('..')) return false;
+  return true;
+};
+
 let _homeDir = '';
 let _homePrefix = '';
 // Fetch home dir async on load, cache for sync access
@@ -269,7 +286,7 @@ const formatRelativeTime = (timestamp: string): string => {
 let loadTimes = 0;
 function SwitcherApp() {
   const optionPress = useRef(false);
-  const launchClaudeRef = useRef<'external' | 'codev' | null>(null);
+  const launchClaudeRef = useRef<'external' | 'codev' | 'worktree' | null>(null);
 
   const ref = useRef(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
@@ -312,6 +329,9 @@ function SwitcherApp() {
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
   const modeRef = useRef<SwitcherMode>(initialMode);
+  const [worktreeDialog, setWorktreeDialog] = useState<{ projectPath: string; projectName: string } | null>(null);
+  const [worktreeBranch, setWorktreeBranch] = useState('');
+  const worktreeInputRef = useRef<HTMLInputElement>(null);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
@@ -1239,6 +1259,25 @@ function SwitcherApp() {
                             }}
                           />
                         </span>
+                        {session.isWorktree && (
+                          <span
+                            title="Git worktree session"
+                            style={{
+                              marginLeft: '6px',
+                              fontSize: '9px',
+                              color: '#c4b5fd',
+                              border: '1px solid #7c6bb5',
+                              borderRadius: '3px',
+                              padding: '1px 4px',
+                              textTransform: 'uppercase',
+                              backgroundColor: 'rgba(124, 107, 181, 0.12)',
+                              letterSpacing: '0.5px',
+                              fontWeight: '600',
+                            }}
+                          >
+                            WT
+                          </span>
+                        )}
                         {customTitles[session.sessionId] && (
                           <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
                             {' '}* <Highlighter
@@ -1460,10 +1499,13 @@ function SwitcherApp() {
             }
           }
           // Cmd+Enter or Shift+Enter: launch new Claude session
+          // Cmd+Shift+Enter: open worktree dialog
           // Set flag so onChange knows to launch instead of opening IDE
           // Clear on every keypress to prevent stale ref if onChange didn't fire
           launchClaudeRef.current = null;
-          if (evt.key === 'Enter' && (evt.metaKey || evt.shiftKey)) {
+          if (evt.key === 'Enter' && evt.metaKey && evt.shiftKey) {
+            launchClaudeRef.current = 'worktree';
+          } else if (evt.key === 'Enter' && (evt.metaKey || evt.shiftKey)) {
             launchClaudeRef.current = evt.shiftKey ? 'codev' : 'external';
           }
         }}
@@ -1473,7 +1515,12 @@ function SwitcherApp() {
         onChange={(evt: any) => {
           const launchMode = launchClaudeRef.current;
           launchClaudeRef.current = null;
-          if (launchMode === 'codev') {
+          if (launchMode === 'worktree') {
+            const name = evt.value?.split('/').pop() || evt.value;
+            setWorktreeDialog({ projectPath: evt.value, projectName: name });
+            setWorktreeBranch('');
+            setTimeout(() => worktreeInputRef.current?.focus(), 0);
+          } else if (launchMode === 'codev') {
             window.electronAPI.launchNewClaudeSessionInCodev(evt.value);
           } else if (launchMode === 'external') {
             window.electronAPI.launchNewClaudeSession(evt.value);
@@ -1489,7 +1536,7 @@ function SwitcherApp() {
         components={{
           DropdownIndicator: () => (
             <div style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}>
-              {'\u2318+Enter: New Claude'}
+              {'\u2318+Shift+Enter: Worktree  \u2318+Enter: External  Shift+Enter: Codev'}
             </div>
           ),
           Option: (props) => OptionUI(props, onDeleteClick, (path: string) => {
@@ -1649,6 +1696,134 @@ function SwitcherApp() {
       />
       </div>
       ))}
+      {/* Worktree launch dialog */}
+      {worktreeDialog && (() => {
+        const trimmed = worktreeBranch.trim();
+        const nameInvalid = trimmed.length > 0 && !isValidWorktreeName(trimmed);
+        const submit = () => {
+          if (trimmed) {
+            if (!isValidWorktreeName(trimmed)) return; // guard against bypass
+            window.electronAPI.launchNewClaudeSessionWorktree(
+              worktreeDialog.projectPath,
+              trimmed,
+            );
+          } else {
+            window.electronAPI.launchNewClaudeSession(worktreeDialog.projectPath);
+          }
+          setWorktreeDialog(null);
+        };
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}
+            // Click on backdrop closes; clicks inside the inner card don't reach here
+            onClick={() => setWorktreeDialog(null)}
+            // Stop document-level keydown handlers (Tab, arrows, etc.) from
+            // firing app-level shortcuts while the modal has focus
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="New Claude session — optional worktree"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                backgroundColor: '#2a2a2a',
+                borderRadius: '8px',
+                padding: '20px',
+                width: '400px',
+                border: '1px solid #444',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+              }}
+            >
+              <div style={{ fontSize: '15px', fontWeight: '600', color: '#eee', marginBottom: '4px' }}>
+                New Claude Session
+              </div>
+              <div style={{ fontSize: '12px', color: '#888', marginBottom: '16px' }}>
+                {worktreeDialog.projectName}
+              </div>
+
+              <div style={{ fontSize: '12px', color: '#aaa', marginBottom: '6px' }}>
+                Branch name <span style={{ color: '#666' }}>(optional — creates a worktree)</span>
+              </div>
+              <input
+                ref={worktreeInputRef}
+                type="text"
+                value={worktreeBranch}
+                onChange={(e) => setWorktreeBranch(e.target.value)}
+                placeholder="e.g. fix/login-bug"
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setWorktreeDialog(null);
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (!nameInvalid) submit();
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  backgroundColor: '#3c3c3c',
+                  border: `1px solid ${nameInvalid ? '#e57373' : '#555'}`,
+                  borderRadius: '4px',
+                  color: '#eee',
+                  fontSize: '13px',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={(e) => { if (!nameInvalid) e.currentTarget.style.borderColor = '#00BCD4'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = nameInvalid ? '#e57373' : '#555'; }}
+              />
+              <div style={{ fontSize: '11px', color: nameInvalid ? '#e57373' : '#666', marginTop: '4px', marginBottom: '16px' }}>
+                {nameInvalid
+                  ? 'Use only letters, digits, /, -, _, ., +. No leading dash/dot/slash.'
+                  : 'Leave empty for a normal session (no worktree)'}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  onClick={() => setWorktreeDialog(null)}
+                  style={{
+                    padding: '6px 16px',
+                    backgroundColor: 'transparent',
+                    border: '1px solid #555',
+                    borderRadius: '4px',
+                    color: '#aaa',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submit}
+                  disabled={nameInvalid}
+                  style={{
+                    padding: '6px 16px',
+                    backgroundColor: nameInvalid ? '#444' : THEME.primary,
+                    border: 'none',
+                    borderRadius: '4px',
+                    color: nameInvalid ? '#888' : '#fff',
+                    fontSize: '12px',
+                    cursor: nameInvalid ? 'not-allowed' : 'pointer',
+                    fontWeight: '500',
+                  }}
+                >
+                  Launch
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

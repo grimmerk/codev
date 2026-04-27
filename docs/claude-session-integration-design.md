@@ -542,6 +542,83 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 - Custom terminal command template
 - Per-terminal PID/TTY matching (pending upstream: Ghostty #11592, cmux #1826)
 
+## Git Worktree Sessions
+
+Claude Code's `claude -w <name>` creates a git worktree at `<repo>/.claude/worktrees/<name>` and starts a session inside it. CodeV exposes this from the Projects tab via `⌘+Shift+Enter`.
+
+### Why we leverage `claude -w` instead of `git worktree add` ourselves
+
+Two approaches were considered:
+
+| Approach | Description | Trade-off |
+|---|---|---|
+| **A. `git worktree add`** (codev manages) | Create worktree at sibling path (`<parent>/<repo>-<branch>`), launch terminal there. claude-control uses this. | Full control, sibling visibility, **no IDE/git-GUI clutter inside the parent repo**. But we own all lifecycle (cleanup UI, branch conflicts, error handling). |
+| **B. `claude -w <name> -n <name>`** (chosen) | Let Claude CLI create+manage the worktree. Pass `-n` to set a custom title. | Minimal code, leverages Claude CLI features (auto-cleanup, tmux). **Downside: nested worktree folder visible to VS Code / git GUI** — users may see worktree files in their workspace, accidentally commit them, or include them in cross-repo searches. Mitigation: `.gitignore` `.claude/worktrees/`. |
+
+We chose **B** because codev is Claude-Code-focused (claude-control is multi-tool, so they need their own implementation). Claude CLI's worktree lifecycle (auto-cleanup if clean) is the right default for codev users.
+
+**A and B are not mutually exclusive.** A future iteration could add a setting to choose between them, or fall back to A for users who hit B's limitations (e.g., the IDE-clutter concern).
+
+### The `-n` flag and Ghostty switch
+
+`claude -w <name>` alone breaks Ghostty session switching:
+
+- **Worktree terminal cwd = parent repo** (because we `cd <parent> && claude -w <name>`; the shell stays in parent, only the claude process internally cd's into the worktree).
+- **Main session terminal cwd = parent repo** too.
+- Ghostty's AppleScript `working directory of term` reports the shell's cwd → both terminals report the same cwd → AppleScript "first match wins" focuses the wrong tab.
+
+Fix: pass `-n <name>` so Claude CLI sets a custom title. Codev's existing AppleScript title-match (Layer 1) finds the correct tab regardless of cwd. Other terminals (iTerm2 / Terminal.app / cmux) use TTY match and were already unaffected.
+
+**Future:** once Ghostty exposes per-tab TTY ([ghostty-org/ghostty#11354](https://github.com/ghostty-org/ghostty/pull/11354), merged but not released yet), Ghostty switch can use TTY match like the other terminals. The `-n` flag and the title-match layer become optional at that point — we can drop them or keep them as defense-in-depth.
+
+### AppleScript switch latency
+
+The Ghostty / Terminal.app / iTerm2 switch scripts iterate `windows × tabs × terminals` to find a match. Latency therefore scales with the user's open terminal count. With many windows/tabs (10+ Ghostty tabs, 50+ Terminal.app tabs) `osascript` invocation can be perceptibly slow (hundreds of ms). This is independent of worktree code — it predates this PR. Mitigations to investigate later: cache window IDs by sessionId, short-circuit on first match, or use TTY/PID directly once Ghostty exposes them.
+
+### AppleScript `activate` timing
+
+Old behavior:
+```applescript
+tell application "Ghostty"
+  activate                  -- always brings Ghostty front
+  ... match logic ...
+  return "not found"
+end tell
+```
+
+When match failed, `activate` had already run, so Ghostty would surface its last-active window — looking like "switched to the wrong tab". Fixed by moving `activate` inside each match success branch.
+
+### Worktree session display
+
+`parseWorktreePath()` recognizes `<repo>/.claude/worktrees/<name>` paths and exposes:
+- `projectName` = parent repo name (e.g., `codev` instead of `test-worktree-4`)
+- `isWorktree` = true → renders a `WT` badge in the Sessions list
+- `parentRepo` = parent repo path (kept for grouping/display logic)
+
+The `project` field still holds the original worktree path so resume / cwd matching continue to work.
+
+### Resume after Claude CLI auto-cleanup
+
+When a `-w` session exits without uncommitted changes, Claude CLI may remove the worktree directory. The session JSONL is stored at `~/.claude/projects/<encoded>/<uuid>.jsonl` (independent of the worktree directory) so `claude --resume <uuid>` still works — the cwd shown in the session header just reflects wherever resume was invoked from. No special handling needed in codev.
+
+### Detection is path-based, not launch-based
+
+`parseWorktreePath()` recognizes any path matching `<repo>/.claude/worktrees/<name>` — regardless of who created the worktree. This means codev shows the `WT` badge for:
+
+- Sessions launched via codev's `⌘+Shift+Enter` (this PR's feature)
+- Sessions where the user manually ran `claude -w <name>` from a terminal
+- Sessions created by other tools (c9watch, older claude-control versions, etc.) that put worktrees in `.claude/worktrees/`
+
+If we ever switch to **Approach A** (codev-managed sibling worktrees at `<parent>/<repo>-<branch>`), the detection path can be expanded to recognize **both** patterns simultaneously — the nested pattern is independent of how new worktrees are created. So switching launch strategy doesn't break detection of pre-existing nested worktrees.
+
+### Future-proofing: when Ghostty exposes per-tab TTY
+
+The `-n` flag (and the title-match layer) is currently the only way to disambiguate Ghostty tabs that share a cwd. Once Ghostty's AppleScript surface exposes per-tab TTY ([ghostty-org/ghostty#11354](https://github.com/ghostty-org/ghostty/pull/11354), merged but unreleased as of v1.0.75), Ghostty switching can use TTY match the same way iTerm2 / Terminal.app / cmux do. At that point:
+
+- The `-n` flag becomes optional — tab disambiguation no longer relies on title
+- Codev should add a Ghostty TTY-match layer (parallel to existing iTerm2 / Terminal.app code)
+- Existing `-n`-set sessions keep working (title match still functions as a Layer 1 fast path)
+
 ## Technical Decisions
 
 ### TypeScript vs Rust
