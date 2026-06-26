@@ -7,6 +7,7 @@
   "extends": [
     "eslint:recommended",
     "plugin:react/recommended",
+    "plugin:react/jsx-runtime",
     "plugin:@typescript-eslint/recommended",
     "plugin:import/recommended",
     "prettier",
@@ -27,4 +28,9 @@
     "react/no-children-prop": "off",
     "react/display-name": "off"
   },
+  "settings": {
+    "react": {
+      "version": "detect"
+    }
+  }
 }

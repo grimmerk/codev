@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.75
+
+- Feat: Sessions search clears after opening a session
+  - Opening a session (Enter or click) clears the search keyword on return; the full list is shown again
+  - Toggling away without selecting (shortcut/Esc/blur) keeps the keyword so you can resume searching
+
 ## 1.0.74
 
 - Fix: session status dot stuck on purple for sessions with large responses (#116)
