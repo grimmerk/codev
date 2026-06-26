@@ -26,5 +26,5 @@
     "@typescript-eslint/no-empty-function": "warn",
     "react/no-children-prop": "off",
     "react/display-name": "off"
-  },
+  }
 }
