@@ -316,6 +316,9 @@ function SwitcherApp() {
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
   const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
+  // Set true when a session is opened; on the next window show, clear the search so
+  // returning to Sessions shows the full list. Toggling away without selecting keeps it.
+  const clearSessionSearchOnShowRef = useRef(false);
   const [currentAppMode, setCurrentAppMode] = useState('menubar');
   const [modeBanner, setModeBanner] = useState<string | null>(null);
   const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
@@ -701,6 +704,14 @@ function SwitcherApp() {
         });
       }
       if (modeRef.current === 'sessions') {
+        // If a session was just opened, reset the search before refetching so the
+        // full list shows on return (keyword is kept when merely toggling away).
+        if (clearSessionSearchOnShowRef.current) {
+          clearSessionSearchOnShowRef.current = false;
+          setSessionSearchValue('');
+          sessionSearchRef2.current = '';
+          setSelectedSessionIndex(-1);
+        }
         fetchClaudeSessions();
       }
       // Refresh session statuses on window focus
@@ -1158,6 +1169,7 @@ function SwitcherApp() {
                 const s = sessions[idx];
                 if (s) {
                   window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
+                  clearSessionSearchOnShowRef.current = true;
                 }
               }
             }}
@@ -1190,6 +1202,7 @@ function SwitcherApp() {
                   data-session-index={index}
                   onClick={() => {
                     window.electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId]);
+                    clearSessionSearchOnShowRef.current = true;
                   }}
                   style={{
                     display: 'flex',
