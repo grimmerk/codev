@@ -711,6 +711,9 @@ function SwitcherApp() {
           setSessionSearchValue('');
           sessionSearchRef2.current = '';
           setSelectedSessionIndex(-1);
+          // Drop the stale filtered list immediately so the empty input and the
+          // visible list agree before fetchClaudeSessions() resolves.
+          setSessions(allSessionsRef.current);
         }
         fetchClaudeSessions();
       }
@@ -1168,8 +1171,9 @@ function SwitcherApp() {
                 const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
                 const s = sessions[idx];
                 if (s) {
-                  window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
+                  // Arm before opening, in case the bridge triggers the focus cycle synchronously.
                   clearSessionSearchOnShowRef.current = true;
+                  window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
                 }
               }
             }}
@@ -1201,8 +1205,8 @@ function SwitcherApp() {
                   key={session.sessionId}
                   data-session-index={index}
                   onClick={() => {
-                    window.electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId]);
                     clearSessionSearchOnShowRef.current = true;
+                    window.electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId]);
                   }}
                   style={{
                     display: 'flex',
