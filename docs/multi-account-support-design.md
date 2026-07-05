@@ -447,3 +447,35 @@ Batch 1 ships the *engine*; account setup is manual until the Batch 2 UI/CLI.
   titles, and registers status hooks in each account's `settings.json`.
 - **No registry / one account** — CodeV behaves exactly as before; the feature is
   invisible and opt-in (graceful fallback to a single default account).
+
+### Concrete example — personal (default) + work
+
+`~/.config/codev/accounts.json`:
+
+```json
+{
+  "version": 1,
+  "defaultAccount": "personal",
+  "accounts": [
+    { "label": "personal", "dir": "/Users/you/.claude",       "identityFile": "/Users/you/.claude.json",            "configDirEnv": null,                        "isDefault": true },
+    { "label": "work",     "dir": "/Users/you/.claude-work",  "identityFile": "/Users/you/.claude-work/.claude.json", "configDirEnv": "/Users/you/.claude-work", "isDefault": false }
+  ]
+}
+```
+
+`~/.config/codev/accounts.sh` (then add `[ -f ~/.config/codev/accounts.sh ] && source ~/.config/codev/accounts.sh` to `~/.zshrc`):
+
+```bash
+claude-personal() { command claude "$@"; }                                   # default: NO CLAUDE_CONFIG_DIR
+claude-work()     { CLAUDE_CONFIG_DIR="$HOME/.claude-work" command claude "$@"; }
+claude() { case "$1" in                                                        # `claude work …` / bare `claude`
+  personal) shift; command claude "$@" ;;
+  work)     shift; CLAUDE_CONFIG_DIR="$HOME/.claude-work" command claude "$@" ;;
+  *)               command claude "$@" ;;
+esac }
+```
+
+Then run `claude-work` once and complete the browser login (populates
+`~/.claude-work`). Restart CodeV so it registers status hooks in the work
+account's `settings.json`. (`claude-whoami` / `claude-accounts` helpers can be
+added the same way — see the generated file for the full set.)
