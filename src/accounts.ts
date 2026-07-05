@@ -162,3 +162,10 @@ export const getAccountByLabel = (label: string | undefined): CodevAccount => {
 
 /** True when more than one account is configured (used to gate account UI). */
 export const isMultiAccount = (): boolean => getAccounts().length > 1;
+
+/**
+ * A session's transcripts live under its account's config dir (`<dir>/projects`).
+ * Falls back to ~/.claude for sessions without an account tag (e.g. VS Code).
+ */
+export const getProjectsDir = (accountDir?: string): string =>
+  path.join(accountDir || path.join(os.homedir(), '.claude'), 'projects');

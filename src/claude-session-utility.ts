@@ -8,7 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
-import { getScannableAccounts } from './accounts';
+import { getScannableAccounts, getProjectsDir } from './accounts';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -57,11 +57,6 @@ interface SessionAccum {
 const getHistoryPath = (dir: string): string => {
   return path.join(dir, 'history.jsonl');
 };
-
-// codev multi-account: a session's transcripts live under its account's config
-// dir. Falls back to ~/.claude for sessions without an account tag (e.g. VS Code).
-const getProjectsDir = (accountDir?: string): string =>
-  path.join(accountDir || path.join(os.homedir(), '.claude'), 'projects');
 
 // Cache for parsed sessions to avoid re-reading history.jsonl on every keystroke
 let cachedSessions: ClaudeSession[] | null = null;
@@ -1069,7 +1064,10 @@ const getResumeConfigDirEnv = (sessionId: string): string | null => {
  */
 const buildResumeCommand = (sessionId: string): string => {
   const configDir = getResumeConfigDirEnv(sessionId);
-  const prefix = configDir ? `CLAUDE_CONFIG_DIR="${configDir}" ` : '';
+  // Single-quote the value: some terminal injections (Ghostty `initial input`)
+  // don't escape the command, so a double-quoted prefix would break their
+  // AppleScript string. Single quotes are safe across all terminals + handle spaces.
+  const prefix = configDir ? `CLAUDE_CONFIG_DIR='${configDir}' ` : '';
   return `${prefix}claude --resume ${sessionId}`;
 };
 

@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { getScannableAccounts } from './accounts';
+import { getScannableAccounts, getProjectsDir } from './accounts';
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
@@ -296,7 +296,7 @@ export const watchStatusDir = (
  * - Otherwise → working
  */
 export const scanInitialStatuses = async (
-  activeSessions: { sessionId: string; project: string }[],
+  activeSessions: { sessionId: string; project: string; accountDir?: string }[],
 ): Promise<Map<string, SessionStatus>> => {
   const { execFile } = require('child_process');
   const tailFile = (filePath: string): Promise<string> =>
@@ -311,7 +311,6 @@ export const scanInitialStatuses = async (
     });
 
   const statuses = new Map<string, SessionStatus>();
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const startTime = Date.now();
 
@@ -322,7 +321,7 @@ export const scanInitialStatuses = async (
 
     // Find JSONL file
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(getProjectsDir(session.accountDir), encodedProject, `${session.sessionId}.jsonl`);
     if (!fs.existsSync(jsonlPath)) return;
 
     // Read last 15 lines
