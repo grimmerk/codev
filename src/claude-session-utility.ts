@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
+import { getScannableAccounts } from './accounts';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -22,6 +23,9 @@ export interface ClaudeSession {
   activePid?: number;
   terminalApp?: string;    // detected terminal: 'iterm2', 'cmux', 'ghostty', 'vscode', etc.
   entrypoint?: string;     // 'cli', 'claude-vscode', etc.
+  accountLabel?: string; // codev multi-account: which account this session belongs to
+  accountDir?: string; // that account's config dir (session data + enrichment root)
+  accountIsDefault?: boolean; // default account => no CLAUDE_CONFIG_DIR at launch
 }
 
 export interface ActiveSessionResult {
@@ -45,10 +49,13 @@ interface SessionAccum {
   firstTimestamp: number;
   lastTimestamp: number;
   promptCount: number;
+  accountLabel: string;
+  accountDir: string;
+  accountIsDefault: boolean;
 }
 
-const getHistoryPath = (): string => {
-  return path.join(os.homedir(), '.claude', 'history.jsonl');
+const getHistoryPath = (dir: string): string => {
+  return path.join(dir, 'history.jsonl');
 };
 
 // Cache for parsed sessions to avoid re-reading history.jsonl on every keystroke
@@ -87,50 +94,55 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
     return cachedSessions.slice(0, limit);
   }
 
-  const historyPath = getHistoryPath();
+  // Multi-account: scan every configured account's history.jsonl and merge.
+  // sessionIds are UUIDs (unique across accounts), so no cross-account dedupe.
+  const bySession = new Map<string, SessionAccum>();
 
   try {
-    if (!fs.existsSync(historyPath)) {
-      console.log('Claude history.jsonl not found:', historyPath);
-      return [];
-    }
+    for (const account of getScannableAccounts()) {
+      const historyPath = getHistoryPath(account.dir);
+      if (!fs.existsSync(historyPath)) continue;
 
-    const content = fs.readFileSync(historyPath, 'utf-8');
-    const bySession = new Map<string, SessionAccum>();
+      const content = fs.readFileSync(historyPath, 'utf-8');
+      for (const line of content.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const raw: HistoryLine = JSON.parse(line);
+          if (!raw.sessionId) continue;
 
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const raw: HistoryLine = JSON.parse(line);
-        if (!raw.sessionId) continue;
-
-        const existing = bySession.get(raw.sessionId);
-        if (existing) {
-          existing.promptCount++;
-          if (raw.timestamp && raw.timestamp > existing.lastTimestamp) {
-            existing.lastTimestamp = raw.timestamp;
-            existing.lastDisplay = raw.display || existing.lastDisplay;
+          const existing = bySession.get(raw.sessionId);
+          if (existing) {
+            existing.promptCount++;
+            if (raw.timestamp && raw.timestamp > existing.lastTimestamp) {
+              existing.lastTimestamp = raw.timestamp;
+              existing.lastDisplay = raw.display || existing.lastDisplay;
+            }
+            if (raw.timestamp && raw.timestamp < existing.firstTimestamp) {
+              existing.firstDisplay = raw.display || existing.firstDisplay;
+              existing.firstTimestamp = raw.timestamp;
+            }
+          } else {
+            bySession.set(raw.sessionId, {
+              sessionId: raw.sessionId,
+              project: raw.project || '',
+              firstDisplay: raw.display || '',
+              lastDisplay: raw.display || '',
+              firstTimestamp: raw.timestamp || 0,
+              lastTimestamp: raw.timestamp || 0,
+              promptCount: 1,
+              accountLabel: account.label,
+              accountDir: account.dir,
+              accountIsDefault: account.isDefault,
+            });
           }
-          if (raw.timestamp && raw.timestamp < existing.firstTimestamp) {
-            existing.firstDisplay = raw.display || existing.firstDisplay;
-            existing.firstTimestamp = raw.timestamp;
-          }
-        } else {
-          bySession.set(raw.sessionId, {
-            sessionId: raw.sessionId,
-            project: raw.project || '',
-            firstDisplay: raw.display || '',
-            lastDisplay: raw.display || '',
-            firstTimestamp: raw.timestamp || 0,
-            lastTimestamp: raw.timestamp || 0,
-            promptCount: 1,
-          });
+        } catch {
+          // skip malformed lines
         }
-      } catch {
-        // skip malformed lines
       }
     }
 
+    // Unified timeline: sort the MERGED set by recency (newest first) so both
+    // accounts interleave by lastTimestamp. The account badge disambiguates.
     const allSessions = Array.from(bySession.values())
       .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
       .map((s) => ({
@@ -142,6 +154,9 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
         lastTimestamp: s.lastTimestamp,
         messageCount: s.promptCount,
         isActive: false,
+        accountLabel: s.accountLabel,
+        accountDir: s.accountDir,
+        accountIsDefault: s.accountIsDefault,
       }));
 
     cachedSessions = allSessions;
@@ -1028,6 +1043,28 @@ const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promi
 };
 
 /**
+ * codev multi-account: look up which account a session belongs to (via the
+ * cached session list, which tags each session with its config dir) and return
+ * the CLAUDE_CONFIG_DIR to prefix at resume — or null for the default account.
+ */
+const getResumeConfigDirEnv = (sessionId: string): string | null => {
+  const s = readClaudeSessions(Number.MAX_SAFE_INTEGER).find(
+    (x) => x.sessionId === sessionId,
+  );
+  return s && !s.accountIsDefault && s.accountDir ? s.accountDir : null;
+};
+
+/**
+ * Build `claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the session
+ * belongs to a non-default account so it resumes under the right account.
+ */
+const buildResumeCommand = (sessionId: string): string => {
+  const configDir = getResumeConfigDirEnv(sessionId);
+  const prefix = configDir ? `CLAUDE_CONFIG_DIR="${configDir}" ` : '';
+  return `${prefix}claude --resume ${sessionId}`;
+};
+
+/**
  * Open a Claude Code session in the configured terminal.
  */
 export const openSession = async (
@@ -1527,7 +1564,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const resumeCmd = buildResumeCommand(sessionId);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
   }
 };
@@ -1742,7 +1779,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const resumeCmd = buildResumeCommand(sessionId);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
   }
 };
@@ -1804,7 +1841,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const resumeCmd = buildResumeCommand(sessionId);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
   }
 };
@@ -1824,7 +1861,7 @@ export const openSessionInCmux = (
   customTitle?: string,
 ): void => {
   const { exec } = require('child_process');
-  const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
 
   console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid, customTitle });
   if (isActive) {
@@ -1949,7 +1986,7 @@ export const openSessionInCmux = (
       exec('osascript -e \'tell application "cmux" to activate\'');
     })();
   } else {
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const resumeCmd = buildResumeCommand(sessionId);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
   }
 };
@@ -1958,7 +1995,7 @@ export const openSessionInCmux = (
  * Copy resume command to clipboard (fallback for unsupported terminals)
  */
 export const copyResumeCommand = (sessionId: string, projectPath: string): string => {
-  const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
   const { execSync } = require('child_process');
   execSync(`echo "${command}" | pbcopy`);
   return command;
