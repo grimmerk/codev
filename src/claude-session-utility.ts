@@ -58,6 +58,11 @@ const getHistoryPath = (dir: string): string => {
   return path.join(dir, 'history.jsonl');
 };
 
+// codev multi-account: a session's transcripts live under its account's config
+// dir. Falls back to ~/.claude for sessions without an account tag (e.g. VS Code).
+const getProjectsDir = (accountDir?: string): string =>
+  path.join(accountDir || path.join(os.homedir(), '.claude'), 'projects');
+
 // Cache for parsed sessions to avoid re-reading history.jsonl on every keystroke
 let cachedSessions: ClaudeSession[] | null = null;
 let cacheTimestamp = 0;
@@ -890,10 +895,14 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
     // Primary: read ~/.claude/sessions/<PID>.json for direct PID → sessionId mapping.
     // These files are created on session start and deleted on session exit.
     // Claude Code also runs concurrentSessionCleanup() to remove stale files.
-    const sessionsDir = path.join(os.homedir(), '.claude', 'sessions');
-    if (fs.existsSync(sessionsDir)) {
+    const allSessions = readClaudeSessions(500);
+    // Multi-account: scan every configured account's sessions/ dir for PID files.
+    let anySessionsDir = false;
+    for (const account of getScannableAccounts()) {
+      const sessionsDir = path.join(account.dir, 'sessions');
+      if (!fs.existsSync(sessionsDir)) continue;
+      anySessionsDir = true;
       const files = fs.readdirSync(sessionsDir).filter(f => /^\d+\.json$/.test(f));
-      const allSessions = readClaudeSessions(500);
 
       for (const file of files) {
         try {
@@ -960,21 +969,21 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
           console.error(`[detect-active] Error processing session file ${file}:`, err);
         }
       }
-
-      // Read VS Code session JSONLs in parallel (head/tail)
-      if (vscodeReadPromises.length > 0) {
-        await Promise.all(vscodeReadPromises);
-      }
-
-      // Cross-reference for PIDs with same-cwd ambiguity.
-      // Group by terminal to avoid redundant pgrep/AppleScript/CLI calls.
-      if (needsCrossRef.length > 0) {
-        await crossRefDisambiguate(needsCrossRef, activeMap, execPromise);
-      }
     }
 
-    // Fallback: if sessions/ directory doesn't exist (old Claude Code versions)
-    if (!fs.existsSync(sessionsDir)) {
+    // Read VS Code session JSONLs in parallel (head/tail)
+    if (vscodeReadPromises.length > 0) {
+      await Promise.all(vscodeReadPromises);
+    }
+
+    // Cross-reference for PIDs with same-cwd ambiguity.
+    // Group by terminal to avoid redundant pgrep/AppleScript/CLI calls.
+    if (needsCrossRef.length > 0) {
+      await crossRefDisambiguate(needsCrossRef, activeMap, execPromise);
+    }
+
+    // Fallback: if no account had a sessions/ dir (old Claude Code versions)
+    if (!anySessionsDir) {
       await detectActiveSessionsLegacy(activeMap);
     }
   } catch (err) {
@@ -1131,7 +1140,7 @@ export const openSession = async (
  * real-time updates without duplicate file reads.
  */
 export const refreshSessionPreview = async (
-  sessions: { sessionId: string; project: string }[]
+  sessions: { sessionId: string; project: string; accountDir?: string }[]
 ): Promise<Map<string, { lastUserMessage: string; lastAssistantMessage: string }>> => {
   const { exec } = require('child_process');
   const execPromise = (cmd: string): Promise<string> =>
@@ -1142,11 +1151,13 @@ export const refreshSessionPreview = async (
     });
 
   const results = new Map<string, { lastUserMessage: string; lastAssistantMessage: string }>();
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-
   const promises = sessions.map(async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(
+      getProjectsDir(session.accountDir),
+      encodedProject,
+      `${session.sessionId}.jsonl`,
+    );
     if (!fs.existsSync(jsonlPath)) return;
 
     const output = await execPromise(`tail -n 100 "${jsonlPath}"`);
@@ -1606,11 +1617,13 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
   const titles = new Map<string, string>();
   const branches = new Map<string, string>();
   const prLinks = new Map<string, PRLinkInfo>();
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-
   const promises = sessions.map(async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(
+      getProjectsDir(session.accountDir),
+      encodedProject,
+      `${session.sessionId}.jsonl`,
+    );
 
     if (!fs.existsSync(jsonlPath)) return;
 
@@ -1686,11 +1699,13 @@ export const loadLastAssistantResponses = async (
     });
 
   const responses = new Map<string, string>();
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-
   const promises = sessions.map(async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(
+      getProjectsDir(session.accountDir),
+      encodedProject,
+      `${session.sessionId}.jsonl`,
+    );
 
     if (!fs.existsSync(jsonlPath)) return;
 
