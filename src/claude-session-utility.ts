@@ -288,7 +288,6 @@ end tell`);
 
   // Cross-reference: for each iTerm2 claude PID, find its TTY → match iTerm2 tab → extract title → find session
   // Load custom titles lazily per-cwd to avoid scanning all sessions
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const titleCache = new Map<string, Map<string, string>>(); // cwd → (sessionId → title)
 
   const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
@@ -297,7 +296,7 @@ end tell`);
     const candidates = allSessions.filter(s => s.project === cwd);
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
     await Promise.all(candidates.map(async (session) => {
-      const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+      const jsonlPath = path.join(getProjectsDir(session.accountDir), encodedProject, `${session.sessionId}.jsonl`);
       if (!fs.existsSync(jsonlPath)) return;
       const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
       try {
@@ -386,7 +385,6 @@ const refineDetectionWithCmux = async (
   if (cmuxSurfaces.length === 0) return;
 
   // Load custom titles lazily per-cwd
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const titleCache = new Map<string, Map<string, string>>();
 
   const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
@@ -395,7 +393,7 @@ const refineDetectionWithCmux = async (
     const candidates = allSessions.filter(s => s.project === cwd);
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
     await Promise.all(candidates.map(async (session) => {
-      const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+      const jsonlPath = path.join(getProjectsDir(session.accountDir), encodedProject, `${session.sessionId}.jsonl`);
       if (!fs.existsSync(jsonlPath)) return;
       const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
       try {
@@ -461,24 +459,26 @@ const crossRefDisambiguate = async (
   }
 
   // Load custom titles lazily per-cwd (shared across terminals)
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const titleCache = new Map<string, Map<string, string>>();
   const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
     if (titleCache.has(cwd)) return titleCache.get(cwd)!;
     const titles = new Map<string, string>();
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
-    const projectDir = path.join(claudeDir, encodedProject);
-    if (!fs.existsSync(projectDir)) { titleCache.set(cwd, titles); return titles; }
-    const jsonlFiles = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
-    await Promise.all(jsonlFiles.map(async (file) => {
-      const sessionId = file.replace('.jsonl', '');
-      const out = await execPromise(`grep '"type":"custom-title"' "${path.join(projectDir, file)}" 2>/dev/null | tail -1`);
-      try {
-        const parsed = JSON.parse(out.trim());
-        const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
-        if (title) titles.set(sessionId, title);
-      } catch {}
-    }));
+    // Scan every account's projects dir — the session may live under any account.
+    for (const account of getScannableAccounts()) {
+      const projectDir = path.join(getProjectsDir(account.dir), encodedProject);
+      if (!fs.existsSync(projectDir)) continue;
+      const jsonlFiles = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+      await Promise.all(jsonlFiles.map(async (file) => {
+        const sessionId = file.replace('.jsonl', '');
+        const out = await execPromise(`grep '"type":"custom-title"' "${path.join(projectDir, file)}" 2>/dev/null | tail -1`);
+        try {
+          const parsed = JSON.parse(out.trim());
+          const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
+          if (title) titles.set(sessionId, title);
+        } catch {}
+      }));
+    }
     titleCache.set(cwd, titles);
     return titles;
   };
