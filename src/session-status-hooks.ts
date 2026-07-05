@@ -8,6 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { getScannableAccounts } from './accounts';
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
@@ -68,24 +69,32 @@ mv -f "$TMPFILE" "$STATUS_DIR/$SESSION_ID.json"
 `;
 
 /**
- * Install hooks into ~/.claude/settings.json (idempotent, merges with existing)
+ * All accounts' settings.json paths. The hook script + status dir stay at
+ * ~/.claude (fixed — the script always writes to ~/.claude/codev-status), but
+ * the hook must be REGISTERED in each account's settings.json so status fires
+ * for sessions running under any account.
  */
-export const installHooks = (): void => {
-  // Create hook script
-  fs.mkdirSync(path.dirname(HOOK_SCRIPT_PATH), { recursive: true });
-  fs.writeFileSync(HOOK_SCRIPT_PATH, HOOK_SCRIPT, { mode: 0o755 });
+const getSettingsPaths = (): string[] =>
+  getScannableAccounts().map((a) => path.join(a.dir, 'settings.json'));
 
-  // Create status directory
-  fs.mkdirSync(STATUS_DIR, { recursive: true });
+/** Back up a settings.json before we modify it. */
+const backupSettings = (settingsPath: string): void => {
+  try {
+    if (fs.existsSync(settingsPath)) {
+      fs.copyFileSync(settingsPath, `${settingsPath}.codev-bak`);
+    }
+  } catch {}
+};
 
+/** Merge our hook into one account's settings.json (idempotent). */
+const installHookIntoSettings = (settingsPath: string): void => {
   // Read existing settings — abort if file exists but can't be parsed (don't overwrite)
   let settings: any = {};
   try {
-    if (fs.existsSync(SETTINGS_PATH)) {
-      settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+    if (fs.existsSync(settingsPath)) {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
     }
   } catch {
-    // Can't parse existing file — don't risk overwriting user's settings
     return;
   }
 
@@ -111,31 +120,31 @@ export const installHooks = (): void => {
   }
 
   if (modified) {
-    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+    backupSettings(settingsPath);
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
   }
 };
 
 /**
- * Remove our hooks from ~/.claude/settings.json
+ * Install hooks into every configured account's settings.json (idempotent).
+ * The hook script + status dir are shared at ~/.claude.
  */
-export const removeHooks = (): void => {
-  // Remove hook script
-  try { fs.unlinkSync(HOOK_SCRIPT_PATH); } catch {}
+export const installHooks = (): void => {
+  fs.mkdirSync(path.dirname(HOOK_SCRIPT_PATH), { recursive: true });
+  fs.writeFileSync(HOOK_SCRIPT_PATH, HOOK_SCRIPT, { mode: 0o755 });
+  fs.mkdirSync(STATUS_DIR, { recursive: true });
 
-  // Remove status files
-  try {
-    if (fs.existsSync(STATUS_DIR)) {
-      for (const f of fs.readdirSync(STATUS_DIR)) {
-        fs.unlinkSync(path.join(STATUS_DIR, f));
-      }
-      fs.rmdirSync(STATUS_DIR);
-    }
-  } catch {}
+  for (const settingsPath of getSettingsPaths()) {
+    installHookIntoSettings(settingsPath);
+  }
+};
 
-  // Remove our entries from settings.json
+/** Remove our hook from one account's settings.json. */
+const removeHookFromSettings = (settingsPath: string): void => {
   try {
-    if (!fs.existsSync(SETTINGS_PATH)) return;
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+    if (!fs.existsSync(settingsPath)) return;
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
     if (!settings.hooks) return;
 
     let modified = false;
@@ -156,9 +165,31 @@ export const removeHooks = (): void => {
     }
 
     if (modified) {
-      fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+      backupSettings(settingsPath);
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
     }
   } catch {}
+};
+
+/**
+ * Remove our hooks from every account's settings.json + delete the shared
+ * hook script and status dir.
+ */
+export const removeHooks = (): void => {
+  try { fs.unlinkSync(HOOK_SCRIPT_PATH); } catch {}
+
+  try {
+    if (fs.existsSync(STATUS_DIR)) {
+      for (const f of fs.readdirSync(STATUS_DIR)) {
+        fs.unlinkSync(path.join(STATUS_DIR, f));
+      }
+      fs.rmdirSync(STATUS_DIR);
+    }
+  } catch {}
+
+  for (const settingsPath of getSettingsPaths()) {
+    removeHookFromSettings(settingsPath);
+  }
 };
 
 /**
