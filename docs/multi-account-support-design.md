@@ -361,15 +361,17 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
 
 ## 7. Phasing (agreed)
 
-- **Batch 1 — now (satisfies 1, 2, 4.1, 5-min, 7, 8):**
-  - *P0 CLI:* registry; per-account functions + `claude <account>` dispatcher (§6.A a+b);
+- **Batch 1 — ✅ Done** (branch `feat/multi-account-support`) **(satisfies 1, 2, 4.1, 5-min, 7, 8):**
+  - *P0 CLI:* registry (`~/.config/codev/accounts.json`); per-account functions +
+    `claude <account>` dispatcher + `claude-whoami` / `claude-accounts` (§6.A);
     shell integration via a sourced file + one rc line (§6.C b); semi-manual add-account
-    (first `claude-<label>` run walks through login). §3.3 already confirmed.
-  - *P1 CodeV:* multi-dir session aggregation + **account badge** (needed to make the
-    merged list legible; shown only when ≥2 accounts) + account-aware resume/launch
-    (§6.E); hooks registered per config dir (§6.F). Biggest CodeV change; required even
-    for the "minimum," since CodeV can't show/resume account-2 sessions without scanning
-    account-2's dir.
+    (first `claude-<label>` run walks through login). §3.3 confirmed.
+  - *P1 CodeV:* multi-dir session aggregation + **account badge** (non-default accounts
+    only) + account-aware resume/launch (§6.E); active-dot + title/branch enrichment per
+    account; same-cwd cross-ref per account; hooks registered per config dir (§6.F).
+  - *Deferred:* VS Code (`claude-vscode`) sessions can't be account-switched (URI-handler
+    launch) — tracked in grimmerk/codev#121. Setup UI/CLI is Batch 2 (registry +
+    `accounts.sh` are hand-created for now).
 - **Batch 2 — after Batch 1, revisit:** account picker / per-launch override (§6.G, 4.2);
   manage-accounts Settings tab — list/add/rename/remove + shell-integration toggle
   (§6.D); pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
@@ -423,5 +425,25 @@ No CLI/PATH helper exists today; the hook installer is the reference pattern.
 - **`~/.claude.json` at the old path:** some third-party tools still read
   `~/.claude.json` directly; with per-dir `.claude.json`, only the default account's is
   at the legacy path. Low impact for CodeV (we read per dir), but worth noting.
-</content>
-</invoke>
+
+---
+
+## 11. How to use it now (Batch 1, manual setup)
+
+Batch 1 ships the *engine*; account setup is manual until the Batch 2 UI/CLI.
+
+- **Registry** — `~/.config/codev/accounts.json`: one entry per account with
+  `label`, `dir`, `configDirEnv` (null for the default), `identityFile`, `isDefault`.
+  The default account is `~/.claude` (its `.claude.json` sits at `~/.claude.json`,
+  HOME level — never set `CLAUDE_CONFIG_DIR=~/.claude`, see §3.4). Extra accounts
+  live in `~/.claude-<label>`.
+- **Shell** — `~/.config/codev/accounts.sh` (sourced from `~/.zshrc`) defines
+  `claude` (dispatcher), `claude-<label>`, `claude-whoami`, `claude-accounts`.
+  Add an account: create its registry entry, then run `claude-<label>` once and
+  complete the browser login (populates `~/.claude-<label>`).
+- **CodeV** — with the registry present and ≥2 accounts logged in, the Sessions
+  tab lists sessions from every account (recency-merged), badges non-default
+  accounts, resumes each under its own account, shows per-account active dots +
+  titles, and registers status hooks in each account's `settings.json`.
+- **No registry / one account** — CodeV behaves exactly as before; the feature is
+  invisible and opt-in (graceful fallback to a single default account).
