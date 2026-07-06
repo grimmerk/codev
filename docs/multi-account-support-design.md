@@ -351,6 +351,11 @@ good. But the hook must be **registered** in each account's `settings.json`. Opt
 - New-session launch (Projects `⌘+Enter`): allow an account override, e.g. extend the
   planned `>` command mode (`> claude @work myrepo`) or an account segment in the
   expanded project row.
+- **Coupled with Batch 3 (§5).** Truly resuming/sharing a *transcript* across accounts
+  only works if the session data (and global config: CLAUDE.md/skills) is shareable
+  across config dirs — i.e. it depends on Batch 3's cross-account reuse. So design 2c
+  and Batch 3 **together**: without sharing, 2c is limited to "new session in this cwd
+  under account Y"; with sharing, genuine cross-account resume becomes possible.
 
 ### 6.H pyenv-style auto-switch by folder (requirement 6, nice-to-have, "reverse" priority)
 

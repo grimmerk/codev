@@ -2,9 +2,10 @@
 
 ## 1.0.77
 
-- Feat: multi-account Batch 2a — `codev account` CLI to manage the registry
+- Feat: multi-account Batch 2a + 2e — `codev account` CLI + configurable global-default
   - `codev account list | add <label> [--dir D] | default <label> | remove <label> | regenerate | show | install | uninstall`
   - One shared generator (`src/cli/account-manager.ts`) produces both `~/.config/codev/accounts.json` and `accounts.sh`, replacing Batch 1's hand-editing; run in dev via `yarn account <cmd>` (PATH install + Settings UI land in Batch 2b)
+  - Batch 2e (global-default): `codev account default <label>` + the shell dispatcher route bare `claude` to a chosen account; CodeV resume now uses `command claude` (bypasses the dispatcher) so a non-anchor global-default can't misroute an anchor-account resume
   - Adds Vitest + a generator test suite, and a real CI workflow (replacing the placeholder)
 
 ## 1.0.76
