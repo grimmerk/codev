@@ -38,33 +38,55 @@ function reg(overrides: Partial<Registry> = {}): Registry {
 }
 
 describe('generateAccountsSh', () => {
-  it('launches the default account with NO CLAUDE_CONFIG_DIR', () => {
+  it('launches the default account with CLAUDE_CONFIG_DIR unset', () => {
     const sh = generateAccountsSh(reg());
-    expect(sh).toContain('claude-personal() { command claude "$@"; }');
+    expect(sh).toContain(
+      'claude-personal() { env -u CLAUDE_CONFIG_DIR claude "$@"; }',
+    );
   });
 
   it('launches an extra account with CLAUDE_CONFIG_DIR ($HOME-relative)', () => {
     const sh = generateAccountsSh(reg());
     expect(sh).toContain(
-      'claude-work() { CLAUDE_CONFIG_DIR="$HOME/.claude-work" command claude "$@"; }',
+      'claude-work() { env CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude "$@"; }',
     );
   });
 
   it('adds a dispatcher case per account', () => {
     const sh = generateAccountsSh(reg());
-    expect(sh).toContain('personal) shift; command claude "$@" ;;');
     expect(sh).toContain(
-      'work) shift; CLAUDE_CONFIG_DIR="$HOME/.claude-work" command claude "$@" ;;',
+      'personal) shift; env -u CLAUDE_CONFIG_DIR claude "$@" ;;',
+    );
+    expect(sh).toContain(
+      'work) shift; env CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude "$@" ;;',
     );
   });
 
   it('routes the dispatcher fallback (*) to the current defaultAccount', () => {
-    // defaultAccount = personal (the no-env anchor)
-    expect(generateAccountsSh(reg())).toContain('*) command claude "$@" ;;');
+    // defaultAccount = personal (the anchor) -> unset CLAUDE_CONFIG_DIR
+    expect(generateAccountsSh(reg())).toContain(
+      '*) env -u CLAUDE_CONFIG_DIR claude "$@" ;;',
+    );
     // defaultAccount = work -> bare `claude` must set work's config dir
     expect(generateAccountsSh(reg({ defaultAccount: 'work' }))).toContain(
-      '*) CLAUDE_CONFIG_DIR="$HOME/.claude-work" command claude "$@" ;;',
+      '*) env CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude "$@" ;;',
     );
+  });
+
+  it('rejects an account dir with shell-unsafe characters', () => {
+    const bad = reg({
+      defaultAccount: 'evil',
+      accounts: [
+        {
+          label: 'evil',
+          dir: '/tmp/$(touch pwned)',
+          identityFile: '/tmp/x/.claude.json',
+          configDirEnv: '/tmp/$(touch pwned)',
+          isDefault: false,
+        },
+      ],
+    });
+    expect(() => generateAccountsSh(bad)).toThrow(/Unsafe shell characters/);
   });
 
   it('maps each account dir back to its label in claude-whoami', () => {

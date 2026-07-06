@@ -43,7 +43,9 @@ function getFlag(args: string[], name: string): string | undefined {
 function printList(): void {
   const accounts = manager.listAccounts();
   if (accounts.length === 0) {
-    console.log('No accounts configured yet. Add one with: codev account add <label>');
+    console.log(
+      'No accounts configured yet. Add one with: codev account add <label>',
+    );
     return;
   }
   const pad = Math.max(...accounts.map((a) => a.label.length), 5);
@@ -71,12 +73,18 @@ function main(): number {
       return 0;
 
     case 'add': {
-      const label = rest.find((a) => !a.startsWith('-'));
       const dir = getFlag(rest, '--dir');
-      const a = manager.addAccount(label as string, { dir });
-      console.log(`✓ Added "${a.label}"  (${a.dir})`);
-      if (!a.loggedIn) {
-        console.log(`  Log in with:  claude ${a.label}   (or claude-${a.label})`);
+      // Skip the token consumed by `--dir` so `add --dir /foo work` still picks
+      // `work` as the label (not `/foo`).
+      const dirIdx = rest.indexOf('--dir');
+      const skipIdx = dirIdx >= 0 ? dirIdx + 1 : -1;
+      const label = rest.find((a, i) => !a.startsWith('-') && i !== skipIdx);
+      const acct = manager.addAccount(label as string, { dir });
+      console.log(`✓ Added "${acct.label}"  (${acct.dir})`);
+      if (!acct.loggedIn) {
+        console.log(
+          `  Log in with:  claude ${acct.label}   (or claude-${acct.label})`,
+        );
       }
       reloadHint();
       return 0;

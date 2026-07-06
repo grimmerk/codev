@@ -1083,7 +1083,11 @@ const buildResumeCommand = (sessionId: string): string => {
   // Single-quote the value: some terminal injections (Ghostty `initial input`)
   // don't escape the command, so a double-quoted prefix would break their
   // AppleScript string. Single quotes are safe across all terminals + handle spaces.
-  const prefix = configDir ? `CLAUDE_CONFIG_DIR='${configDir}' ` : '';
+  // Escape single quotes (e.g. /Users/O'Brien/…) so the single-quoted prefix
+  // stays well-formed: ' becomes '\'' .
+  const prefix = configDir
+    ? `CLAUDE_CONFIG_DIR='${configDir.replace(/'/g, "'\\''")}' `
+    : '';
   // `command claude` bypasses the accounts.sh `claude` dispatcher. CodeV has
   // already resolved the exact account (the prefix, or none for the anchor), so
   // the shell must NOT re-route a bare `claude` to a configured non-default
