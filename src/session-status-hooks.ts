@@ -8,9 +8,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { getScannableAccounts, getProjectsDir } from './accounts';
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
-const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
 const STATUS_DIR = path.join(CLAUDE_DIR, 'codev-status');
 const HOOK_SCRIPT_PATH = path.join(CLAUDE_DIR, 'codev-status-hook.sh');
 const HOOK_MARKER = 'codev-status-hook';
@@ -68,24 +68,34 @@ mv -f "$TMPFILE" "$STATUS_DIR/$SESSION_ID.json"
 `;
 
 /**
- * Install hooks into ~/.claude/settings.json (idempotent, merges with existing)
+ * All accounts' settings.json paths. The hook script + status dir stay at
+ * ~/.claude (fixed — the script always writes to ~/.claude/codev-status), but
+ * the hook must be REGISTERED in each account's settings.json so status fires
+ * for sessions running under any account.
  */
-export const installHooks = (): void => {
-  // Create hook script
-  fs.mkdirSync(path.dirname(HOOK_SCRIPT_PATH), { recursive: true });
-  fs.writeFileSync(HOOK_SCRIPT_PATH, HOOK_SCRIPT, { mode: 0o755 });
+const getSettingsPaths = (): string[] =>
+  getScannableAccounts().map((a) => path.join(a.dir, 'settings.json'));
 
-  // Create status directory
-  fs.mkdirSync(STATUS_DIR, { recursive: true });
+/** Back up a settings.json before we modify it. */
+const backupSettings = (settingsPath: string): void => {
+  try {
+    if (fs.existsSync(settingsPath)) {
+      fs.copyFileSync(settingsPath, `${settingsPath}.codev-bak`);
+    }
+  } catch {
+    // best-effort backup
+  }
+};
 
+/** Merge our hook into one account's settings.json (idempotent). */
+const installHookIntoSettings = (settingsPath: string): void => {
   // Read existing settings — abort if file exists but can't be parsed (don't overwrite)
   let settings: any = {};
   try {
-    if (fs.existsSync(SETTINGS_PATH)) {
-      settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+    if (fs.existsSync(settingsPath)) {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
     }
   } catch {
-    // Can't parse existing file — don't risk overwriting user's settings
     return;
   }
 
@@ -111,31 +121,31 @@ export const installHooks = (): void => {
   }
 
   if (modified) {
-    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+    backupSettings(settingsPath);
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
   }
 };
 
 /**
- * Remove our hooks from ~/.claude/settings.json
+ * Install hooks into every configured account's settings.json (idempotent).
+ * The hook script + status dir are shared at ~/.claude.
  */
-export const removeHooks = (): void => {
-  // Remove hook script
-  try { fs.unlinkSync(HOOK_SCRIPT_PATH); } catch {}
+export const installHooks = (): void => {
+  fs.mkdirSync(path.dirname(HOOK_SCRIPT_PATH), { recursive: true });
+  fs.writeFileSync(HOOK_SCRIPT_PATH, HOOK_SCRIPT, { mode: 0o755 });
+  fs.mkdirSync(STATUS_DIR, { recursive: true });
 
-  // Remove status files
-  try {
-    if (fs.existsSync(STATUS_DIR)) {
-      for (const f of fs.readdirSync(STATUS_DIR)) {
-        fs.unlinkSync(path.join(STATUS_DIR, f));
-      }
-      fs.rmdirSync(STATUS_DIR);
-    }
-  } catch {}
+  for (const settingsPath of getSettingsPaths()) {
+    installHookIntoSettings(settingsPath);
+  }
+};
 
-  // Remove our entries from settings.json
+/** Remove our hook from one account's settings.json. */
+const removeHookFromSettings = (settingsPath: string): void => {
   try {
-    if (!fs.existsSync(SETTINGS_PATH)) return;
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+    if (!fs.existsSync(settingsPath)) return;
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
     if (!settings.hooks) return;
 
     let modified = false;
@@ -156,29 +166,52 @@ export const removeHooks = (): void => {
     }
 
     if (modified) {
-      fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+      backupSettings(settingsPath);
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
     }
   } catch {}
+};
+
+/**
+ * Remove our hooks from every account's settings.json + delete the shared
+ * hook script and status dir.
+ */
+export const removeHooks = (): void => {
+  try { fs.unlinkSync(HOOK_SCRIPT_PATH); } catch {}
+
+  try {
+    if (fs.existsSync(STATUS_DIR)) {
+      for (const f of fs.readdirSync(STATUS_DIR)) {
+        fs.unlinkSync(path.join(STATUS_DIR, f));
+      }
+      fs.rmdirSync(STATUS_DIR);
+    }
+  } catch {}
+
+  for (const settingsPath of getSettingsPaths()) {
+    removeHookFromSettings(settingsPath);
+  }
 };
 
 /**
  * Check if our hooks are currently installed
  */
 export const isHooksInstalled = (): boolean => {
-  try {
-    if (!fs.existsSync(SETTINGS_PATH)) return false;
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
-    if (!settings.hooks) return false;
-
-    // Check if at least one of our events has our hook
-    return HOOK_EVENTS.some(event =>
-      settings.hooks[event]?.some((entry: any) =>
-        entry.hooks?.some((h: any) => h.command === HOOK_SCRIPT_PATH)
-      )
-    );
-  } catch {
-    return false;
-  }
+  // Consistent with multi-account install/remove: installed if any account's
+  // settings.json has our hook.
+  return getSettingsPaths().some((settingsPath) => {
+    try {
+      if (!fs.existsSync(settingsPath)) return false;
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      return HOOK_EVENTS.some((event) =>
+        settings.hooks?.[event]?.some((entry: any) =>
+          entry.hooks?.some((h: any) => h.command === HOOK_SCRIPT_PATH),
+        ),
+      );
+    } catch {
+      return false;
+    }
+  });
 };
 
 export type SessionStatus = 'working' | 'idle' | 'needs-attention' | 'unknown' | null;
@@ -265,7 +298,7 @@ export const watchStatusDir = (
  * - Otherwise → working
  */
 export const scanInitialStatuses = async (
-  activeSessions: { sessionId: string; project: string }[],
+  activeSessions: { sessionId: string; project: string; accountDir?: string }[],
 ): Promise<Map<string, SessionStatus>> => {
   const { execFile } = require('child_process');
   const tailFile = (filePath: string): Promise<string> =>
@@ -280,7 +313,6 @@ export const scanInitialStatuses = async (
     });
 
   const statuses = new Map<string, SessionStatus>();
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
 
   const startTime = Date.now();
 
@@ -291,7 +323,11 @@ export const scanInitialStatuses = async (
 
     // Find JSONL file
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(
+      getProjectsDir(session.accountDir),
+      encodedProject,
+      `${session.sessionId}.jsonl`,
+    );
     if (!fs.existsSync(jsonlPath)) return;
 
     // Read last 15 lines

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.76
+
+- Feat: multi-account support (Batch 1) — run multiple Claude Code accounts (e.g. personal + work) from one machine
+  - Sessions tab aggregates sessions across all accounts (recency-merged), badges non-default accounts, and resumes each under its own account (`CLAUDE_CONFIG_DIR`)
+  - Per-account active dots, custom titles/branches, previews, and status hooks
+  - CLI helpers via `~/.config/codev/accounts.sh`: `claude <account>` / `claude-<account>`, `claude-whoami`, `claude-accounts`
+  - Fully opt-in: with no `~/.config/codev/accounts.json` registry (or a single account), CodeV behaves exactly as before
+  - Setup is manual for now (registry + `accounts.sh`); a management UI/CLI is planned. VS Code sessions can't be account-switched (#121). See `docs/multi-account-support-design.md`.
+
 ## 1.0.75
 
 - Feat: Sessions search clears after opening a session

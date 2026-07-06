@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
+import { getScannableAccounts, getProjectsDir } from './accounts';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -22,6 +23,10 @@ export interface ClaudeSession {
   activePid?: number;
   terminalApp?: string;    // detected terminal: 'iterm2', 'cmux', 'ghostty', 'vscode', etc.
   entrypoint?: string;     // 'cli', 'claude-vscode', etc.
+  accountLabel?: string; // codev multi-account: which account this session belongs to
+  accountDir?: string; // that account's config dir (session data + enrichment root)
+  accountConfigDirEnv?: string | null; // CLAUDE_CONFIG_DIR to set at resume (null = default)
+  accountIsDefault?: boolean; // default account => no CLAUDE_CONFIG_DIR at launch
 }
 
 export interface ActiveSessionResult {
@@ -45,10 +50,14 @@ interface SessionAccum {
   firstTimestamp: number;
   lastTimestamp: number;
   promptCount: number;
+  accountLabel: string;
+  accountDir: string;
+  accountConfigDirEnv: string | null;
+  accountIsDefault: boolean;
 }
 
-const getHistoryPath = (): string => {
-  return path.join(os.homedir(), '.claude', 'history.jsonl');
+const getHistoryPath = (dir: string): string => {
+  return path.join(dir, 'history.jsonl');
 };
 
 // Cache for parsed sessions to avoid re-reading history.jsonl on every keystroke
@@ -87,70 +96,84 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
     return cachedSessions.slice(0, limit);
   }
 
-  const historyPath = getHistoryPath();
+  // Multi-account: scan every configured account's history.jsonl and merge.
+  // sessionIds are UUIDs (unique across accounts), so no cross-account dedupe.
+  const bySession = new Map<string, SessionAccum>();
 
-  try {
-    if (!fs.existsSync(historyPath)) {
-      console.log('Claude history.jsonl not found:', historyPath);
-      return [];
-    }
+  // Per-account try/catch: one unreadable/corrupt history must not hide the
+  // sessions of every other account.
+  for (const account of getScannableAccounts()) {
+    try {
+      const historyPath = getHistoryPath(account.dir);
+      if (!fs.existsSync(historyPath)) continue;
 
-    const content = fs.readFileSync(historyPath, 'utf-8');
-    const bySession = new Map<string, SessionAccum>();
+      const content = fs.readFileSync(historyPath, 'utf-8');
+      for (const line of content.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const raw: HistoryLine = JSON.parse(line);
+          if (!raw.sessionId) continue;
 
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const raw: HistoryLine = JSON.parse(line);
-        if (!raw.sessionId) continue;
-
-        const existing = bySession.get(raw.sessionId);
-        if (existing) {
-          existing.promptCount++;
-          if (raw.timestamp && raw.timestamp > existing.lastTimestamp) {
-            existing.lastTimestamp = raw.timestamp;
-            existing.lastDisplay = raw.display || existing.lastDisplay;
+          const existing = bySession.get(raw.sessionId);
+          if (existing) {
+            existing.promptCount++;
+            if (raw.timestamp && raw.timestamp > existing.lastTimestamp) {
+              existing.lastTimestamp = raw.timestamp;
+              existing.lastDisplay = raw.display || existing.lastDisplay;
+            }
+            if (raw.timestamp && raw.timestamp < existing.firstTimestamp) {
+              existing.firstDisplay = raw.display || existing.firstDisplay;
+              existing.firstTimestamp = raw.timestamp;
+            }
+          } else {
+            bySession.set(raw.sessionId, {
+              sessionId: raw.sessionId,
+              project: raw.project || '',
+              firstDisplay: raw.display || '',
+              lastDisplay: raw.display || '',
+              firstTimestamp: raw.timestamp || 0,
+              lastTimestamp: raw.timestamp || 0,
+              promptCount: 1,
+              accountLabel: account.label,
+              accountDir: account.dir,
+              accountConfigDirEnv: account.configDirEnv,
+              accountIsDefault: account.isDefault,
+            });
           }
-          if (raw.timestamp && raw.timestamp < existing.firstTimestamp) {
-            existing.firstDisplay = raw.display || existing.firstDisplay;
-            existing.firstTimestamp = raw.timestamp;
-          }
-        } else {
-          bySession.set(raw.sessionId, {
-            sessionId: raw.sessionId,
-            project: raw.project || '',
-            firstDisplay: raw.display || '',
-            lastDisplay: raw.display || '',
-            firstTimestamp: raw.timestamp || 0,
-            lastTimestamp: raw.timestamp || 0,
-            promptCount: 1,
-          });
+        } catch {
+          // skip malformed lines
         }
-      } catch {
-        // skip malformed lines
       }
+    } catch (error) {
+      console.error(
+        `Error reading Claude sessions for ${account.label}:`,
+        error,
+      );
     }
-
-    const allSessions = Array.from(bySession.values())
-      .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
-      .map((s) => ({
-        sessionId: s.sessionId,
-        project: s.project,
-        projectName: path.basename(s.project) || s.project,
-        firstUserMessage: s.firstDisplay,
-        lastUserMessage: s.lastDisplay,
-        lastTimestamp: s.lastTimestamp,
-        messageCount: s.promptCount,
-        isActive: false,
-      }));
-
-    cachedSessions = allSessions;
-    cacheTimestamp = now;
-    return allSessions.slice(0, limit);
-  } catch (error) {
-    console.error('Error reading Claude sessions:', error);
-    return [];
   }
+
+  // Unified timeline: sort the MERGED set by recency (newest first) so both
+  // accounts interleave by lastTimestamp. The account badge disambiguates.
+  const allSessions = Array.from(bySession.values())
+    .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
+    .map((s) => ({
+      sessionId: s.sessionId,
+      project: s.project,
+      projectName: path.basename(s.project) || s.project,
+      firstUserMessage: s.firstDisplay,
+      lastUserMessage: s.lastDisplay,
+      lastTimestamp: s.lastTimestamp,
+      messageCount: s.promptCount,
+      isActive: false,
+      accountLabel: s.accountLabel,
+      accountDir: s.accountDir,
+      accountConfigDirEnv: s.accountConfigDirEnv,
+      accountIsDefault: s.accountIsDefault,
+    }));
+
+  cachedSessions = allSessions;
+  cacheTimestamp = now;
+  return allSessions.slice(0, limit);
 };
 
 /**
@@ -268,7 +291,6 @@ end tell`);
 
   // Cross-reference: for each iTerm2 claude PID, find its TTY → match iTerm2 tab → extract title → find session
   // Load custom titles lazily per-cwd to avoid scanning all sessions
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const titleCache = new Map<string, Map<string, string>>(); // cwd → (sessionId → title)
 
   const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
@@ -277,7 +299,11 @@ end tell`);
     const candidates = allSessions.filter(s => s.project === cwd);
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
     await Promise.all(candidates.map(async (session) => {
-      const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+      const jsonlPath = path.join(
+        getProjectsDir(session.accountDir),
+        encodedProject,
+        `${session.sessionId}.jsonl`,
+      );
       if (!fs.existsSync(jsonlPath)) return;
       const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
       try {
@@ -366,7 +392,6 @@ const refineDetectionWithCmux = async (
   if (cmuxSurfaces.length === 0) return;
 
   // Load custom titles lazily per-cwd
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const titleCache = new Map<string, Map<string, string>>();
 
   const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
@@ -375,7 +400,11 @@ const refineDetectionWithCmux = async (
     const candidates = allSessions.filter(s => s.project === cwd);
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
     await Promise.all(candidates.map(async (session) => {
-      const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+      const jsonlPath = path.join(
+        getProjectsDir(session.accountDir),
+        encodedProject,
+        `${session.sessionId}.jsonl`,
+      );
       if (!fs.existsSync(jsonlPath)) return;
       const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
       try {
@@ -441,24 +470,26 @@ const crossRefDisambiguate = async (
   }
 
   // Load custom titles lazily per-cwd (shared across terminals)
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const titleCache = new Map<string, Map<string, string>>();
   const getTitlesForCwd = async (cwd: string): Promise<Map<string, string>> => {
     if (titleCache.has(cwd)) return titleCache.get(cwd)!;
     const titles = new Map<string, string>();
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
-    const projectDir = path.join(claudeDir, encodedProject);
-    if (!fs.existsSync(projectDir)) { titleCache.set(cwd, titles); return titles; }
-    const jsonlFiles = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
-    await Promise.all(jsonlFiles.map(async (file) => {
-      const sessionId = file.replace('.jsonl', '');
-      const out = await execPromise(`grep '"type":"custom-title"' "${path.join(projectDir, file)}" 2>/dev/null | tail -1`);
-      try {
-        const parsed = JSON.parse(out.trim());
-        const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
-        if (title) titles.set(sessionId, title);
-      } catch {}
-    }));
+    // Scan every account's projects dir — the session may live under any account.
+    for (const account of getScannableAccounts()) {
+      const projectDir = path.join(getProjectsDir(account.dir), encodedProject);
+      if (!fs.existsSync(projectDir)) continue;
+      const jsonlFiles = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+      await Promise.all(jsonlFiles.map(async (file) => {
+        const sessionId = file.replace('.jsonl', '');
+        const out = await execPromise(`grep '"type":"custom-title"' "${path.join(projectDir, file)}" 2>/dev/null | tail -1`);
+        try {
+          const parsed = JSON.parse(out.trim());
+          const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
+          if (title) titles.set(sessionId, title);
+        } catch {}
+      }));
+    }
     titleCache.set(cwd, titles);
     return titles;
   };
@@ -875,10 +906,14 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
     // Primary: read ~/.claude/sessions/<PID>.json for direct PID → sessionId mapping.
     // These files are created on session start and deleted on session exit.
     // Claude Code also runs concurrentSessionCleanup() to remove stale files.
-    const sessionsDir = path.join(os.homedir(), '.claude', 'sessions');
-    if (fs.existsSync(sessionsDir)) {
+    const allSessions = readClaudeSessions(500);
+    // Multi-account: scan every configured account's sessions/ dir for PID files.
+    let anySessionsDir = false;
+    for (const account of getScannableAccounts()) {
+      const sessionsDir = path.join(account.dir, 'sessions');
+      if (!fs.existsSync(sessionsDir)) continue;
+      anySessionsDir = true;
       const files = fs.readdirSync(sessionsDir).filter(f => /^\d+\.json$/.test(f));
-      const allSessions = readClaudeSessions(500);
 
       for (const file of files) {
         try {
@@ -945,21 +980,21 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
           console.error(`[detect-active] Error processing session file ${file}:`, err);
         }
       }
-
-      // Read VS Code session JSONLs in parallel (head/tail)
-      if (vscodeReadPromises.length > 0) {
-        await Promise.all(vscodeReadPromises);
-      }
-
-      // Cross-reference for PIDs with same-cwd ambiguity.
-      // Group by terminal to avoid redundant pgrep/AppleScript/CLI calls.
-      if (needsCrossRef.length > 0) {
-        await crossRefDisambiguate(needsCrossRef, activeMap, execPromise);
-      }
     }
 
-    // Fallback: if sessions/ directory doesn't exist (old Claude Code versions)
-    if (!fs.existsSync(sessionsDir)) {
+    // Read VS Code session JSONLs in parallel (head/tail)
+    if (vscodeReadPromises.length > 0) {
+      await Promise.all(vscodeReadPromises);
+    }
+
+    // Cross-reference for PIDs with same-cwd ambiguity.
+    // Group by terminal to avoid redundant pgrep/AppleScript/CLI calls.
+    if (needsCrossRef.length > 0) {
+      await crossRefDisambiguate(needsCrossRef, activeMap, execPromise);
+    }
+
+    // Fallback: if no account had a sessions/ dir (old Claude Code versions)
+    if (!anySessionsDir) {
       await detectActiveSessionsLegacy(activeMap);
     }
   } catch (err) {
@@ -1025,6 +1060,31 @@ const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promi
       }
     }
   }
+};
+
+/**
+ * codev multi-account: look up which account a session belongs to (via the
+ * cached session list, which tags each session with its config dir) and return
+ * the CLAUDE_CONFIG_DIR to prefix at resume — or null for the default account.
+ */
+const getResumeConfigDirEnv = (sessionId: string): string | null => {
+  const s = readClaudeSessions(Number.MAX_SAFE_INTEGER).find(
+    (x) => x.sessionId === sessionId,
+  );
+  return s?.accountConfigDirEnv ?? null;
+};
+
+/**
+ * Build `claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the session
+ * belongs to a non-default account so it resumes under the right account.
+ */
+const buildResumeCommand = (sessionId: string): string => {
+  const configDir = getResumeConfigDirEnv(sessionId);
+  // Single-quote the value: some terminal injections (Ghostty `initial input`)
+  // don't escape the command, so a double-quoted prefix would break their
+  // AppleScript string. Single quotes are safe across all terminals + handle spaces.
+  const prefix = configDir ? `CLAUDE_CONFIG_DIR='${configDir}' ` : '';
+  return `${prefix}claude --resume ${sessionId}`;
 };
 
 /**
@@ -1094,7 +1154,7 @@ export const openSession = async (
  * real-time updates without duplicate file reads.
  */
 export const refreshSessionPreview = async (
-  sessions: { sessionId: string; project: string }[]
+  sessions: { sessionId: string; project: string; accountDir?: string }[]
 ): Promise<Map<string, { lastUserMessage: string; lastAssistantMessage: string }>> => {
   const { exec } = require('child_process');
   const execPromise = (cmd: string): Promise<string> =>
@@ -1105,11 +1165,13 @@ export const refreshSessionPreview = async (
     });
 
   const results = new Map<string, { lastUserMessage: string; lastAssistantMessage: string }>();
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-
   const promises = sessions.map(async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(
+      getProjectsDir(session.accountDir),
+      encodedProject,
+      `${session.sessionId}.jsonl`,
+    );
     if (!fs.existsSync(jsonlPath)) return;
 
     const output = await execPromise(`tail -n 100 "${jsonlPath}"`);
@@ -1527,7 +1589,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const resumeCmd = buildResumeCommand(sessionId);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
   }
 };
@@ -1569,11 +1631,13 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
   const titles = new Map<string, string>();
   const branches = new Map<string, string>();
   const prLinks = new Map<string, PRLinkInfo>();
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-
   const promises = sessions.map(async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(
+      getProjectsDir(session.accountDir),
+      encodedProject,
+      `${session.sessionId}.jsonl`,
+    );
 
     if (!fs.existsSync(jsonlPath)) return;
 
@@ -1649,11 +1713,13 @@ export const loadLastAssistantResponses = async (
     });
 
   const responses = new Map<string, string>();
-  const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-
   const promises = sessions.map(async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(claudeDir, encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(
+      getProjectsDir(session.accountDir),
+      encodedProject,
+      `${session.sessionId}.jsonl`,
+    );
 
     if (!fs.existsSync(jsonlPath)) return;
 
@@ -1742,7 +1808,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const resumeCmd = buildResumeCommand(sessionId);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
   }
 };
@@ -1804,7 +1870,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const resumeCmd = buildResumeCommand(sessionId);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
   }
 };
@@ -1824,7 +1890,7 @@ export const openSessionInCmux = (
   customTitle?: string,
 ): void => {
   const { exec } = require('child_process');
-  const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
 
   console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid, customTitle });
   if (isActive) {
@@ -1949,7 +2015,7 @@ export const openSessionInCmux = (
       exec('osascript -e \'tell application "cmux" to activate\'');
     })();
   } else {
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const resumeCmd = buildResumeCommand(sessionId);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
   }
 };
@@ -1958,8 +2024,8 @@ export const openSessionInCmux = (
  * Copy resume command to clipboard (fallback for unsupported terminals)
  */
 export const copyResumeCommand = (sessionId: string, projectPath: string): string => {
-  const command = `cd "${projectPath}" && claude --resume ${sessionId}`;
-  const { execSync } = require('child_process');
-  execSync(`echo "${command}" | pbcopy`);
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
+  const { execFileSync } = require('child_process');
+  execFileSync('pbcopy', { input: command });
   return command;
 };

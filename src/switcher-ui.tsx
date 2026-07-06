@@ -1324,6 +1324,21 @@ function SwitcherApp() {
                             </span>
                           );
                         })()}
+                        {session.accountLabel && !session.accountIsDefault && (
+                          <span
+                            style={{
+                              fontSize: '9px',
+                              color: '#c9a0e8',
+                              border: '1px solid #7a5a9e',
+                              borderRadius: '3px',
+                              padding: '1px 4px',
+                              textTransform: 'uppercase',
+                            }}
+                            title={`Claude account: ${session.accountLabel}`}
+                          >
+                            {session.accountLabel}
+                          </span>
+                        )}
                         {(() => {
                           // Only show terminal/IDE badge for active sessions
                           const badge = session.isActive
