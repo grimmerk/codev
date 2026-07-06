@@ -83,7 +83,12 @@ const isDefaultDir = (dir: string): boolean =>
 // into `case` patterns. Reject shell-dangerous characters so a hand-edited
 // registry or a crafted `--dir` can't inject code when accounts.sh is sourced.
 const SHELL_UNSAFE_DIR = /["`$\\\r\n;|&<>()]/;
-const assertSafeDir = (dir: string): void => {
+const assertSafeDir = (dir: unknown): void => {
+  if (typeof dir !== 'string' || dir.length === 0) {
+    throw new Error(
+      `Invalid account path ${JSON.stringify(dir)} (must be a non-empty string)`,
+    );
+  }
   if (SHELL_UNSAFE_DIR.test(dir)) {
     throw new Error(
       `Unsafe shell characters in account dir "${dir}" (quotes, $, backticks, ; | & < > ( ) are not allowed)`,
@@ -174,7 +179,9 @@ export function generateAccountsSh(reg: Registry): string {
   // match, but a hand-edited registry could diverge them.
   accounts.forEach((a) => {
     assertSafeDir(expandHome(a.dir));
-    if (a.configDirEnv) assertSafeDir(expandHome(a.configDirEnv));
+    // null configDirEnv = the default account (no env); any other value must be
+    // a valid, non-empty, injection-free path.
+    if (a.configDirEnv !== null) assertSafeDir(expandHome(a.configDirEnv));
   });
   const defaultLabel = resolveDefaultLabel(reg);
   const defaultAccount = accounts.find((a) => a.label === defaultLabel);

@@ -117,6 +117,22 @@ describe('generateAccountsSh', () => {
     });
     expect(() => generateAccountsSh(bad)).toThrow(/Unsafe shell characters/);
   });
+
+  it('rejects an empty configDirEnv (hand-edited registry)', () => {
+    const bad = reg({
+      defaultAccount: 'x',
+      accounts: [
+        {
+          label: 'x',
+          dir: '/tmp/x',
+          identityFile: '/tmp/x/.claude.json',
+          configDirEnv: '',
+          isDefault: false,
+        },
+      ],
+    });
+    expect(() => generateAccountsSh(bad)).toThrow(/Invalid account path/);
+  });
 });
 
 describe('resolveDefaultLabel', () => {
