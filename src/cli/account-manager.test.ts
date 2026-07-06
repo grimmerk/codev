@@ -101,6 +101,22 @@ describe('generateAccountsSh', () => {
     writeFileSync(file, sh);
     expect(() => execFileSync('bash', ['-n', file])).not.toThrow();
   });
+
+  it('rejects an unsafe configDirEnv even when dir is clean', () => {
+    const bad = reg({
+      defaultAccount: 'evil',
+      accounts: [
+        {
+          label: 'evil',
+          dir: '/tmp/clean',
+          identityFile: '/tmp/clean/.claude.json',
+          configDirEnv: '/tmp/$(touch pwned)',
+          isDefault: false,
+        },
+      ],
+    });
+    expect(() => generateAccountsSh(bad)).toThrow(/Unsafe shell characters/);
+  });
 });
 
 describe('resolveDefaultLabel', () => {

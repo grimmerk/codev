@@ -169,7 +169,13 @@ function launchCmd(account: RegistryAccount | undefined): string {
 /** Render the accounts.sh contents from a registry object. Pure function. */
 export function generateAccountsSh(reg: Registry): string {
   const accounts = reg.accounts || [];
-  accounts.forEach((a) => assertSafeDir(expandHome(a.dir)));
+  // Validate EVERY value embedded into the shell: dir (whoami case + list
+  // display) AND configDirEnv (the launcher's CLAUDE_CONFIG_DIR). They usually
+  // match, but a hand-edited registry could diverge them.
+  accounts.forEach((a) => {
+    assertSafeDir(expandHome(a.dir));
+    if (a.configDirEnv) assertSafeDir(expandHome(a.configDirEnv));
+  });
   const defaultLabel = resolveDefaultLabel(reg);
   const defaultAccount = accounts.find((a) => a.label === defaultLabel);
   const pad = Math.max(0, ...accounts.map((a) => a.label.length));
