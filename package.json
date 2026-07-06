@@ -1,7 +1,7 @@
 {
   "name": "CodeV",
   "productName": "CodeV",
-  "version": "1.0.76",
+  "version": "1.0.77",
   "description": "Quick switcher for VS Code, Cursor, and Claude Code sessions",
   "repository": {
     "type": "git",
@@ -12,6 +12,9 @@
     "db": "prisma migrate dev",
     "start": "cross-env NODE_ENV=development electron-forge start",
     "dev": "npm run start",
+    "account": "ts-node src/cli/codev-account.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "package": "electron-forge package",
     "package_mas": "npm run prebuild && cross-env BUILD_TYPE=prod electron-forge package --platform=mas && npm run postbuild",
     "prebuild": "sh prebuild.sh",
@@ -61,6 +64,7 @@
     "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
     "typescript": "~5.7.0",
+    "vitest": "^4.1.9",
     "webpack-node-externals": "^3.0.0"
   },
   "dependencies": {

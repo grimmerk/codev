@@ -249,6 +249,14 @@ lists all. These ship in Batch 1 (they make the imminent smoke-test legible and 
 first-arg would be swallowed by the dispatcher / passed to real `claude`; use distinct
 function names. Batch 2 folds them into `codev account current | list | default`.
 
+**Implemented (Batch 2a):** the `codev account` CLI (`src/cli/codev-account.ts`, run
+via `yarn account <cmd>`) now generates **both** `accounts.json` and `accounts.sh` from
+one shared generator (`src/cli/account-manager.ts`) — no more hand-editing. Commands:
+`list`, `add <label> [--dir D]`, `default <label>`, `remove <label>`, `regenerate`,
+`show` (dry-run), `install`/`uninstall` (the marker-guarded `~/.zshrc` source block).
+A Vitest generator suite + CI guard the shell output. A real `codev` binary on PATH and
+the Settings UI are Batch 2b.
+
 ### 6.B Account registry (source of truth)
 
 - **`~/.config/codev/accounts.json`** (plain JSON), owned/written by CodeV, readable
@@ -372,11 +380,17 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     only) + account-aware resume/launch (§6.E); active-dot + title/branch enrichment per
     account; same-cwd cross-ref per account; hooks registered per config dir (§6.F).
   - *Deferred:* VS Code (`claude-vscode`) sessions can't be account-switched (URI-handler
-    launch) — tracked in grimmerk/codev#121. Setup UI/CLI is Batch 2 (registry +
-    `accounts.sh` are hand-created for now).
-- **Batch 2 — after Batch 1, revisit:** account picker / per-launch override (§6.G, 4.2);
-  manage-accounts Settings tab — list/add/rename/remove + shell-integration toggle
-  (§6.D); pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
+    launch) — tracked in grimmerk/codev#121. (Setup is no longer hand-made — see
+    Batch 2a below.)
+- **Batch 2 — in progress (order 2a→2e):**
+  - *2a — ✅ Done* (branch `feat/codev-account-cli`): `codev account` CLI generates the
+    registry + `accounts.sh` from one shared generator (§6.A/B); Vitest + CI added.
+  - *2b:* manage-accounts Settings tab — list/add/rename/remove + shell-integration
+    toggle (§6.D), plus a real `codev` binary on PATH.
+  - *2c:* account picker / per-launch override (§6.G, 4.2).
+  - *2d:* pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
+  - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it
+    also needs the CLI/UI to manage.
 - **Batch 3 — later:** cross-account symlink reuse of global files
   (CLAUDE.md / skills / commands / plugins / settings, §5).
 

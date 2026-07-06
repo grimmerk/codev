@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.77
+
+- Feat: multi-account Batch 2a — `codev account` CLI to manage the registry
+  - `codev account list | add <label> [--dir D] | default <label> | remove <label> | regenerate | show | install | uninstall`
+  - One shared generator (`src/cli/account-manager.ts`) produces both `~/.config/codev/accounts.json` and `accounts.sh`, replacing Batch 1's hand-editing; run in dev via `yarn account <cmd>` (PATH install + Settings UI land in Batch 2b)
+  - Adds Vitest + a generator test suite, and a real CI workflow (replacing the placeholder)
+
 ## 1.0.76
 
 - Feat: multi-account support (Batch 1) — run multiple Claude Code accounts (e.g. personal + work) from one machine
