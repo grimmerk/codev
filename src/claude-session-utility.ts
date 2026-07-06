@@ -25,6 +25,7 @@ export interface ClaudeSession {
   entrypoint?: string;     // 'cli', 'claude-vscode', etc.
   accountLabel?: string; // codev multi-account: which account this session belongs to
   accountDir?: string; // that account's config dir (session data + enrichment root)
+  accountConfigDirEnv?: string | null; // CLAUDE_CONFIG_DIR to set at resume (null = default)
   accountIsDefault?: boolean; // default account => no CLAUDE_CONFIG_DIR at launch
 }
 
@@ -51,6 +52,7 @@ interface SessionAccum {
   promptCount: number;
   accountLabel: string;
   accountDir: string;
+  accountConfigDirEnv: string | null;
   accountIsDefault: boolean;
 }
 
@@ -98,8 +100,10 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
   // sessionIds are UUIDs (unique across accounts), so no cross-account dedupe.
   const bySession = new Map<string, SessionAccum>();
 
-  try {
-    for (const account of getScannableAccounts()) {
+  // Per-account try/catch: one unreadable/corrupt history must not hide the
+  // sessions of every other account.
+  for (const account of getScannableAccounts()) {
+    try {
       const historyPath = getHistoryPath(account.dir);
       if (!fs.existsSync(historyPath)) continue;
 
@@ -132,6 +136,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
               promptCount: 1,
               accountLabel: account.label,
               accountDir: account.dir,
+              accountConfigDirEnv: account.configDirEnv,
               accountIsDefault: account.isDefault,
             });
           }
@@ -139,33 +144,33 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
           // skip malformed lines
         }
       }
+    } catch (error) {
+      console.error(`Error reading Claude sessions for ${account.label}:`, error);
     }
-
-    // Unified timeline: sort the MERGED set by recency (newest first) so both
-    // accounts interleave by lastTimestamp. The account badge disambiguates.
-    const allSessions = Array.from(bySession.values())
-      .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
-      .map((s) => ({
-        sessionId: s.sessionId,
-        project: s.project,
-        projectName: path.basename(s.project) || s.project,
-        firstUserMessage: s.firstDisplay,
-        lastUserMessage: s.lastDisplay,
-        lastTimestamp: s.lastTimestamp,
-        messageCount: s.promptCount,
-        isActive: false,
-        accountLabel: s.accountLabel,
-        accountDir: s.accountDir,
-        accountIsDefault: s.accountIsDefault,
-      }));
-
-    cachedSessions = allSessions;
-    cacheTimestamp = now;
-    return allSessions.slice(0, limit);
-  } catch (error) {
-    console.error('Error reading Claude sessions:', error);
-    return [];
   }
+
+  // Unified timeline: sort the MERGED set by recency (newest first) so both
+  // accounts interleave by lastTimestamp. The account badge disambiguates.
+  const allSessions = Array.from(bySession.values())
+    .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
+    .map((s) => ({
+      sessionId: s.sessionId,
+      project: s.project,
+      projectName: path.basename(s.project) || s.project,
+      firstUserMessage: s.firstDisplay,
+      lastUserMessage: s.lastDisplay,
+      lastTimestamp: s.lastTimestamp,
+      messageCount: s.promptCount,
+      isActive: false,
+      accountLabel: s.accountLabel,
+      accountDir: s.accountDir,
+      accountConfigDirEnv: s.accountConfigDirEnv,
+      accountIsDefault: s.accountIsDefault,
+    }));
+
+  cachedSessions = allSessions;
+  cacheTimestamp = now;
+  return allSessions.slice(0, limit);
 };
 
 /**
@@ -1055,7 +1060,7 @@ const getResumeConfigDirEnv = (sessionId: string): string | null => {
   const s = readClaudeSessions(Number.MAX_SAFE_INTEGER).find(
     (x) => x.sessionId === sessionId,
   );
-  return s && !s.accountIsDefault && s.accountDir ? s.accountDir : null;
+  return s?.accountConfigDirEnv ?? null;
 };
 
 /**
@@ -2009,7 +2014,7 @@ export const openSessionInCmux = (
  */
 export const copyResumeCommand = (sessionId: string, projectPath: string): string => {
   const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
-  const { execSync } = require('child_process');
-  execSync(`echo "${command}" | pbcopy`);
+  const { execFileSync } = require('child_process');
+  execFileSync('pbcopy', { input: command });
   return command;
 };

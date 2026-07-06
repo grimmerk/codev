@@ -46,6 +46,7 @@ interface RawAccount {
 
 interface RawRegistry {
   accounts?: RawAccount[];
+  defaultAccount?: string;
 }
 
 const REGISTRY_PATH = path.join(
@@ -99,7 +100,10 @@ export const getAccounts = (): CodevAccount[] => {
         const dir = expandHome(
           String(a.dir || path.join(os.homedir(), '.claude')),
         );
-        const isDefault = !!a.isDefault;
+        // Tolerate a partial registry entry: if isDefault is omitted, infer it
+        // from the top-level defaultAccount label.
+        const isDefault =
+          a.isDefault ?? (!!raw.defaultAccount && a.label === raw.defaultAccount);
         const configDirEnv =
           a.configDirEnv === null || a.configDirEnv === undefined
             ? isDefault

@@ -131,8 +131,8 @@ global keychain item `Claude Code-credentials`, which is why tools like *claudin
 keychain items — 2.1.201 does not).
 
 **Result (verified 2026-07, CC 2.1.201):** with the default account
-(`grimmer0125@gmail.com`, Max) logged in at `~/.claude`, logging a *different* account
-(`grimmer@fireflies.ai`, Team) into `~/.claude-ma-test` produced two live sessions
+(a personal Max account) logged in at `~/.claude`, logging a *different* account
+(a work Team account) into `~/.claude-ma-test` produced two live sessions
 **simultaneously** (each `claude auth status` reported its own account); logging out the
 test dir left the default account **still logged in**. So `CLAUDE_CONFIG_DIR` alone is
 the whole mechanism — no `CLAUDE_CODE_OAUTH_TOKEN` needed — and accounts can run
@@ -188,6 +188,8 @@ Single source of truth (registry), read by both the shell layer and CodeV:
      ],
      "projectMap": { "/Users/me/git/work-repo": "work" }   // §6.H, optional
    }
+   // Simplified sketch — each entry also records `configDirEnv`, `identityFile`,
+   // and `isDefault`; see §11 for the full copy-paste schema.
 ```
 
 Launching account X = `CLAUDE_CONFIG_DIR=<X.dir> claude …` **for extra accounts**; the

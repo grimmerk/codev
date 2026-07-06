@@ -11,7 +11,6 @@ import * as os from 'os';
 import { getScannableAccounts, getProjectsDir } from './accounts';
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
-const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
 const STATUS_DIR = path.join(CLAUDE_DIR, 'codev-status');
 const HOOK_SCRIPT_PATH = path.join(CLAUDE_DIR, 'codev-status-hook.sh');
 const HOOK_MARKER = 'codev-status-hook';
@@ -83,7 +82,9 @@ const backupSettings = (settingsPath: string): void => {
     if (fs.existsSync(settingsPath)) {
       fs.copyFileSync(settingsPath, `${settingsPath}.codev-bak`);
     }
-  } catch {}
+  } catch {
+    // best-effort backup
+  }
 };
 
 /** Merge our hook into one account's settings.json (idempotent). */
@@ -196,20 +197,21 @@ export const removeHooks = (): void => {
  * Check if our hooks are currently installed
  */
 export const isHooksInstalled = (): boolean => {
-  try {
-    if (!fs.existsSync(SETTINGS_PATH)) return false;
-    const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
-    if (!settings.hooks) return false;
-
-    // Check if at least one of our events has our hook
-    return HOOK_EVENTS.some(event =>
-      settings.hooks[event]?.some((entry: any) =>
-        entry.hooks?.some((h: any) => h.command === HOOK_SCRIPT_PATH)
-      )
-    );
-  } catch {
-    return false;
-  }
+  // Consistent with multi-account install/remove: installed if any account's
+  // settings.json has our hook.
+  return getSettingsPaths().some((settingsPath) => {
+    try {
+      if (!fs.existsSync(settingsPath)) return false;
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      return HOOK_EVENTS.some((event) =>
+        settings.hooks?.[event]?.some((entry: any) =>
+          entry.hooks?.some((h: any) => h.command === HOOK_SCRIPT_PATH),
+        ),
+      );
+    } catch {
+      return false;
+    }
+  });
 };
 
 export type SessionStatus = 'working' | 'idle' | 'needs-attention' | 'unknown' | null;
