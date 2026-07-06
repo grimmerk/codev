@@ -323,7 +323,11 @@ export const scanInitialStatuses = async (
 
     // Find JSONL file
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(getProjectsDir(session.accountDir), encodedProject, `${session.sessionId}.jsonl`);
+    const jsonlPath = path.join(
+      getProjectsDir(session.accountDir),
+      encodedProject,
+      `${session.sessionId}.jsonl`,
+    );
     if (!fs.existsSync(jsonlPath)) return;
 
     // Read last 15 lines

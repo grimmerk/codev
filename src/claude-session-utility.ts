@@ -145,7 +145,10 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
         }
       }
     } catch (error) {
-      console.error(`Error reading Claude sessions for ${account.label}:`, error);
+      console.error(
+        `Error reading Claude sessions for ${account.label}:`,
+        error,
+      );
     }
   }
 
@@ -296,7 +299,11 @@ end tell`);
     const candidates = allSessions.filter(s => s.project === cwd);
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
     await Promise.all(candidates.map(async (session) => {
-      const jsonlPath = path.join(getProjectsDir(session.accountDir), encodedProject, `${session.sessionId}.jsonl`);
+      const jsonlPath = path.join(
+        getProjectsDir(session.accountDir),
+        encodedProject,
+        `${session.sessionId}.jsonl`,
+      );
       if (!fs.existsSync(jsonlPath)) return;
       const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
       try {
@@ -393,7 +400,11 @@ const refineDetectionWithCmux = async (
     const candidates = allSessions.filter(s => s.project === cwd);
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
     await Promise.all(candidates.map(async (session) => {
-      const jsonlPath = path.join(getProjectsDir(session.accountDir), encodedProject, `${session.sessionId}.jsonl`);
+      const jsonlPath = path.join(
+        getProjectsDir(session.accountDir),
+        encodedProject,
+        `${session.sessionId}.jsonl`,
+      );
       if (!fs.existsSync(jsonlPath)) return;
       const out = await execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`);
       try {

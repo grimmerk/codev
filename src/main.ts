@@ -2002,9 +2002,19 @@ ipcMain.handle('get-session-statuses', async () => {
         if (!session && isDebug) {
           console.log(`[session-status] active session ${sessionId} not found in allKnown (${allKnown.length} sessions)`);
         }
-        return session ? { sessionId, project: session.project, accountDir: session.accountDir } : null;
+        return session
+          ? {
+              sessionId,
+              project: session.project,
+              accountDir: session.accountDir,
+            }
+          : null;
       })
-      .filter(Boolean) as { sessionId: string; project: string; accountDir?: string }[];
+      .filter(Boolean) as {
+      sessionId: string;
+      project: string;
+      accountDir?: string;
+    }[];
 
     if (sessionsWithoutStatus.length > 0) {
       if (isDebug) {
