@@ -209,9 +209,34 @@ The registry records `configDirEnv` (null for default, the dir for extras) and
 | Global `~/.claude/CLAUDE.md` (user instructions) | Config dir | No by default → **opt-in symlink** | `ln -s ~/.claude/CLAUDE.md ~/.claude-x/CLAUDE.md` |
 | Global `skills/`, `commands/`, `plugins/` | Config dir | No by default → **opt-in symlink** | symlink the dir |
 | `settings.json` (model, hooks, permissions, env) | Config dir | Optional symlink (careful) | Symlink ⇒ hooks/permissions shared; or install hook per-dir (§6.F) |
+| Single `settings.json` keys (`statusLine`, `model`, `effortLevel`, `theme`) | Config dir | **Yes — per-key copy** | Copy the key into the other account's settings.json (statusLine done for `work` 2026-07; HOME-based script serves all accounts) |
 | `.claude.json` (identity + per-project trust) | Config dir | **No — never symlink** | Holds `oauthAccount`; must stay per-account |
 | Auto-memory (`projects/<path>/memory/`, `MEMORY.md`) | Config dir | No by default | Per-account, or advanced: symlink individual `memory/` subdirs |
 | Session data (`history.jsonl`, `projects/*.jsonl`, `sessions/`) | Config dir | **No — aggregated for display, not shared** | CodeV scans all dirs (§6.E) |
+
+**Verified 2026-07-09:** Claude Code follows symlinks for both `skills/<name>` entries
+and the global `CLAUDE.md` — a work-account `-p` probe listed the symlinked
+`fireflies-repos` skill and had the symlinked CLAUDE.md's rules in context. So the
+symlink mechanism above is confirmed viable; the remaining Batch 3 work is UX
+(share checkboxes / `codev account share`), not feasibility.
+
+**Collision & ownership policy (the actual Batch 3 UX work):** sharing must never
+silently overwrite. If the target already exists in the other account: back it up
+(`*.codev-bak`, the convention session-status-hooks already uses) or skip and report —
+never `ln -sf`. Link per **entry** (`skills/<name>`), not whole dirs, so an account
+keeps private skills alongside shared ones. (Note: it's *hard* links that can't target
+directories — a **symlink to a dir works fine** and new files *inside* a linked skill
+are picked up automatically; only a brand-new skill needs a new per-entry link. If an
+account needs no private skills, a whole-`skills/`-dir symlink is the zero-maintenance
+alternative — current and future skills auto-shared, at the cost that anything either
+account adds becomes shared.) A symlink is ONE file both ways — edits
+from either account hit the same inode; offer **link (stay in sync) / copy (fork) /
+skip** per item. `plugins/` is untested: the payload dir may symlink, but enablement
+lives in each account's `settings.json` (`enabledPlugins`) and plugins may keep their
+own state — needs its own experiment. Session data stays unshared by design (it's
+live-written and identity-bound, and §6.E aggregation already provides the union view);
+cross-account "resume" (§6.G/2c) should **copy-fork** a transcript into the target
+account, never link it.
 
 Your guess was right: **per-project files are account-independent; only the global
 files need help.** "Reusing" session data across accounts isn't actually desirable —
@@ -221,6 +246,14 @@ does.
 CodeV's "Add account" flow (§6.D) offers per-item checkboxes: *Share global CLAUDE.md
 / skills / commands / plugins / settings with the default account?* → creates the
 symlinks. `.claude.json` is never offered.
+
+**Per-key copy instead of whole-file symlink (`settings.json`):** individual settings
+keys can be shared by copying just that key into the other account's `settings.json` —
+e.g. `statusLine` (done manually for `work`, 2026-07: same
+`bash ~/.claude/statusline-command.sh` command works for every account since the script
+path is HOME-based and Claude Code feeds it the session's own context via stdin).
+Candidates for a future `codev account sync-settings <keys>`: `statusLine`, `model`,
+`effortLevel`, `theme`. Hooks stay per-dir (§6.F installs them per account).
 
 ---
 
@@ -248,6 +281,24 @@ lists all. These ship in Batch 1 (they make the imminent smoke-test legible and 
 "what does the default map to"). Do **not** expose them as `claude whoami` — a bare
 first-arg would be swallowed by the dispatcher / passed to real `claude`; use distinct
 function names. Batch 2 folds them into `codev account current | list | default`.
+
+**Implemented (Batch 2a):** the `codev account` CLI (`src/cli/codev-account.ts`, run
+via `yarn account <cmd>`) now generates **both** `accounts.json` and `accounts.sh` from
+one shared generator (`src/cli/account-manager.ts`) — no more hand-editing. Commands:
+`list`, `add <label> [--dir D]`, `default <label>`, `remove <label>`, `regenerate`,
+`show` (dry-run), `install`/`uninstall` (the marker-guarded `~/.zshrc` source block).
+A Vitest generator suite + CI guard the shell output. A real `codev` binary on PATH and
+the Settings UI are Batch 2b.
+
+**Caveat — the dispatcher leaks into Claude Code sessions (shell snapshots):** Claude
+Code captures the interactive shell's functions into a snapshot
+(`~/.claude/shell-snapshots/…`) and sources it for Bash-tool / `!` commands. So *inside
+any session*, bare `claude …` resolves to the dispatcher function and routes to the
+**global default** — NOT the session's own account. Consequences: (a) `!claude auth
+status` is not a valid probe of the session's account (it reports the default; use
+`command claude auth status` or `echo $CLAUDE_CONFIG_DIR` instead); (b) nested/scripted
+`claude` invocations from within a session go to the default account — use
+`command claude` or an explicit `claude <label>` when the account matters.
 
 ### 6.B Account registry (source of truth)
 
@@ -343,6 +394,11 @@ good. But the hook must be **registered** in each account's `settings.json`. Opt
 - New-session launch (Projects `⌘+Enter`): allow an account override, e.g. extend the
   planned `>` command mode (`> claude @work myrepo`) or an account segment in the
   expanded project row.
+- **Coupled with Batch 3 (§5).** Truly resuming/sharing a *transcript* across accounts
+  only works if the session data (and global config: CLAUDE.md/skills) is shareable
+  across config dirs — i.e. it depends on Batch 3's cross-account reuse. So design 2c
+  and Batch 3 **together**: without sharing, 2c is limited to "new session in this cwd
+  under account Y"; with sharing, genuine cross-account resume becomes possible.
 
 ### 6.H pyenv-style auto-switch by folder (requirement 6, nice-to-have, "reverse" priority)
 
@@ -372,11 +428,17 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     only) + account-aware resume/launch (§6.E); active-dot + title/branch enrichment per
     account; same-cwd cross-ref per account; hooks registered per config dir (§6.F).
   - *Deferred:* VS Code (`claude-vscode`) sessions can't be account-switched (URI-handler
-    launch) — tracked in grimmerk/codev#121. Setup UI/CLI is Batch 2 (registry +
-    `accounts.sh` are hand-created for now).
-- **Batch 2 — after Batch 1, revisit:** account picker / per-launch override (§6.G, 4.2);
-  manage-accounts Settings tab — list/add/rename/remove + shell-integration toggle
-  (§6.D); pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
+    launch) — tracked in grimmerk/codev#121. (Setup is no longer hand-made — see
+    Batch 2a below.)
+- **Batch 2 — in progress (order 2a→2e):**
+  - *2a — ✅ Done* (branch `feat/codev-account-cli`): `codev account` CLI generates the
+    registry + `accounts.sh` from one shared generator (§6.A/B); Vitest + CI added.
+  - *2b:* manage-accounts Settings tab — list/add/rename/remove + shell-integration
+    toggle (§6.D), plus a real `codev` binary on PATH.
+  - *2c:* account picker / per-launch override (§6.G, 4.2).
+  - *2d:* pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
+  - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it
+    also needs the CLI/UI to manage.
 - **Batch 3 — later:** cross-account symlink reuse of global files
   (CLAUDE.md / skills / commands / plugins / settings, §5).
 

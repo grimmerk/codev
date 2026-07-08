@@ -1075,16 +1075,26 @@ const getResumeConfigDirEnv = (sessionId: string): string | null => {
 };
 
 /**
- * Build `claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the session
- * belongs to a non-default account so it resumes under the right account.
+ * Build `command claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the
+ * session belongs to a non-default account so it resumes under the right account.
  */
 const buildResumeCommand = (sessionId: string): string => {
   const configDir = getResumeConfigDirEnv(sessionId);
   // Single-quote the value: some terminal injections (Ghostty `initial input`)
   // don't escape the command, so a double-quoted prefix would break their
   // AppleScript string. Single quotes are safe across all terminals + handle spaces.
-  const prefix = configDir ? `CLAUDE_CONFIG_DIR='${configDir}' ` : '';
-  return `${prefix}claude --resume ${sessionId}`;
+  // Escape single quotes (e.g. /Users/O'Brien/…) so the single-quoted prefix
+  // stays well-formed: ' becomes '\'' .
+  const prefix = configDir
+    ? `CLAUDE_CONFIG_DIR='${configDir.replace(/'/g, "'\\''")}' `
+    : '';
+  // `command claude` bypasses the accounts.sh `claude` dispatcher. CodeV has
+  // already resolved the exact account (the prefix, or none for the anchor), so
+  // the shell must NOT re-route a bare `claude` to a configured non-default
+  // global-default (§2e) — that would resume an anchor-account session under the
+  // wrong account. Every terminal here runs the string through a shell, so the
+  // `command` builtin is available.
+  return `${prefix}command claude --resume ${sessionId}`;
 };
 
 /**
