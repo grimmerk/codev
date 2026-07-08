@@ -257,6 +257,16 @@ one shared generator (`src/cli/account-manager.ts`) — no more hand-editing. Co
 A Vitest generator suite + CI guard the shell output. A real `codev` binary on PATH and
 the Settings UI are Batch 2b.
 
+**Caveat — the dispatcher leaks into Claude Code sessions (shell snapshots):** Claude
+Code captures the interactive shell's functions into a snapshot
+(`~/.claude/shell-snapshots/…`) and sources it for Bash-tool / `!` commands. So *inside
+any session*, bare `claude …` resolves to the dispatcher function and routes to the
+**global default** — NOT the session's own account. Consequences: (a) `!claude auth
+status` is not a valid probe of the session's account (it reports the default; use
+`command claude auth status` or `echo $CLAUDE_CONFIG_DIR` instead); (b) nested/scripted
+`claude` invocations from within a session go to the default account — use
+`command claude` or an explicit `claude <label>` when the account matters.
+
 ### 6.B Account registry (source of truth)
 
 - **`~/.config/codev/accounts.json`** (plain JSON), owned/written by CodeV, readable
