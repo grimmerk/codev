@@ -125,6 +125,22 @@ describe('generateAccountsSh', () => {
     expect(() => generateAccountsSh(bad)).toThrow(/Unsafe shell characters/);
   });
 
+  it('rejects a shell-unsafe label (hand-edited registry)', () => {
+    const bad = reg({
+      defaultAccount: 'x',
+      accounts: [
+        {
+          label: 'x; touch pwned',
+          dir: '/tmp/clean',
+          identityFile: '/tmp/clean/.claude.json',
+          configDirEnv: '/tmp/clean',
+          isDefault: false,
+        },
+      ],
+    });
+    expect(() => generateAccountsSh(bad)).toThrow(/Invalid account label/);
+  });
+
   it('rejects an empty configDirEnv (hand-edited registry)', () => {
     const bad = reg({
       defaultAccount: 'x',

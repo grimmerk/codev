@@ -222,6 +222,14 @@ CodeV's "Add account" flow (§6.D) offers per-item checkboxes: *Share global CLA
 / skills / commands / plugins / settings with the default account?* → creates the
 symlinks. `.claude.json` is never offered.
 
+**Per-key copy instead of whole-file symlink (`settings.json`):** individual settings
+keys can be shared by copying just that key into the other account's `settings.json` —
+e.g. `statusLine` (done manually for `work`, 2026-07: same
+`bash ~/.claude/statusline-command.sh` command works for every account since the script
+path is HOME-based and Claude Code feeds it the session's own context via stdin).
+Candidates for a future `codev account sync-settings <keys>`: `statusLine`, `model`,
+`effortLevel`, `theme`. Hooks stay per-dir (§6.F installs them per account).
+
 ---
 
 ## 6. Sub-feature designs (approaches, pros/cons, recommendation)

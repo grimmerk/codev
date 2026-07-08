@@ -96,6 +96,17 @@ const assertSafeDir = (dir: unknown): void => {
   }
 };
 
+// Labels are embedded as function names (`claude-<label>`) and `case` patterns.
+// `add` already enforces LABEL_RE, but a hand-edited registry bypasses `add`,
+// so re-validate at generation time too.
+const assertSafeLabel = (label: unknown): void => {
+  if (typeof label !== 'string' || !LABEL_RE.test(label)) {
+    throw new Error(
+      `Invalid account label ${JSON.stringify(label)} — must start with a letter and use only letters/digits/-/_`,
+    );
+  }
+};
+
 function stripUndefined<T extends object>(obj: T): Partial<T> {
   const out: Partial<T> = {};
   for (const [k, v] of Object.entries(obj)) {
@@ -178,6 +189,7 @@ export function generateAccountsSh(reg: Registry): string {
   // display) AND configDirEnv (the launcher's CLAUDE_CONFIG_DIR). They usually
   // match, but a hand-edited registry could diverge them.
   accounts.forEach((a) => {
+    assertSafeLabel(a.label);
     assertSafeDir(expandHome(a.dir));
     // null configDirEnv = the default account (no env); any other value must be
     // a valid, non-empty, injection-free path.
@@ -343,13 +355,17 @@ export function removeAccount(label: string): string | undefined {
     );
   }
   reg.accounts.splice(idx, 1);
+  // Report the new default only when this removal actually reassigned it —
+  // removing a non-default account leaves the default untouched.
+  let reassignedDefault: string | undefined;
   if (reg.defaultAccount === label) {
     const anchor = reg.accounts.find((a) => a.isDefault) || reg.accounts[0];
     reg.defaultAccount = anchor.label;
+    reassignedDefault = anchor.label;
   }
   writeRegistry(reg);
   regenerate(reg);
-  return reg.defaultAccount;
+  return reassignedDefault;
 }
 
 export function setDefault(label: string): void {
