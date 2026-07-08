@@ -108,84 +108,117 @@ const PopupDefaultExample = ({
   const [accountsError, setAccountsError] = useState('');
   const [accountsNotice, setAccountsNotice] = useState('');
   const [newAccountLabel, setNewAccountLabel] = useState('');
+  const [accountsBusy, setAccountsBusy] = useState(false);
 
-  const refreshAccounts = () => {
-    window.electronAPI.getAccounts().then((r) => {
+  const refreshAccounts = async () => {
+    try {
+      const r = await window.electronAPI.getAccounts();
       if (r.ok) {
         setAccounts((r.accounts as AccountRow[]) || []);
         setAccountsShellInstalled(!!r.shellInstalled);
+        setAccountsError('');
       } else {
+        setAccountsNotice('');
         setAccountsError(r.error || 'Failed to load accounts');
       }
-    });
+    } catch (e) {
+      setAccountsNotice('');
+      setAccountsError((e as Error).message || 'Failed to load accounts');
+    }
   };
 
   useEffect(() => {
     if (isOpen && settingsTab === 'accounts') {
+      // Fresh view: drop any stale notice/error from a previous visit.
+      setAccountsError('');
+      setAccountsNotice('');
       refreshAccounts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, settingsTab]);
 
-  const handleAddAccount = async () => {
+  /** Serialize account mutations: busy-guard + shared error handling. */
+  const runAccountOp = async (op: () => Promise<void>) => {
+    if (accountsBusy) return;
+    setAccountsBusy(true);
+    setAccountsError('');
+    try {
+      await op();
+    } catch (e) {
+      setAccountsNotice('');
+      setAccountsError((e as Error).message || 'Account operation failed');
+    } finally {
+      setAccountsBusy(false);
+    }
+  };
+
+  const handleAddAccount = () => {
     const label = newAccountLabel.trim();
     if (!label) return;
-    setAccountsError('');
-    const r = await window.electronAPI.addAccount(label);
-    if (r.ok) {
-      setNewAccountLabel('');
-      setAccountsNotice(
-        `Added "${label}". Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`,
-      );
-      refreshAccounts();
-    } else {
-      setAccountsNotice('');
-      setAccountsError(r.error || 'Failed to add account');
-    }
+    runAccountOp(async () => {
+      const r = await window.electronAPI.addAccount(label);
+      if (r.ok) {
+        setNewAccountLabel('');
+        setAccountsNotice(
+          `Added "${label}". Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`,
+        );
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to add account');
+      }
+    });
   };
 
-  const handleRemoveAccount = async (label: string) => {
-    setAccountsError('');
-    const r = await window.electronAPI.removeAccount(label);
-    if (r.ok) {
-      setAccountsNotice(`Removed "${label}" (its folder stays on disk).`);
-      refreshAccounts();
-    } else {
-      setAccountsNotice('');
-      setAccountsError(r.error || 'Failed to remove account');
-    }
+  const handleRemoveAccount = (label: string) => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.removeAccount(label);
+      if (r.ok) {
+        setAccountsNotice(`Removed "${label}" (its folder stays on disk).`);
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to remove account');
+      }
+    });
   };
 
-  const handleSetDefaultAccount = async (label: string) => {
-    setAccountsError('');
-    const r = await window.electronAPI.setDefaultAccount(label);
-    if (r.ok) {
-      setAccountsNotice(
-        `Bare claude now resolves to "${label}" — open a new shell (or source ~/.zshrc).`,
-      );
-      refreshAccounts();
-    } else {
-      setAccountsNotice('');
-      setAccountsError(r.error || 'Failed to set default');
-    }
+  const handleSetDefaultAccount = (label: string) => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.setDefaultAccount(label);
+      if (r.ok) {
+        // Without the ~/.zshrc shell integration, the saved default isn't
+        // live in shells yet — say so instead of overpromising.
+        setAccountsNotice(
+          accountsShellInstalled
+            ? `Bare claude now resolves to "${label}" — open a new shell (or source ~/.zshrc).`
+            : `Default saved as "${label}" — install Shell integration below so bare claude uses it.`,
+        );
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to set default');
+      }
+    });
   };
 
-  const handleAccountsShellToggle = async () => {
-    setAccountsError('');
-    const r = await window.electronAPI.setAccountsShellHook(
-      accountsShellInstalled ? 'uninstall' : 'install',
-    );
-    if (r.ok) {
-      setAccountsNotice(
-        accountsShellInstalled
-          ? 'Removed the CodeV block from ~/.zshrc (registry and account folders kept).'
-          : 'Added the source block to ~/.zshrc — open a new shell to use claude <label>.',
+  const handleAccountsShellToggle = () => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.setAccountsShellHook(
+        accountsShellInstalled ? 'uninstall' : 'install',
       );
-      refreshAccounts();
-    } else {
-      setAccountsNotice('');
-      setAccountsError(r.error || 'Failed to update ~/.zshrc');
-    }
+      if (r.ok) {
+        setAccountsNotice(
+          accountsShellInstalled
+            ? 'Removed the CodeV block from ~/.zshrc (registry and account folders kept).'
+            : 'Added the source block to ~/.zshrc — open a new shell to use claude <label>.',
+        );
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to update ~/.zshrc');
+      }
+    });
   };
 
   useEffect(() => {
@@ -752,6 +785,7 @@ const PopupDefaultExample = ({
                     <button
                       style={smallButtonStyle}
                       onClick={() => handleSetDefaultAccount(a.label)}
+                      disabled={accountsBusy}
                       title="Make bare `claude` resolve to this account"
                     >
                       Set default
@@ -761,6 +795,7 @@ const PopupDefaultExample = ({
                     <button
                       style={{ ...smallButtonStyle, color: THEME.button.warning }}
                       onClick={() => handleRemoveAccount(a.label)}
+                      disabled={accountsBusy}
                       title="Unregister (keeps its folder on disk)"
                     >
                       Remove
@@ -780,14 +815,22 @@ const PopupDefaultExample = ({
                 placeholder="new account label (e.g. work)"
                 style={{ ...selectStyle, cursor: 'text', width: '170px' }}
               />
-              <button style={smallButtonStyle} onClick={handleAddAccount}>
+              <button
+                style={smallButtonStyle}
+                onClick={handleAddAccount}
+                disabled={accountsBusy}
+              >
                 Add account
               </button>
             </div>
 
             <div style={rowStyle}>
               <span style={labelStyle}>Shell integration (~/.zshrc)</span>
-              <button style={smallButtonStyle} onClick={handleAccountsShellToggle}>
+              <button
+                style={smallButtonStyle}
+                onClick={handleAccountsShellToggle}
+                disabled={accountsBusy}
+              >
                 {accountsShellInstalled ? 'Uninstall' : 'Install'}
               </button>
             </div>

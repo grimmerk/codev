@@ -319,6 +319,23 @@ export function addAccount(
   );
   assertSafeDir(dir);
   const isDefault = isDefaultDir(dir);
+  // Fresh registry + adding an EXTRA account: seed the anchor (~/.claude)
+  // account first, so the machine's existing default install stays registered
+  // and keeps the global default (instead of it silently moving to a
+  // brand-new, not-yet-logged-in account).
+  if (reg.accounts.length === 0 && !isDefault) {
+    const anchorLabel = label === 'personal' ? 'default' : 'personal';
+    const anchorIdentity = path.join(os.homedir(), '.claude.json');
+    reg.accounts.push({
+      label: anchorLabel,
+      dir: defaultDir(),
+      identityFile: anchorIdentity,
+      configDirEnv: null,
+      isDefault: true,
+      ...readIdentity(anchorIdentity),
+    });
+    reg.defaultAccount = anchorLabel;
+  }
   const identityFile = isDefault
     ? path.join(os.homedir(), '.claude.json')
     : path.join(dir, '.claude.json');

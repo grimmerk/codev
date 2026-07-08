@@ -644,8 +644,13 @@ ipcMain.handle('accounts-get', () => {
 
 ipcMain.handle('accounts-add', (_event, label: string) => {
   try {
-    const account = accountManager.addAccount(label);
+    const added = accountManager.addAccount(label);
     invalidateAccountsCache();
+    // Return the enriched (listed) shape so it matches CodevAccountInfo
+    // (isCurrentDefault etc.), not the raw registry entry.
+    const account =
+      accountManager.listAccounts().find((a) => a.label === added.label) ||
+      added;
     return { ok: true, account };
   } catch (error) {
     return { ok: false, error: (error as Error).message };
@@ -676,6 +681,13 @@ ipcMain.handle(
   'accounts-shell-hook',
   (_event, action: 'install' | 'uninstall') => {
     try {
+      // Validate: a malformed payload must fail, not silently uninstall.
+      if (action !== 'install' && action !== 'uninstall') {
+        return {
+          ok: false,
+          error: `Unknown shell-hook action "${String(action)}"`,
+        };
+      }
       const result =
         action === 'install'
           ? accountManager.installShellHook()
