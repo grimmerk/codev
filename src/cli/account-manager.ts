@@ -244,24 +244,20 @@ export function generateAccountsSh(reg: Registry): string {
   L.push('}');
   L.push('');
   L.push(
-    '# claude-whoami: which account THIS shell resolves to (via CLAUDE_CONFIG_DIR).',
+    '# claude-whoami: which account bare `claude` resolves to here (the default).',
   );
-  L.push('claude-whoami() {');
-  L.push('  local dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" label');
-  L.push('  case "$dir" in');
-  for (const a of accounts) {
-    const marker = a.label === defaultLabel ? ' (default)' : '';
-    L.push(
-      `    "${toShellPath(expandHome(a.dir))}") label="${a.label}${marker}" ;;`,
-    );
-  }
-  L.push('    *) label="(unregistered)" ;;');
-  L.push('  esac');
-  L.push('  echo "codev account     : $label"');
   L.push(
-    '  echo "CLAUDE_CONFIG_DIR : ${CLAUDE_CONFIG_DIR:-<unset → ~/.claude>}"',
+    '# Bare `claude` always routes through the dispatcher `*)` to the default,',
   );
-  L.push('  command claude auth status 2>/dev/null');
+  L.push('# regardless of any CLAUDE_CONFIG_DIR already set in this shell.');
+  L.push('claude-whoami() {');
+  L.push(`  echo "bare 'claude' here -> ${defaultLabel || '(none)'}"`);
+  L.push('  if [ -n "$CLAUDE_CONFIG_DIR" ]; then');
+  L.push(
+    '    echo "  note: shell exports CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR (affects command claude, not the dispatcher)"',
+  );
+  L.push('  fi');
+  L.push(`  ${launchCmd(defaultAccount)}auth status 2>/dev/null`);
   L.push('}');
   L.push('');
   L.push('# claude-accounts: list configured accounts.');

@@ -89,10 +89,17 @@ describe('generateAccountsSh', () => {
     expect(() => generateAccountsSh(bad)).toThrow(/Unsafe shell characters/);
   });
 
-  it('maps each account dir back to its label in claude-whoami', () => {
+  it('reports the default account (not ambient env) in claude-whoami', () => {
+    // default = personal -> whoami reports personal, auth under the anchor
     const sh = generateAccountsSh(reg());
-    expect(sh).toContain('"$HOME/.claude") label="personal (default)" ;;');
-    expect(sh).toContain('"$HOME/.claude-work") label="work" ;;');
+    expect(sh).toContain("bare 'claude' here -> personal");
+    expect(sh).toContain('env -u CLAUDE_CONFIG_DIR claude auth status');
+    // default = work -> whoami reports work + auth under work's env
+    const shWork = generateAccountsSh(reg({ defaultAccount: 'work' }));
+    expect(shWork).toContain("bare 'claude' here -> work");
+    expect(shWork).toContain(
+      'env CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude auth status',
+    );
   });
 
   it('emits syntactically valid shell (bash -n)', () => {
