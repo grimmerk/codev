@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.78
+
+- Feat: multi-account Batch 2b (part 1) — Accounts tab in Settings
+  - List accounts (identity, default marker), add (with log-in hint), remove, and set the global default — via IPC over the same shared generator the `codev account` CLI uses
+  - Shell-integration install/uninstall (`~/.zshrc` source block) from the UI
+  - Remaining 2b item: a real `codev` binary on PATH
+
 ## 1.0.77
 
 - Feat: multi-account Batch 2a + 2e — `codev account` CLI + configurable global-default

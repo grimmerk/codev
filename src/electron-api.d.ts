@@ -2,9 +2,40 @@
 
 type IpcCallback = (event: Electron.IpcRendererEvent, ...args: any[]) => void;
 
+/** One configured Claude Code account (codev multi-account). */
+interface CodevAccountInfo {
+  label: string;
+  dir: string;
+  isDefault: boolean; // the anchor ~/.claude account
+  isCurrentDefault: boolean; // what bare `claude` resolves to
+  email?: string;
+  org?: string;
+  loggedIn?: boolean;
+}
+
 interface IElectronAPI {
   // App actions
   getHomeDir: () => Promise<string>;
+  // codev multi-account (Settings → Accounts)
+  getAccounts: () => Promise<{
+    ok: boolean;
+    error?: string;
+    accounts?: CodevAccountInfo[];
+    shellInstalled?: boolean;
+  }>;
+  addAccount: (label: string) => Promise<{
+    ok: boolean;
+    error?: string;
+    account?: CodevAccountInfo;
+  }>;
+  removeAccount: (label: string) => Promise<{ ok: boolean; error?: string }>;
+  setDefaultAccount: (label: string) => Promise<{ ok: boolean; error?: string }>;
+  setAccountsShellHook: (action: 'install' | 'uninstall') => Promise<{
+    ok: boolean;
+    error?: string;
+    changed?: boolean;
+    path?: string;
+  }>;
   getBannerSeen: () => Promise<boolean>;
   setBannerSeen: () => void;
   invokeVSCode: (path: string, option: string) => void;

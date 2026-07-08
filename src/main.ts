@@ -43,6 +43,8 @@ import {
   readVSCodeIndex,
   SessionStatus,
 } from './session-status-hooks';
+import * as accountManager from './cli/account-manager';
+import { invalidateAccountsCache } from './accounts';
 import {
   deleteRecentProjectRecord,
   openVSCodeBasedIDE,
@@ -624,6 +626,66 @@ ipcMain.on('search-working-folder', (event, path: string) => {
 ipcMain.handle('get-home-dir', () => {
   return require('os').homedir();
 });
+
+// --- codev multi-account management (Settings → Accounts, Batch 2b) ---
+// Thin IPC wrappers over the shared manager (src/cli/account-manager.ts),
+// the same module the `codev account` CLI uses — one generator, no drift.
+ipcMain.handle('accounts-get', () => {
+  try {
+    return {
+      ok: true,
+      accounts: accountManager.listAccounts(),
+      shellInstalled: accountManager.isShellHookInstalled(),
+    };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle('accounts-add', (_event, label: string) => {
+  try {
+    const account = accountManager.addAccount(label);
+    invalidateAccountsCache();
+    return { ok: true, account };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle('accounts-remove', (_event, label: string) => {
+  try {
+    accountManager.removeAccount(label);
+    invalidateAccountsCache();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle('accounts-set-default', (_event, label: string) => {
+  try {
+    accountManager.setDefault(label);
+    invalidateAccountsCache();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle(
+  'accounts-shell-hook',
+  (_event, action: 'install' | 'uninstall') => {
+    try {
+      const result =
+        action === 'install'
+          ? accountManager.installShellHook()
+          : accountManager.uninstallShellHook();
+      return { ok: true, changed: result.changed, path: result.path };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  },
+);
 
 ipcMain.on('hide-app', (event) => {
   hideSwitcherWindow();
