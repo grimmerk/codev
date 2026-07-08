@@ -213,6 +213,12 @@ The registry records `configDirEnv` (null for default, the dir for extras) and
 | Auto-memory (`projects/<path>/memory/`, `MEMORY.md`) | Config dir | No by default | Per-account, or advanced: symlink individual `memory/` subdirs |
 | Session data (`history.jsonl`, `projects/*.jsonl`, `sessions/`) | Config dir | **No — aggregated for display, not shared** | CodeV scans all dirs (§6.E) |
 
+**Verified 2026-07-09:** Claude Code follows symlinks for both `skills/<name>` entries
+and the global `CLAUDE.md` — a work-account `-p` probe listed the symlinked
+`fireflies-repos` skill and had the symlinked CLAUDE.md's rules in context. So the
+symlink mechanism above is confirmed viable; the remaining Batch 3 work is UX
+(share checkboxes / `codev account share`), not feasibility.
+
 Your guess was right: **per-project files are account-independent; only the global
 files need help.** "Reusing" session data across accounts isn't actually desirable —
 each account owns its sessions; what you want is CodeV *showing* them all, which §6.E
