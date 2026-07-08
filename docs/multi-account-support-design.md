@@ -209,6 +209,7 @@ The registry records `configDirEnv` (null for default, the dir for extras) and
 | Global `~/.claude/CLAUDE.md` (user instructions) | Config dir | No by default → **opt-in symlink** | `ln -s ~/.claude/CLAUDE.md ~/.claude-x/CLAUDE.md` |
 | Global `skills/`, `commands/`, `plugins/` | Config dir | No by default → **opt-in symlink** | symlink the dir |
 | `settings.json` (model, hooks, permissions, env) | Config dir | Optional symlink (careful) | Symlink ⇒ hooks/permissions shared; or install hook per-dir (§6.F) |
+| Single `settings.json` keys (`statusLine`, `model`, `effortLevel`, `theme`) | Config dir | **Yes — per-key copy** | Copy the key into the other account's settings.json (statusLine done for `work` 2026-07; HOME-based script serves all accounts) |
 | `.claude.json` (identity + per-project trust) | Config dir | **No — never symlink** | Holds `oauthAccount`; must stay per-account |
 | Auto-memory (`projects/<path>/memory/`, `MEMORY.md`) | Config dir | No by default | Per-account, or advanced: symlink individual `memory/` subdirs |
 | Session data (`history.jsonl`, `projects/*.jsonl`, `sessions/`) | Config dir | **No — aggregated for display, not shared** | CodeV scans all dirs (§6.E) |
@@ -218,6 +219,24 @@ and the global `CLAUDE.md` — a work-account `-p` probe listed the symlinked
 `fireflies-repos` skill and had the symlinked CLAUDE.md's rules in context. So the
 symlink mechanism above is confirmed viable; the remaining Batch 3 work is UX
 (share checkboxes / `codev account share`), not feasibility.
+
+**Collision & ownership policy (the actual Batch 3 UX work):** sharing must never
+silently overwrite. If the target already exists in the other account: back it up
+(`*.codev-bak`, the convention session-status-hooks already uses) or skip and report —
+never `ln -sf`. Link per **entry** (`skills/<name>`), not whole dirs, so an account
+keeps private skills alongside shared ones. (Note: it's *hard* links that can't target
+directories — a **symlink to a dir works fine** and new files *inside* a linked skill
+are picked up automatically; only a brand-new skill needs a new per-entry link. If an
+account needs no private skills, a whole-`skills/`-dir symlink is the zero-maintenance
+alternative — current and future skills auto-shared, at the cost that anything either
+account adds becomes shared.) A symlink is ONE file both ways — edits
+from either account hit the same inode; offer **link (stay in sync) / copy (fork) /
+skip** per item. `plugins/` is untested: the payload dir may symlink, but enablement
+lives in each account's `settings.json` (`enabledPlugins`) and plugins may keep their
+own state — needs its own experiment. Session data stays unshared by design (it's
+live-written and identity-bound, and §6.E aggregation already provides the union view);
+cross-account "resume" (§6.G/2c) should **copy-fork** a transcript into the target
+account, never link it.
 
 Your guess was right: **per-project files are account-independent; only the global
 files need help.** "Reusing" session data across accounts isn't actually desirable —
