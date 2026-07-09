@@ -164,10 +164,11 @@ const PopupDefaultExample = ({
       const r = await window.electronAPI.addAccount(label);
       if (r.ok) {
         setNewAccountLabel('');
+        const dir = r.account?.dir || `~/.claude-${label}`;
         setAccountsNotice(
           accountsShellInstalled
-            ? `Added "${label}". Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`
-            : `Added "${label}". Install Shell integration below, open a new shell, then log in with: claude ${label}.`,
+            ? `Added "${label}" → ${dir}. Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`
+            : `Added "${label}" → ${dir}. Install Shell integration below, open a new shell, then log in with: claude ${label}.`,
         );
         await refreshAccounts();
       } else {
@@ -799,7 +800,7 @@ const PopupDefaultExample = ({
             {accounts.map((a) => (
               <div key={a.label} style={rowStyle}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={labelStyle}>
+                  <span style={labelStyle} title={`Config dir: ${a.dir}`}>
                     {a.label}
                     {a.isCurrentDefault && (
                       <span style={{ color: THEME.primary, fontSize: '11px', marginLeft: '6px' }}>
