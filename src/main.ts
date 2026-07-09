@@ -2276,14 +2276,14 @@ ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath:
   openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode, customTitle);
 });
 
-ipcMain.on('launch-new-claude-session', async (_event, projectPath: string) => {
+ipcMain.on('launch-new-claude-session', async (_event, projectPath: string, accountLabel?: string) => {
   if (!existsSync(projectPath)) {
     console.log('[launch-new-claude-session] path does not exist:', projectPath);
     return;
   }
   const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
   const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
-  launchNewClaudeSession(projectPath, terminalApp, terminalMode);
+  launchNewClaudeSession(projectPath, terminalApp, terminalMode, accountLabel);
 });
 
 ipcMain.on('launch-new-claude-session-in-codev', (_event, projectPath: string) => {

@@ -8,7 +8,11 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
-import { getScannableAccounts, getProjectsDir } from './accounts';
+import {
+  getScannableAccounts,
+  getProjectsDir,
+  getAccountByLabel,
+} from './accounts';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -1389,6 +1393,7 @@ export const launchNewClaudeSession = (
   projectPath: string,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
+  accountLabel?: string,
 ): void => {
   if (terminalApp === 'vscode') {
     const { execFile } = require('child_process');
@@ -1411,12 +1416,30 @@ export const launchNewClaudeSession = (
     return;
   }
   if (terminalApp === 'codev') {
+    // Embedded terminal spawns the user's shell; the account override isn't
+    // threaded through it yet (the 2c-lite picker targets external terminals).
+    if (accountLabel) {
+      console.log(
+        '[launchNewClaudeSession] account override ignored for codev terminal:',
+        accountLabel,
+      );
+    }
     if (launchInCodevTerminalCallback) {
       launchInCodevTerminalCallback(projectPath);
     }
     return;
   }
-  runCommandInTerminal(`cd "${projectPath}" && claude`, 'claude', projectPath, terminalApp, terminalMode);
+  // No accountLabel: bare `claude` → the accounts.sh dispatcher → the user's
+  // global default (2e). With an explicit account (2c-lite picker): bypass the
+  // dispatcher via `command claude` + explicit env, like buildResumeCommand.
+  let claudeCmd = 'claude';
+  if (accountLabel) {
+    const account = getAccountByLabel(accountLabel);
+    claudeCmd = account?.configDirEnv
+      ? `CLAUDE_CONFIG_DIR='${account.configDirEnv.replace(/'/g, "'\\''")}' command claude`
+      : 'command claude';
+  }
+  runCommandInTerminal(`cd "${projectPath}" && ${claudeCmd}`, 'claude', projectPath, terminalApp, terminalMode);
 };
 
 /**

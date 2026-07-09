@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.80
+
+- Feat: multi-account Batch 2c-lite — pick the account when launching a new session
+  - `⌥⌘+Enter` on a project opens a small account picker (↑↓ / Enter / Esc, or click); the chosen account launches via explicit `CLAUDE_CONFIG_DIR` + `command claude`
+  - Plain `⌘+Enter` unchanged: opens instantly under the global default; single-account (or registry-less) setups never see the picker
+  - Cross-account *resume* stays deferred to Batch 3 (copy-fork design; a session's transcript lives in its own account)
+
 ## 1.0.79
 
 - Feat: multi-account Batch 2b (part 2) — `codev` command in your shell

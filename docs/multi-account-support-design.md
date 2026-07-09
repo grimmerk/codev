@@ -461,7 +461,13 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     real `.app` location in the registry (`appPath`) on every launch and refreshes
     accounts.sh, so app moves and generator updates self-heal. CLI is tsc-compiled
     into `resources/cli` (extraResource) at build time.
-  - *2c:* account picker / per-launch override (§6.G, 4.2).
+  - *2c-lite (✅, branch `feat/new-session-account-picker`):* NEW-session account
+    picker — ⌥⌘+Enter on a project opens a picker (⌘+Enter unchanged → global
+    default; single-account setups never see it); launches with explicit
+    `CLAUDE_CONFIG_DIR` + `command claude`. Cross-account *resume* (the other half
+    of §6.G) stays deferred to Batch 3 as explicit copy-fork — a transcript lives in
+    its own account's projects dir, so "resume under another account" must copy, never
+    link. "This repo always opens under X" belongs to 2d's projectMap.
   - *2d:* pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
   - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it
     also needs the CLI/UI to manage.
