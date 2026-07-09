@@ -111,11 +111,10 @@ const PopupDefaultExample = ({
   const [newAccountLabel, setNewAccountLabel] = useState('');
   const [accountsBusy, setAccountsBusy] = useState(false);
   // Footer example uses a REAL account name (prefer a non-default one) so
-  // nobody reads "work" as a fixed keyword.
+  // nobody reads it as a fixed keyword; the example clause is hidden entirely
+  // when no account is registered (the commands wouldn't exist yet).
   const exampleAccountLabel =
-    accounts.find((a) => !a.isCurrentDefault)?.label ||
-    accounts[0]?.label ||
-    'work';
+    accounts.find((a) => !a.isCurrentDefault)?.label || accounts[0]?.label;
 
   const refreshAccounts = async () => {
     try {
@@ -889,9 +888,9 @@ const PopupDefaultExample = ({
               </div>
             )}
             <div style={{ padding: '4px 16px', fontSize: '11px', color: THEME.text.secondary }}>
-              Registry: ~/.config/codev/accounts.json — launch any account
-              above by its name: claude {exampleAccountLabel} and claude-
-              {exampleAccountLabel} are equivalent
+              Registry: ~/.config/codev/accounts.json
+              {accounts.length > 0 &&
+                ` — launch any account above by its name: claude ${exampleAccountLabel} and claude-${exampleAccountLabel} are equivalent`}
             </div>
           </div>
           )}
