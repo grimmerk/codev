@@ -1253,6 +1253,24 @@ const trayToggleEvtHandler = async () => {
   // Initialize session status hooks (install if enabled, start watching)
   initSessionStatusHooks();
 
+  // codev multi-account: keep accounts.sh in sync with this app install —
+  // record the real .app location (wherever the user put it, for the codev()
+  // CLI launcher) and refresh the generated file so generator updates and
+  // app moves self-heal. No-op for single-account users (no registry).
+  try {
+    if (
+      app.isPackaged &&
+      require('fs').existsSync(accountManager.REGISTRY_PATH)
+    ) {
+      // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root
+      const bundle = path.resolve(process.execPath, '..', '..', '..');
+      accountManager.setAppPath(bundle);
+      accountManager.regenerate();
+    }
+  } catch (e) {
+    console.error('[accounts] accounts.sh launch sync failed:', e);
+  }
+
   // Pre-spawn terminal for faster first Terminal tab switch
   setTimeout(() => {
     if (!ptyProcess) {

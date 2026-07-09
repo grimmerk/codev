@@ -446,7 +446,13 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
   - *2b (UI ✅, branch `feat/accounts-settings-ui`):* Accounts tab in Settings —
     list/add/remove + set-default + shell-integration toggle (§6.D), as IPC wrappers
     over the shared manager (one generator with the CLI). Rename deferred (labels name
-    dirs; remove+add covers it). Remaining 2b item: a real `codev` binary on PATH.
+    dirs; remove+add covers it).
+  - *2b part 2 (✅, branch `feat/codev-path-binary`):* the `codev` command — a
+    `codev()` function in accounts.sh runs the CLI bundled inside CodeV.app via
+    `ELECTRON_RUN_AS_NODE` (no system Node; no sudo/PATH edits). The app records its
+    real `.app` location in the registry (`appPath`) on every launch and refreshes
+    accounts.sh, so app moves and generator updates self-heal. CLI is tsc-compiled
+    into `resources/cli` (extraResource) at build time.
   - *2c:* account picker / per-launch override (§6.G, 4.2).
   - *2d:* pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
   - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it

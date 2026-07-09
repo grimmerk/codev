@@ -36,6 +36,7 @@ export interface RegistryAccount {
 export interface Registry {
   version: number;
   defaultAccount?: string; // label bare `claude` resolves to
+  appPath?: string; // CodeV.app bundle root (recorded by the app on launch)
   accounts: RegistryAccount[];
 }
 
@@ -285,8 +286,42 @@ export function generateAccountsSh(reg: Registry): string {
     '  echo "  identity: run claude-whoami, or claude <acct> auth status"',
   );
   L.push('}');
+  if (reg.appPath) {
+    assertSafeDir(expandHome(reg.appPath));
+    const appPath = toShellPath(expandHome(reg.appPath));
+    const exe = path.basename(expandHome(reg.appPath), '.app');
+    L.push('');
+    L.push('# codev CLI — the account manager bundled inside the CodeV app.');
+    L.push(
+      '# ELECTRON_RUN_AS_NODE runs the app binary as plain Node (no system',
+    );
+    L.push(
+      '# Node needed). CodeV refreshes this file on every launch, so a moved',
+    );
+    L.push('# app self-heals the path below.');
+    L.push('codev() {');
+    L.push(
+      `  ELECTRON_RUN_AS_NODE=1 "${appPath}/Contents/MacOS/${exe}" "${appPath}/Contents/Resources/cli/codev-account.js" "$@"`,
+    );
+    L.push('}');
+  }
   L.push('');
   return L.join('\n');
+}
+
+/**
+ * Record where the CodeV.app bundle lives (called by the app on launch, with
+ * the app's real location — wherever the user installed/moved it). No-op
+ * unless a registry already exists (single-account users never get one).
+ * Returns true when the stored path changed.
+ */
+export function setAppPath(appPath: string): boolean {
+  if (!fs.existsSync(REGISTRY_PATH)) return false;
+  const reg = readRegistry();
+  if (reg.appPath === appPath) return false;
+  reg.appPath = appPath;
+  writeRegistry(reg);
+  return true;
 }
 
 export function regenerate(reg?: Registry): string {

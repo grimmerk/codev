@@ -97,3 +97,4 @@ src/build.json
 
 # Claude Code worktrees
 .claude/worktrees/
+resources/cli

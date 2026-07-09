@@ -125,6 +125,18 @@ describe('generateAccountsSh', () => {
     expect(() => generateAccountsSh(bad)).toThrow(/Unsafe shell characters/);
   });
 
+  it('emits a codev() launcher when appPath is recorded', () => {
+    const sh = generateAccountsSh(reg({ appPath: '/Applications/CodeV.app' }));
+    expect(sh).toContain('codev() {');
+    expect(sh).toContain(
+      'ELECTRON_RUN_AS_NODE=1 "/Applications/CodeV.app/Contents/MacOS/CodeV" "/Applications/CodeV.app/Contents/Resources/cli/codev-account.js" "$@"',
+    );
+  });
+
+  it('omits the codev() launcher when no appPath is recorded', () => {
+    expect(generateAccountsSh(reg())).not.toContain('codev()');
+  });
+
   it('rejects a shell-unsafe label (hand-edited registry)', () => {
     const bad = reg({
       defaultAccount: 'x',
