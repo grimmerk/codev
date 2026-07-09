@@ -468,7 +468,14 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     of §6.G) stays deferred to Batch 3 as explicit copy-fork — a transcript lives in
     its own account's projects dir, so "resume under another account" must copy, never
     link. "This repo always opens under X" belongs to 2d's projectMap.
-  - *2d:* pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
+  - *2d — ❌ dropped (2026-07-10):* pyenv-style folder auto-switch (§6.H). Rationale:
+    in practice one folder hosts sessions from MULTIPLE accounts (we test exactly this
+    way), so a folder→account default would guess wrong precisely where the account
+    choice matters; stacking a third decision layer (global default → folder default →
+    picker) adds "why did bare claude open work here?" confusion for thin value. The
+    need is covered by 2e (global default) + 2c-lite (explicit per-launch picker).
+    Technically it was feasible (a default, not a constraint — resume always follows
+    the session's own account); dropped on value, not feasibility.
   - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it
     also needs the CLI/UI to manage.
 - **Batch 3 — later:** cross-account symlink reuse of global files
