@@ -346,6 +346,26 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('  compdef _codev codev');
     L.push('fi');
   }
+  // Account-label completion for the `claude <label>` dispatcher. Registered
+  // only when nothing else completes `claude` (checked via _comps), so an
+  // official Claude Code completion — if one ever ships — wins automatically.
+  // Independent of appPath — the dispatcher exists whenever accounts do.
+  const allLabelsForClaude = accounts.map((a) => a.label).join(' ');
+  if (allLabelsForClaude) {
+    L.push('');
+    L.push('# Complete account names for `claude <TAB>` (labels only; native');
+    L.push('# claude flags/subcommands still work — just not suggested).');
+    L.push('_claude_codev_accounts() {');
+    L.push('  if (( CURRENT == 2 )); then');
+    L.push(`    compadd ${allLabelsForClaude}`);
+    L.push('  fi');
+    L.push('}');
+    L.push(
+      'if [ -n "${ZSH_VERSION:-}" ] && (( ${+functions[compdef]} )) && [ -z "${_comps[claude]:-}" ]; then',
+    );
+    L.push('  compdef _claude_codev_accounts claude');
+    L.push('fi');
+  }
   L.push('');
   return L.join('\n');
 }

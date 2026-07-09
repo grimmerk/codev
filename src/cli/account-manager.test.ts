@@ -149,6 +149,15 @@ describe('generateAccountsSh', () => {
     expect(sh).toContain('remove|rm) compadd work ;;');
   });
 
+  it('completes account labels for `claude <TAB>` without clobbering', () => {
+    // Works even without appPath — the dispatcher exists whenever accounts do.
+    const sh = generateAccountsSh(reg());
+    expect(sh).toContain('_claude_codev_accounts() {');
+    expect(sh).toContain('compadd personal work');
+    // polite registration: only when nothing else completes `claude`
+    expect(sh).toContain('[ -z "${_comps[claude]:-}" ]');
+  });
+
   it('uses the recorded appExec so a renamed .app bundle still works', () => {
     const sh = generateAccountsSh(
       reg({
