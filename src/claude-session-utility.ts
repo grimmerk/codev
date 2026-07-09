@@ -1439,7 +1439,10 @@ export const launchNewClaudeSession = (
       ? `CLAUDE_CONFIG_DIR='${account.configDirEnv.replace(/'/g, "'\\''")}' command claude`
       : 'command claude';
   }
-  runCommandInTerminal(`cd "${projectPath}" && ${claudeCmd}`, 'claude', projectPath, terminalApp, terminalMode);
+  // Pass claudeCmd as the 2nd arg too — Ghostty/cmux build their launch
+  // scripts from it (iTerm2/Terminal.app use fullCommand), so the account
+  // env prefix must be present in both.
+  runCommandInTerminal(`cd "${projectPath}" && ${claudeCmd}`, claudeCmd, projectPath, terminalApp, terminalMode);
 };
 
 /**

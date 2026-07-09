@@ -476,8 +476,10 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     need is covered by 2e (global default) + 2c-lite (explicit per-launch picker).
     Technically it was feasible (a default, not a constraint — resume always follows
     the session's own account); dropped on value, not feasibility.
-  - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it
-    also needs the CLI/UI to manage.
+  - *2e — ✅ shipped with 2a (PR #123, v1.0.77):* configurable global-default —
+    `codev account default <label>` / Settings → Set default routes bare `claude`
+    through the dispatcher `*)` to the chosen account; CodeV resume/launch bypass the
+    dispatcher with `command claude` so explicit account choices can't be re-routed.
 - **Batch 3 — later:** cross-account symlink reuse of global files
   (CLAUDE.md / skills / commands / plugins / settings, §5).
 

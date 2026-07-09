@@ -290,7 +290,13 @@ function SwitcherApp() {
   const openAccountPickerForLaunch = async (projectPath: string) => {
     try {
       const r = await window.electronAPI.getAccounts();
-      const accounts = ((r.ok && r.accounts) || []) as LaunchAccount[];
+      if (!r.ok) {
+        // The user explicitly asked to pick — don't guess an identity when
+        // the account list can't be loaded.
+        console.error('[account-picker] failed to load accounts:', r.error);
+        return;
+      }
+      const accounts = (r.accounts || []) as LaunchAccount[];
       if (accounts.length <= 1) {
         // Single account (or no registry): nothing to pick — launch as usual.
         window.electronAPI.launchNewClaudeSession(projectPath);
@@ -298,8 +304,8 @@ function SwitcherApp() {
       }
       setLaunchPickerIndex(0);
       setLaunchPicker({ path: projectPath, accounts });
-    } catch {
-      window.electronAPI.launchNewClaudeSession(projectPath);
+    } catch (e) {
+      console.error('[account-picker] failed to load accounts:', e);
     }
   };
 
@@ -598,12 +604,20 @@ function SwitcherApp() {
     });
 
     // Account count decides whether the ⌥⌘+Enter picker hint is shown.
-    window.electronAPI
-      .getAccounts()
-      .then((r) => {
-        if (r.ok) setIsMultiAccountUI(((r.accounts || []) as unknown[]).length > 1);
-      })
-      .catch(() => {});
+    // Re-checked when the embedded Settings popup mutates accounts (same-window
+    // CustomEvent) and on window focus (covers CLI-side changes) — no restart
+    // needed for the hint to switch.
+    const refreshMultiAccountHint = () => {
+      window.electronAPI
+        .getAccounts()
+        .then((r) => {
+          if (r.ok) setIsMultiAccountUI(((r.accounts || []) as unknown[]).length > 1);
+        })
+        .catch(() => {});
+    };
+    refreshMultiAccountHint();
+    window.addEventListener('codev-accounts-changed', refreshMultiAccountHint);
+    window.addEventListener('focus', refreshMultiAccountHint);
 
     // If initial mode is sessions (from URL hash), fetch sessions immediately
     if (initialMode === 'sessions') {
@@ -1573,6 +1587,9 @@ function SwitcherApp() {
         }}
         // Custom components
         components={{
+          // Hide react-select's default vertical separator ("|" that looks
+          // like a stray cursor before the hint text).
+          IndicatorSeparator: () => null,
           DropdownIndicator: () => (
             <div
               title="\u2325\u2318+Enter: choose the account first"

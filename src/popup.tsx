@@ -119,6 +119,9 @@ const PopupDefaultExample = ({
         setAccountsLoaded(true);
         setAccountsShellInstalled(!!r.shellInstalled);
         setAccountsError('');
+        // Tell the surrounding switcher UI (same window) accounts changed,
+        // e.g. so the ⌥⌘+Enter hint updates without an app restart.
+        window.dispatchEvent(new CustomEvent('codev-accounts-changed'));
       } else {
         setAccountsNotice('');
         setAccountsError(r.error || 'Failed to load accounts');
