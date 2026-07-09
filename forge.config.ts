@@ -25,7 +25,9 @@ const config: ForgeConfig = {
       // Compile the codev account CLI (plain fs/os/path TS — no bundling
       // needed) into resources/cli. Shipped via extraResource below and run
       // through the app binary with ELECTRON_RUN_AS_NODE (see accounts.sh
-      // codev() launcher).
+      // codev() launcher). Clean first — tsc never removes stale output, so
+      // a renamed source would otherwise ship both old and new .js.
+      fs.rmSync('./resources/cli', { recursive: true, force: true });
       execFileSync(
         './node_modules/.bin/tsc',
         [
