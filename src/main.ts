@@ -1262,9 +1262,10 @@ const trayToggleEvtHandler = async () => {
       app.isPackaged &&
       require('fs').existsSync(accountManager.REGISTRY_PATH)
     ) {
-      // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root
+      // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root.
+      // Record the exec path too — it survives .app renames.
       const bundle = path.resolve(process.execPath, '..', '..', '..');
-      accountManager.setAppPath(bundle);
+      accountManager.setAppPath(bundle, process.execPath);
       accountManager.regenerate();
     }
   } catch (e) {

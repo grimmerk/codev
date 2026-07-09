@@ -37,6 +37,7 @@ export interface Registry {
   version: number;
   defaultAccount?: string; // label bare `claude` resolves to
   appPath?: string; // CodeV.app bundle root (recorded by the app on launch)
+  appExec?: string; // full app-binary path (survives .app renames)
   accounts: RegistryAccount[];
 }
 
@@ -289,7 +290,17 @@ export function generateAccountsSh(reg: Registry): string {
   if (reg.appPath) {
     assertSafeDir(expandHome(reg.appPath));
     const appPath = toShellPath(expandHome(reg.appPath));
-    const exe = path.basename(expandHome(reg.appPath), '.app');
+    // Prefer the recorded binary path: the executable inside Contents/MacOS
+    // keeps its original name ("CodeV") even if the user renames the .app
+    // bundle, so deriving it from the bundle name would break on rename.
+    let exec: string;
+    if (reg.appExec) {
+      assertSafeDir(expandHome(reg.appExec));
+      exec = toShellPath(expandHome(reg.appExec));
+    } else {
+      const exe = path.basename(expandHome(reg.appPath), '.app');
+      exec = `${appPath}/Contents/MacOS/${exe}`;
+    }
     L.push('');
     L.push('# codev CLI — the account manager bundled inside the CodeV app.');
     L.push(
@@ -301,7 +312,7 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('# app self-heals the path below.');
     L.push('codev() {');
     L.push(
-      `  ELECTRON_RUN_AS_NODE=1 "${appPath}/Contents/MacOS/${exe}" "${appPath}/Contents/Resources/cli/codev-account.js" "$@"`,
+      `  ELECTRON_RUN_AS_NODE=1 "${exec}" "${appPath}/Contents/Resources/cli/codev-account.js" "$@"`,
     );
     L.push('}');
   }
@@ -315,11 +326,12 @@ export function generateAccountsSh(reg: Registry): string {
  * unless a registry already exists (single-account users never get one).
  * Returns true when the stored path changed.
  */
-export function setAppPath(appPath: string): boolean {
+export function setAppPath(appPath: string, appExec?: string): boolean {
   if (!fs.existsSync(REGISTRY_PATH)) return false;
   const reg = readRegistry();
-  if (reg.appPath === appPath) return false;
+  if (reg.appPath === appPath && reg.appExec === appExec) return false;
   reg.appPath = appPath;
+  if (appExec) reg.appExec = appExec;
   writeRegistry(reg);
   return true;
 }

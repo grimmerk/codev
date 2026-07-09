@@ -763,6 +763,9 @@ const PopupDefaultExample = ({
           {/* Accounts tab */}
           {settingsTab === 'accounts' && (
           <div style={{ padding: '4px 0' }}>
+            <div style={{ padding: '2px 16px 6px', fontSize: '11px', color: THEME.text.secondary }}>
+              Claude Code (Anthropic) accounts — each launches claude with its own config dir
+            </div>
             {accounts.map((a) => (
               <div key={a.label} style={rowStyle}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>

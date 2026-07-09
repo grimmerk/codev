@@ -137,6 +137,18 @@ describe('generateAccountsSh', () => {
     expect(generateAccountsSh(reg())).not.toContain('codev()');
   });
 
+  it('uses the recorded appExec so a renamed .app bundle still works', () => {
+    const sh = generateAccountsSh(
+      reg({
+        appPath: '/Applications/MyCodeV.app',
+        appExec: '/Applications/MyCodeV.app/Contents/MacOS/CodeV',
+      }),
+    );
+    expect(sh).toContain(
+      'ELECTRON_RUN_AS_NODE=1 "/Applications/MyCodeV.app/Contents/MacOS/CodeV" "/Applications/MyCodeV.app/Contents/Resources/cli/codev-account.js" "$@"',
+    );
+  });
+
   it('rejects a shell-unsafe label (hand-edited registry)', () => {
     const bad = reg({
       defaultAccount: 'x',
