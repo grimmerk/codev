@@ -283,6 +283,9 @@ function SwitcherApp() {
     accounts: LaunchAccount[];
   } | null>(null);
   const [launchPickerIndex, setLaunchPickerIndex] = useState(0);
+  // Multi-account? → advertise ⌥⌘+Enter in the search-bar hint (single-account
+  // users see the unchanged short hint — no extra clutter).
+  const [isMultiAccountUI, setIsMultiAccountUI] = useState(false);
 
   const openAccountPickerForLaunch = async (projectPath: string) => {
     try {
@@ -593,6 +596,14 @@ function SwitcherApp() {
       modeRef.current = 'terminal';
       setMode('terminal');
     });
+
+    // Account count decides whether the ⌥⌘+Enter picker hint is shown.
+    window.electronAPI
+      .getAccounts()
+      .then((r) => {
+        if (r.ok) setIsMultiAccountUI(((r.accounts || []) as unknown[]).length > 1);
+      })
+      .catch(() => {});
 
     // If initial mode is sessions (from URL hash), fetch sessions immediately
     if (initialMode === 'sessions') {
@@ -1567,7 +1578,9 @@ function SwitcherApp() {
               title="\u2325\u2318+Enter: choose the account first"
               style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}
             >
-              {'\u2318+Enter: New Claude'}
+              {isMultiAccountUI
+                ? '\u2318+Enter: New Claude \u00b7 \u2325\u2318+Enter: pick account'
+                : '\u2318+Enter: New Claude'}
             </div>
           ),
           Option: (props) => OptionUI(props, onDeleteClick, (path: string) => {
