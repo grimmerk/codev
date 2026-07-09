@@ -71,6 +71,7 @@ Tab completion included (zsh): `claude <TAB>` completes account names; `codev ac
 | `codev account add <name> [--dir D]` | Register an account (default dir `~/.claude-<name>`) |
 | `codev account default <name>` | Point bare `claude` at an account |
 | `codev account remove <name>` (`rm`) | Unregister; keeps its folder on disk |
+| `codev account rename <old> <new>` | Rename a label — the folder is not moved; also the way to rename the auto-seeded default account (`personal`) |
 | `codev account regenerate` (`regen`) | Rewrite `accounts.sh` from the registry |
 | `codev account show` (`preview`) | Dry-run print of the generated `accounts.sh` |
 | `codev account install` / `uninstall` | Add / remove the `~/.zshrc` source block |

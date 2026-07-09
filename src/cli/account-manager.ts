@@ -331,11 +331,11 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('    compadd account');
     L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
     L.push(
-      '    compadd list add default remove rm regenerate show install uninstall help',
+      '    compadd list add default remove rm rename regenerate show install uninstall help',
     );
     L.push('  elif (( CURRENT == 4 )) && [ "${words[2]}" = "account" ]; then');
     L.push('    case "${words[3]}" in');
-    if (allLabels) L.push(`      default) compadd ${allLabels} ;;`);
+    if (allLabels) L.push(`      default|rename) compadd ${allLabels} ;;`);
     if (removable) L.push(`      remove|rm) compadd ${removable} ;;`);
     L.push('    esac');
     L.push('  fi');
@@ -498,6 +498,31 @@ export function removeAccount(label: string): string | undefined {
   writeRegistry(reg);
   regenerate(reg);
   return reassignedDefault;
+}
+
+/**
+ * Rename an account's label (the folder is NOT moved — `dir` is stored in the
+ * registry, so extra accounts keep working even when label ≠ folder suffix).
+ * This is also the only way to rename the anchor (~/.claude) account, whose
+ * auto-seeded "personal" label can't be changed via remove+add (the anchor is
+ * protected from removal).
+ */
+export function renameAccount(oldLabel: string, newLabel: string): void {
+  if (!newLabel || !LABEL_RE.test(newLabel)) {
+    throw new Error(
+      `Invalid label "${newLabel}" — use a letter followed by letters/digits/-/_`,
+    );
+  }
+  const reg = readRegistry();
+  const acct = reg.accounts.find((a) => a.label === oldLabel);
+  if (!acct) throw new Error(`No account "${oldLabel}"`);
+  if (reg.accounts.some((a) => a.label === newLabel)) {
+    throw new Error(`Account "${newLabel}" already exists`);
+  }
+  acct.label = newLabel;
+  if (reg.defaultAccount === oldLabel) reg.defaultAccount = newLabel;
+  writeRegistry(reg);
+  regenerate(reg);
 }
 
 export function setDefault(label: string): void {

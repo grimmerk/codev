@@ -23,6 +23,7 @@ Usage:
   codev account add <label> [--dir D] Register a new account (default dir ~/.claude-<label>)
   codev account default <label>      Set which account bare \`claude\` resolves to
   codev account remove <label>       Unregister an account (leaves its dir on disk)
+  codev account rename <old> <new>   Rename an account's label (folder is not moved)
   codev account regenerate           Rewrite ~/.config/codev/accounts.sh from the registry
   codev account show                 Print the generated accounts.sh (dry run, writes nothing)
   codev account install              Add the source line to ~/.zshrc (idempotent)
@@ -98,6 +99,14 @@ function main(): number {
       const label = rest[0];
       manager.setDefault(label);
       console.log(`✓ bare 'claude' now resolves to "${label}"`);
+      reloadHint();
+      return 0;
+    }
+
+    case 'rename': {
+      const [oldLabel, newLabel] = rest;
+      manager.renameAccount(oldLabel, newLabel);
+      console.log(`✓ Renamed "${oldLabel}" → "${newLabel}" (folder unchanged)`);
       reloadHint();
       return 0;
     }

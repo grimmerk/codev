@@ -142,9 +142,9 @@ describe('generateAccountsSh', () => {
     expect(sh).toContain('_codev() {');
     expect(sh).toContain('compdef _codev codev');
     expect(sh).toContain(
-      'compadd list add default remove rm regenerate show install uninstall help',
+      'compadd list add default remove rm rename regenerate show install uninstall help',
     );
-    expect(sh).toContain('default) compadd personal work ;;');
+    expect(sh).toContain('default|rename) compadd personal work ;;');
     // anchor (personal) is not removable
     expect(sh).toContain('remove|rm) compadd work ;;');
   });
