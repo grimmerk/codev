@@ -156,6 +156,8 @@ describe('generateAccountsSh', () => {
     expect(sh).toContain('compadd personal work');
     // polite registration: only when nothing else completes `claude`
     expect(sh).toContain('[ -z "${_comps[claude]:-}" ]');
+    // non-label positions keep the default file completion
+    expect(sh).toContain('_files');
   });
 
   it('uses the recorded appExec so a renamed .app bundle still works', () => {
