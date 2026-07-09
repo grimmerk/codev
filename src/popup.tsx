@@ -776,8 +776,10 @@ const PopupDefaultExample = ({
                   </span>
                   <span style={{ fontSize: '11px', color: THEME.text.secondary }}>
                     {a.loggedIn
-                      ? a.email || 'logged in'
-                      : `not logged in — run: claude ${a.label}`}
+                      ? `${a.email || 'logged in'} — launch: ${
+                          a.isCurrentDefault ? 'claude' : `claude ${a.label}`
+                        }`
+                      : `not logged in — log in & launch: claude ${a.label}`}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -812,7 +814,7 @@ const PopupDefaultExample = ({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleAddAccount();
                 }}
-                placeholder="new account label (e.g. work)"
+                placeholder="account name (e.g. work)"
                 style={{ ...selectStyle, cursor: 'text', width: '170px' }}
               />
               <button
@@ -847,7 +849,8 @@ const PopupDefaultExample = ({
               </div>
             )}
             <div style={{ padding: '4px 16px', fontSize: '11px', color: THEME.text.secondary }}>
-              Registry: ~/.config/codev/accounts.json — launch with claude &lt;label&gt; or claude-&lt;label&gt;
+              Registry: ~/.config/codev/accounts.json — each account also has a
+              function form, e.g. claude-work
             </div>
           </div>
           )}
