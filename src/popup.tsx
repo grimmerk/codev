@@ -883,8 +883,8 @@ const PopupDefaultExample = ({
               </div>
             )}
             <div style={{ padding: '4px 16px', fontSize: '11px', color: THEME.text.secondary }}>
-              Registry: ~/.config/codev/accounts.json — each account also has a
-              function form, e.g. claude-work
+              Registry: ~/.config/codev/accounts.json — e.g. claude work or
+              claude-work (two equivalent forms, both launch that account)
             </div>
           </div>
           )}
