@@ -647,10 +647,16 @@ ipcMain.handle('accounts-add', (_event, label: string) => {
     const added = accountManager.addAccount(label);
     invalidateAccountsCache();
     // Return the enriched (listed) shape so it matches CodevAccountInfo
-    // (isCurrentDefault etc.), not the raw registry entry.
-    const account =
-      accountManager.listAccounts().find((a) => a.label === added.label) ||
-      added;
+    // (isCurrentDefault etc.), not the raw registry entry. The fallback
+    // derives isCurrentDefault too, keeping the IPC contract intact.
+    const account = accountManager
+      .listAccounts()
+      .find((a) => a.label === added.label) || {
+      ...added,
+      isCurrentDefault:
+        accountManager.resolveDefaultLabel(accountManager.readRegistry()) ===
+        added.label,
+    };
     return { ok: true, account };
   } catch (error) {
     return { ok: false, error: (error as Error).message };
