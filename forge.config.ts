@@ -9,6 +9,7 @@ import { mainConfig } from './webpack.main.config';
 import { preloadConfig } from './webpack.preload.config';
 import { rendererConfig } from './webpack.renderer.config';
 
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 
 // Ensure compatibility with Electron Forge v7
@@ -20,6 +21,28 @@ const config: ForgeConfig = {
         JSON.stringify({
           BUILD_TYPE: process.env.BUILD_TYPE,
         }),
+      );
+      // Compile the codev account CLI (plain fs/os/path TS — no bundling
+      // needed) into resources/cli. Shipped via extraResource below and run
+      // through the app binary with ELECTRON_RUN_AS_NODE (see accounts.sh
+      // codev() launcher). Clean first — tsc never removes stale output, so
+      // a renamed source would otherwise ship both old and new .js.
+      fs.rmSync('./resources/cli', { recursive: true, force: true });
+      execFileSync(
+        './node_modules/.bin/tsc',
+        [
+          'src/cli/account-manager.ts',
+          'src/cli/codev-account.ts',
+          '--outDir',
+          'resources/cli',
+          '--module',
+          'commonjs',
+          '--target',
+          'es2020',
+          '--esModuleInterop',
+          '--skipLibCheck',
+        ],
+        { stdio: 'inherit' },
       );
     },
   },
@@ -37,6 +60,7 @@ const config: ForgeConfig = {
       '../node_modules',
       'images/MenuBar.png',
       'images/MenuBar@2x.png',
+      'resources/cli',
     ],
     extendInfo: {
       LSUIElement: true,

@@ -36,6 +36,8 @@ export interface RegistryAccount {
 export interface Registry {
   version: number;
   defaultAccount?: string; // label bare `claude` resolves to
+  appPath?: string; // CodeV.app bundle root (recorded by the app on launch)
+  appExec?: string; // full app-binary path (survives .app renames)
   accounts: RegistryAccount[];
 }
 
@@ -285,8 +287,98 @@ export function generateAccountsSh(reg: Registry): string {
     '  echo "  identity: run claude-whoami, or claude <acct> auth status"',
   );
   L.push('}');
+  if (reg.appPath) {
+    assertSafeDir(expandHome(reg.appPath));
+    const appPath = toShellPath(expandHome(reg.appPath));
+    // Prefer the recorded binary path: the executable inside Contents/MacOS
+    // keeps its original name ("CodeV") even if the user renames the .app
+    // bundle, so deriving it from the bundle name would break on rename.
+    let exec: string;
+    if (reg.appExec) {
+      assertSafeDir(expandHome(reg.appExec));
+      exec = toShellPath(expandHome(reg.appExec));
+    } else {
+      const exe = path.basename(expandHome(reg.appPath), '.app');
+      exec = `${appPath}/Contents/MacOS/${exe}`;
+    }
+    L.push('');
+    L.push('# codev CLI — the account manager bundled inside the CodeV app.');
+    L.push(
+      '# ELECTRON_RUN_AS_NODE runs the app binary as plain Node (no system',
+    );
+    L.push(
+      '# Node needed). CodeV refreshes this file on every launch, so a moved',
+    );
+    L.push('# app self-heals the path below.');
+    L.push('codev() {');
+    L.push(
+      `  ELECTRON_RUN_AS_NODE=1 "${exec}" "${appPath}/Contents/Resources/cli/codev-account.js" "$@"`,
+    );
+    L.push('}');
+    // Tab completion (zsh). Labels are baked in and refresh on regenerate,
+    // like everything else in this file. The function body is only PARSED by
+    // bash (never registered/executed there), so the file stays
+    // bash-sourceable; registration is guarded for zsh + a loaded compinit.
+    const allLabels = accounts.map((a) => a.label).join(' ');
+    const removable = accounts
+      .filter((a) => !a.isDefault)
+      .map((a) => a.label)
+      .join(' ');
+    L.push('');
+    L.push('# Tab completion for codev (zsh; needs compinit loaded).');
+    L.push('_codev() {');
+    L.push('  if (( CURRENT == 2 )); then');
+    L.push('    compadd account');
+    L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
+    L.push(
+      '    compadd list add default remove rm regenerate show install uninstall help',
+    );
+    L.push('  elif (( CURRENT == 4 )) && [ "${words[2]}" = "account" ]; then');
+    L.push('    case "${words[3]}" in');
+    if (allLabels) L.push(`      default) compadd ${allLabels} ;;`);
+    if (removable) L.push(`      remove|rm) compadd ${removable} ;;`);
+    L.push('    esac');
+    L.push('  fi');
+    L.push('}');
+    L.push(
+      'if [ -n "${ZSH_VERSION:-}" ] && (( ${+functions[compdef]} )); then',
+    );
+    L.push('  compdef _codev codev');
+    L.push('fi');
+  }
   L.push('');
   return L.join('\n');
+}
+
+/**
+ * Record where the CodeV.app bundle lives (called by the app on launch, with
+ * the app's real location — wherever the user installed/moved it). No-op
+ * unless a registry already exists (single-account users never get one).
+ * Returns true when the stored path changed.
+ */
+export function setAppPath(appPath: string, appExec?: string): boolean {
+  if (!fs.existsSync(REGISTRY_PATH)) return false;
+  const reg = readRegistry();
+  if (reg.appPath === appPath && reg.appExec === appExec) return false;
+  reg.appPath = appPath;
+  if (appExec) reg.appExec = appExec;
+  writeRegistry(reg);
+  return true;
+}
+
+/**
+ * Remove recorded app metadata. MAS builds call this so a stale appPath from
+ * a previous direct-download install can't keep advertising a codev()
+ * launcher that can't run under the MAS sandbox.
+ */
+export function clearAppPath(): boolean {
+  if (!fs.existsSync(REGISTRY_PATH)) return false;
+  const reg = readRegistry();
+  if (reg.appPath === undefined && reg.appExec === undefined) return false;
+  delete reg.appPath;
+  delete reg.appExec;
+  writeRegistry(reg);
+  return true;
 }
 
 export function regenerate(reg?: Registry): string {

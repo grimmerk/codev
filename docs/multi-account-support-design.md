@@ -325,6 +325,24 @@ detected rc, with **(c)** as manual fallback. Mirrors the existing Session-Statu
 toggle (write file with `0o755`, register a reference, idempotent, removable). Detect
 shell; warn if not zsh/bash.
 
+**Supported environments (current implementation, Batch 2a/2b):** the Install button /
+`codev account install` writes only `~/.zshrc` → **zsh** is the supported shell (the
+macOS default). The generated `accounts.sh` is bash-compatible — bash users can
+`source` it manually from `.bashrc` — while **fish is unsupported** (different function
+syntax; the `env`-prefixed commands CodeV injects at resume do parse in fish ≥3.1, but
+the dispatcher/whoami functions won't load there). Account-aware resume/launch covers
+every terminal CodeV supports (iTerm2, Terminal.app, Ghostty, cmux, embedded Term tab);
+VS Code sessions can't be account-switched (grimmerk/codev#121). rc-file shell
+detection remains future work. accounts.sh also ships zsh tab completion for `codev`
+(subcommands + account labels, baked in and refreshed on regenerate; registration is
+guarded so the file stays bash-sourceable).
+
+**MAS builds:** the Mac App Store variant is sandboxed and `ELECTRON_RUN_AS_NODE` is
+unsupported there, so the bundled `codev` CLI can never run from a MAS install — CodeV
+skips recording `appPath` on MAS (no broken `codev()` is advertised). The wider
+`~/.claude`-reading feature set has the same sandbox constraint; academic today, since
+no MAS build with the Claude-sessions feature set has shipped.
+
 ### 6.D Add-account (login) bootstrap
 
 OAuth is interactive (browser) — CodeV cannot automate it, only orchestrate it.
@@ -436,7 +454,13 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
   - *2b (UI ✅, branch `feat/accounts-settings-ui`):* Accounts tab in Settings —
     list/add/remove + set-default + shell-integration toggle (§6.D), as IPC wrappers
     over the shared manager (one generator with the CLI). Rename deferred (labels name
-    dirs; remove+add covers it). Remaining 2b item: a real `codev` binary on PATH.
+    dirs; remove+add covers it).
+  - *2b part 2 (✅, branch `feat/codev-path-binary`):* the `codev` command — a
+    `codev()` function in accounts.sh runs the CLI bundled inside CodeV.app via
+    `ELECTRON_RUN_AS_NODE` (no system Node; no sudo/PATH edits). The app records its
+    real `.app` location in the registry (`appPath`) on every launch and refreshes
+    accounts.sh, so app moves and generator updates self-heal. CLI is tsc-compiled
+    into `resources/cli` (extraResource) at build time.
   - *2c:* account picker / per-launch override (§6.G, 4.2).
   - *2d:* pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
   - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it

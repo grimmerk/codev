@@ -125,6 +125,42 @@ describe('generateAccountsSh', () => {
     expect(() => generateAccountsSh(bad)).toThrow(/Unsafe shell characters/);
   });
 
+  it('emits a codev() launcher when appPath is recorded', () => {
+    const sh = generateAccountsSh(reg({ appPath: '/Applications/CodeV.app' }));
+    expect(sh).toContain('codev() {');
+    expect(sh).toContain(
+      'ELECTRON_RUN_AS_NODE=1 "/Applications/CodeV.app/Contents/MacOS/CodeV" "/Applications/CodeV.app/Contents/Resources/cli/codev-account.js" "$@"',
+    );
+  });
+
+  it('omits the codev() launcher when no appPath is recorded', () => {
+    expect(generateAccountsSh(reg())).not.toContain('codev()');
+  });
+
+  it('emits zsh completion for codev with baked-in labels', () => {
+    const sh = generateAccountsSh(reg({ appPath: '/Applications/CodeV.app' }));
+    expect(sh).toContain('_codev() {');
+    expect(sh).toContain('compdef _codev codev');
+    expect(sh).toContain(
+      'compadd list add default remove rm regenerate show install uninstall help',
+    );
+    expect(sh).toContain('default) compadd personal work ;;');
+    // anchor (personal) is not removable
+    expect(sh).toContain('remove|rm) compadd work ;;');
+  });
+
+  it('uses the recorded appExec so a renamed .app bundle still works', () => {
+    const sh = generateAccountsSh(
+      reg({
+        appPath: '/Applications/MyCodeV.app',
+        appExec: '/Applications/MyCodeV.app/Contents/MacOS/CodeV',
+      }),
+    );
+    expect(sh).toContain(
+      'ELECTRON_RUN_AS_NODE=1 "/Applications/MyCodeV.app/Contents/MacOS/CodeV" "/Applications/MyCodeV.app/Contents/Resources/cli/codev-account.js" "$@"',
+    );
+  });
+
   it('rejects a shell-unsafe label (hand-edited registry)', () => {
     const bad = reg({
       defaultAccount: 'x',

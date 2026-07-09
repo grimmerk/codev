@@ -65,7 +65,11 @@ function printList(): void {
 }
 
 function main(): number {
-  const [cmd, ...rest] = process.argv.slice(2);
+  const argv = process.argv.slice(2);
+  // Installed form is `codev account <cmd>`; the dev form `yarn account <cmd>`
+  // passes <cmd> directly. Accept both.
+  if (argv[0] === 'account') argv.shift();
+  const [cmd, ...rest] = argv;
   switch (cmd) {
     case 'list':
     case 'ls':
