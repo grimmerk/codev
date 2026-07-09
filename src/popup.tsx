@@ -104,6 +104,7 @@ const PopupDefaultExample = ({
     loggedIn?: boolean;
   };
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [accountsShellInstalled, setAccountsShellInstalled] = useState(false);
   const [accountsError, setAccountsError] = useState('');
   const [accountsNotice, setAccountsNotice] = useState('');
@@ -115,6 +116,7 @@ const PopupDefaultExample = ({
       const r = await window.electronAPI.getAccounts();
       if (r.ok) {
         setAccounts((r.accounts as AccountRow[]) || []);
+        setAccountsLoaded(true);
         setAccountsShellInstalled(!!r.shellInstalled);
         setAccountsError('');
       } else {
@@ -775,7 +777,9 @@ const PopupDefaultExample = ({
               Claude Code (Anthropic) accounts — each launches claude with its
               own config dir
             </div>
-            {accounts.length === 0 && (
+            {/* Only after a successful load — avoids flashing while the IPC
+                call is in flight and contradicting an error message. */}
+            {accountsLoaded && !accountsError && accounts.length === 0 && (
               <div
                 style={{
                   padding: '4px 16px',

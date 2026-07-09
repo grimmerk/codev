@@ -640,20 +640,24 @@ ipcMain.handle('get-home-dir', () => {
  */
 const syncAccountsAppPath = () => {
   try {
-    // Skip MAS builds: they're sandboxed and ELECTRON_RUN_AS_NODE is not
-    // supported there, so a codev() launcher pointing at a MAS install could
-    // never run — don't record appPath / advertise it.
     if (
-      app.isPackaged &&
-      !isMAS() &&
-      require('fs').existsSync(accountManager.REGISTRY_PATH)
+      !app.isPackaged ||
+      !require('fs').existsSync(accountManager.REGISTRY_PATH)
     ) {
-      // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root.
-      // Record the exec path too — it survives .app renames.
-      const bundle = path.resolve(process.execPath, '..', '..', '..');
-      accountManager.setAppPath(bundle, process.execPath);
-      accountManager.regenerate();
+      return;
     }
+    // MAS builds are sandboxed and ELECTRON_RUN_AS_NODE is unsupported there,
+    // so the codev() launcher can never run. Clear any appPath left over from
+    // a previous direct-download install so it stops being advertised.
+    if (isMAS()) {
+      if (accountManager.clearAppPath()) accountManager.regenerate();
+      return;
+    }
+    // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root.
+    // Record the exec path too — it survives .app renames.
+    const bundle = path.resolve(process.execPath, '..', '..', '..');
+    accountManager.setAppPath(bundle, process.execPath);
+    accountManager.regenerate();
   } catch (e) {
     console.error('[accounts] accounts.sh app-path sync failed:', e);
   }

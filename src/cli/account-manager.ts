@@ -331,7 +331,7 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('    compadd account');
     L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
     L.push(
-      '    compadd list add default remove regenerate show install uninstall help',
+      '    compadd list add default remove rm regenerate show install uninstall help',
     );
     L.push('  elif (( CURRENT == 4 )) && [ "${words[2]}" = "account" ]; then');
     L.push('    case "${words[3]}" in');
@@ -362,6 +362,21 @@ export function setAppPath(appPath: string, appExec?: string): boolean {
   if (reg.appPath === appPath && reg.appExec === appExec) return false;
   reg.appPath = appPath;
   if (appExec) reg.appExec = appExec;
+  writeRegistry(reg);
+  return true;
+}
+
+/**
+ * Remove recorded app metadata. MAS builds call this so a stale appPath from
+ * a previous direct-download install can't keep advertising a codev()
+ * launcher that can't run under the MAS sandbox.
+ */
+export function clearAppPath(): boolean {
+  if (!fs.existsSync(REGISTRY_PATH)) return false;
+  const reg = readRegistry();
+  if (reg.appPath === undefined && reg.appExec === undefined) return false;
+  delete reg.appPath;
+  delete reg.appExec;
   writeRegistry(reg);
   return true;
 }
