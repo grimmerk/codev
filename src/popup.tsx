@@ -110,6 +110,12 @@ const PopupDefaultExample = ({
   const [accountsNotice, setAccountsNotice] = useState('');
   const [newAccountLabel, setNewAccountLabel] = useState('');
   const [accountsBusy, setAccountsBusy] = useState(false);
+  // Footer example uses a REAL account name (prefer a non-default one) so
+  // nobody reads "work" as a fixed keyword.
+  const exampleAccountLabel =
+    accounts.find((a) => !a.isCurrentDefault)?.label ||
+    accounts[0]?.label ||
+    'work';
 
   const refreshAccounts = async () => {
     try {
@@ -883,8 +889,9 @@ const PopupDefaultExample = ({
               </div>
             )}
             <div style={{ padding: '4px 16px', fontSize: '11px', color: THEME.text.secondary }}>
-              Registry: ~/.config/codev/accounts.json — e.g. claude work or
-              claude-work (two equivalent forms, both launch that account)
+              Registry: ~/.config/codev/accounts.json — launch any account
+              above by its name: claude {exampleAccountLabel} and claude-
+              {exampleAccountLabel} are equivalent
             </div>
           </div>
           )}
