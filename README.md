@@ -41,6 +41,52 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 | cmux | Title match → TTY fallback | CLI new-workspace | Same as iTerm2 (requires cmux v0.63+); requires socket access in cmux Settings (`automation` or `allowAll`) |
 | VS Code | URI handler (session-level) | `open -b` + URI handler | Requires Claude Code VS Code extension v2.1.72+; `[VSCODE]` badge on active sessions; adaptive resume via IDE lock file polling (~0.5s if project already open) |
 
+### Multi-Account Support (Claude Code)
+
+Run multiple Claude Code accounts (e.g. personal + work) on one machine. Each account gets its own config dir (via `CLAUDE_CONFIG_DIR`); the default account stays at `~/.claude` untouched. The Sessions tab aggregates sessions from every account (non-default ones get a purple account badge), and each session always resumes under the account it belongs to.
+
+**Setup** — Settings → Accounts:
+
+1. **Add** an account (e.g. `work`) — writes the registry (`~/.config/codev/accounts.json`) and generates `~/.config/codev/accounts.sh`
+2. **Install** Shell integration — appends one marker-guarded `source` line to `~/.zshrc` (zsh; the generated file is bash-sourceable manually, fish unsupported)
+3. Open a new shell and log in: `claude work`
+
+**Shell commands** (from the generated `accounts.sh`):
+
+| Command | What it does |
+|---------|--------------|
+| `claude` | Launches the **global default** account (configurable, see below) |
+| `claude <name> […]` | Launches that account, full passthrough (e.g. `claude work -r`) |
+| `claude-<name> […]` | Function form of the same (e.g. `claude-work mcp list`) |
+| `claude-whoami` | Which account bare `claude` resolves to here, plus its auth status |
+| `claude-accounts` | Quick list of configured accounts |
+
+Tab completion included (zsh): `claude <TAB>` completes account names; `codev account <TAB>` completes subcommands and labels.
+
+**`codev account` CLI** (the account manager — same generator the Settings UI uses):
+
+| Command | What it does |
+|---------|--------------|
+| `codev account list` (`ls`) | Accounts + identity; `*` marks the bare-`claude` default |
+| `codev account add <name> [--dir D]` | Register an account (default dir `~/.claude-<name>`) |
+| `codev account default <name>` | Point bare `claude` at an account |
+| `codev account remove <name>` (`rm`) | Unregister; keeps its folder on disk |
+| `codev account regenerate` (`regen`) | Rewrite `accounts.sh` from the registry |
+| `codev account show` (`preview`) | Dry-run print of the generated `accounts.sh` |
+| `codev account install` / `uninstall` | Add / remove the `~/.zshrc` source block |
+
+The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. CodeV refreshes `accounts.sh` on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
+
+**In the CodeV UI:**
+
+| Where | What |
+|-------|------|
+| Settings → Accounts | List/add/remove accounts, set the global default, install shell integration |
+| Sessions tab | Sessions from all accounts with account badges; resume uses each session's own account |
+| Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default) |
+
+**Gotcha:** inside a Claude Code session, `!claude auth status` reports the *global default* (the shell snapshot carries the dispatcher function), not the session's account — use `!command claude auth status` instead. Full design + details: [docs/multi-account-support-design.md](docs/multi-account-support-design.md).
+
 ### Embedded Terminal
 
 CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same technology as VS Code's integrated terminal). Press `⌃+⌘+T` from anywhere (global shortcut) or `⌘+3` when CodeV is in foreground to open it.
