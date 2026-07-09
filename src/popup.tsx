@@ -160,7 +160,9 @@ const PopupDefaultExample = ({
       if (r.ok) {
         setNewAccountLabel('');
         setAccountsNotice(
-          `Added "${label}". Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`,
+          accountsShellInstalled
+            ? `Added "${label}". Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`
+            : `Added "${label}". Install Shell integration below, open a new shell, then log in with: claude ${label}.`,
         );
         await refreshAccounts();
       } else {
@@ -766,6 +768,12 @@ const PopupDefaultExample = ({
             <div style={{ padding: '2px 16px 6px', fontSize: '11px', color: THEME.text.secondary }}>
               Claude Code (Anthropic) accounts — each launches claude with its own config dir
             </div>
+            {accounts.length === 0 && (
+              <div style={{ padding: '4px 16px', fontSize: '12px', color: THEME.text.secondary }}>
+                No accounts registered yet — your existing ~/.claude login stays
+                the default. Add a second account below to go multi-account.
+              </div>
+            )}
             {accounts.map((a) => (
               <div key={a.label} style={rowStyle}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>

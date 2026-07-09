@@ -630,6 +630,30 @@ ipcMain.handle('get-home-dir', () => {
 // --- codev multi-account management (Settings → Accounts, Batch 2b) ---
 // Thin IPC wrappers over the shared manager (src/cli/account-manager.ts),
 // the same module the `codev account` CLI uses — one generator, no drift.
+
+/**
+ * Record this app install's real location in the registry (for the codev()
+ * launcher) and refresh accounts.sh. No-op without a registry (single-account
+ * users) or in dev. Called at launch AND after account mutations — the latter
+ * covers the fresh-install case where the registry is first created by an
+ * "Add account" while the app is already running.
+ */
+const syncAccountsAppPath = () => {
+  try {
+    if (
+      app.isPackaged &&
+      require('fs').existsSync(accountManager.REGISTRY_PATH)
+    ) {
+      // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root.
+      // Record the exec path too — it survives .app renames.
+      const bundle = path.resolve(process.execPath, '..', '..', '..');
+      accountManager.setAppPath(bundle, process.execPath);
+      accountManager.regenerate();
+    }
+  } catch (e) {
+    console.error('[accounts] accounts.sh app-path sync failed:', e);
+  }
+};
 ipcMain.handle('accounts-get', () => {
   try {
     return {
@@ -657,6 +681,9 @@ ipcMain.handle('accounts-add', (_event, label: string) => {
         accountManager.resolveDefaultLabel(accountManager.readRegistry()) ===
         added.label,
     };
+    // First add creates the registry mid-run — record appPath now so the
+    // freshly generated accounts.sh already contains the codev() launcher.
+    syncAccountsAppPath();
     return { ok: true, account };
   } catch (error) {
     return { ok: false, error: (error as Error).message };
@@ -667,6 +694,7 @@ ipcMain.handle('accounts-remove', (_event, label: string) => {
   try {
     accountManager.removeAccount(label);
     invalidateAccountsCache();
+    syncAccountsAppPath();
     return { ok: true };
   } catch (error) {
     return { ok: false, error: (error as Error).message };
@@ -677,6 +705,7 @@ ipcMain.handle('accounts-set-default', (_event, label: string) => {
   try {
     accountManager.setDefault(label);
     invalidateAccountsCache();
+    syncAccountsAppPath();
     return { ok: true };
   } catch (error) {
     return { ok: false, error: (error as Error).message };
@@ -694,6 +723,7 @@ ipcMain.handle(
           error: `Unknown shell-hook action "${String(action)}"`,
         };
       }
+      if (action === 'install') syncAccountsAppPath();
       const result =
         action === 'install'
           ? accountManager.installShellHook()
@@ -1253,24 +1283,10 @@ const trayToggleEvtHandler = async () => {
   // Initialize session status hooks (install if enabled, start watching)
   initSessionStatusHooks();
 
-  // codev multi-account: keep accounts.sh in sync with this app install —
-  // record the real .app location (wherever the user put it, for the codev()
-  // CLI launcher) and refresh the generated file so generator updates and
-  // app moves self-heal. No-op for single-account users (no registry).
-  try {
-    if (
-      app.isPackaged &&
-      require('fs').existsSync(accountManager.REGISTRY_PATH)
-    ) {
-      // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root.
-      // Record the exec path too — it survives .app renames.
-      const bundle = path.resolve(process.execPath, '..', '..', '..');
-      accountManager.setAppPath(bundle, process.execPath);
-      accountManager.regenerate();
-    }
-  } catch (e) {
-    console.error('[accounts] accounts.sh launch sync failed:', e);
-  }
+  // codev multi-account: keep accounts.sh in sync with this app install
+  // (real .app location + latest generator template). Self-heals app
+  // moves/renames; no-op for single-account users.
+  syncAccountsAppPath();
 
   // Pre-spawn terminal for faster first Terminal tab switch
   setTimeout(() => {
