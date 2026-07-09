@@ -6,6 +6,7 @@
   - `codev account list|add|default|remove|regenerate|show|install|uninstall` works in the terminal: `accounts.sh` gains a `codev()` launcher that runs the CLI bundled inside CodeV.app via `ELECTRON_RUN_AS_NODE` (no system Node required)
   - CodeV records its real `.app` location on every launch and refreshes `accounts.sh` — moving the app self-heals, and generator updates propagate without manual `regenerate`
   - The CLI is compiled into the app at build time (`resources/cli` extraResource)
+  - zsh tab completion for `codev` (subcommands + account labels); MAS builds skip the `codev()` launcher (sandboxed + no `ELECTRON_RUN_AS_NODE`)
 
 ## 1.0.78
 

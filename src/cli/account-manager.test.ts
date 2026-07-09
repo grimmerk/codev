@@ -137,6 +137,18 @@ describe('generateAccountsSh', () => {
     expect(generateAccountsSh(reg())).not.toContain('codev()');
   });
 
+  it('emits zsh completion for codev with baked-in labels', () => {
+    const sh = generateAccountsSh(reg({ appPath: '/Applications/CodeV.app' }));
+    expect(sh).toContain('_codev() {');
+    expect(sh).toContain('compdef _codev codev');
+    expect(sh).toContain(
+      'compadd list add default remove regenerate show install uninstall help',
+    );
+    expect(sh).toContain('default) compadd personal work ;;');
+    // anchor (personal) is not removable
+    expect(sh).toContain('remove|rm) compadd work ;;');
+  });
+
   it('uses the recorded appExec so a renamed .app bundle still works', () => {
     const sh = generateAccountsSh(
       reg({

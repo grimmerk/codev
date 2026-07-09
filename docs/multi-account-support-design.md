@@ -333,7 +333,15 @@ syntax; the `env`-prefixed commands CodeV injects at resume do parse in fish ≥
 the dispatcher/whoami functions won't load there). Account-aware resume/launch covers
 every terminal CodeV supports (iTerm2, Terminal.app, Ghostty, cmux, embedded Term tab);
 VS Code sessions can't be account-switched (grimmerk/codev#121). rc-file shell
-detection remains future work.
+detection remains future work. accounts.sh also ships zsh tab completion for `codev`
+(subcommands + account labels, baked in and refreshed on regenerate; registration is
+guarded so the file stays bash-sourceable).
+
+**MAS builds:** the Mac App Store variant is sandboxed and `ELECTRON_RUN_AS_NODE` is
+unsupported there, so the bundled `codev` CLI can never run from a MAS install — CodeV
+skips recording `appPath` on MAS (no broken `codev()` is advertised). The wider
+`~/.claude`-reading feature set has the same sandbox constraint; academic today, since
+no MAS build with the Claude-sessions feature set has shipped.
 
 ### 6.D Add-account (login) bootstrap
 

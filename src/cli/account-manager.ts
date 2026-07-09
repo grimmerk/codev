@@ -315,6 +315,36 @@ export function generateAccountsSh(reg: Registry): string {
       `  ELECTRON_RUN_AS_NODE=1 "${exec}" "${appPath}/Contents/Resources/cli/codev-account.js" "$@"`,
     );
     L.push('}');
+    // Tab completion (zsh). Labels are baked in and refresh on regenerate,
+    // like everything else in this file. The function body is only PARSED by
+    // bash (never registered/executed there), so the file stays
+    // bash-sourceable; registration is guarded for zsh + a loaded compinit.
+    const allLabels = accounts.map((a) => a.label).join(' ');
+    const removable = accounts
+      .filter((a) => !a.isDefault)
+      .map((a) => a.label)
+      .join(' ');
+    L.push('');
+    L.push('# Tab completion for codev (zsh; needs compinit loaded).');
+    L.push('_codev() {');
+    L.push('  if (( CURRENT == 2 )); then');
+    L.push('    compadd account');
+    L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
+    L.push(
+      '    compadd list add default remove regenerate show install uninstall help',
+    );
+    L.push('  elif (( CURRENT == 4 )) && [ "${words[2]}" = "account" ]; then');
+    L.push('    case "${words[3]}" in');
+    if (allLabels) L.push(`      default) compadd ${allLabels} ;;`);
+    if (removable) L.push(`      remove|rm) compadd ${removable} ;;`);
+    L.push('    esac');
+    L.push('  fi');
+    L.push('}');
+    L.push(
+      'if [ -n "${ZSH_VERSION:-}" ] && (( ${+functions[compdef]} )); then',
+    );
+    L.push('  compdef _codev codev');
+    L.push('fi');
   }
   L.push('');
   return L.join('\n');
