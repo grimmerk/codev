@@ -75,6 +75,8 @@ Tab completion included (zsh): `claude <TAB>` completes account names; `codev ac
 | `codev account show` (`preview`) | Dry-run print of the generated `accounts.sh` |
 | `codev account install` / `uninstall` | Add / remove the `~/.zshrc` source block |
 
+> **Remove is non-destructive.** It only unregisters: the account's folder (`~/.claude-<name>`), login, and session history all stay on disk. `codev account add <name>` (or the UI) later reattaches everything — identity and sessions reappear immediately, no re-login needed.
+
 The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. CodeV refreshes `accounts.sh` on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
 
 **In the CodeV UI:**

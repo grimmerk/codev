@@ -181,7 +181,9 @@ const PopupDefaultExample = ({
     runAccountOp(async () => {
       const r = await window.electronAPI.removeAccount(label);
       if (r.ok) {
-        setAccountsNotice(`Removed "${label}" (its folder stays on disk).`);
+        setAccountsNotice(
+        `Removed "${label}" — its folder, login and sessions stay on disk; add "${label}" back anytime to reattach them.`,
+      );
         await refreshAccounts();
       } else {
         setAccountsNotice('');
@@ -829,7 +831,7 @@ const PopupDefaultExample = ({
                       style={{ ...smallButtonStyle, color: THEME.button.warning }}
                       onClick={() => handleRemoveAccount(a.label)}
                       disabled={accountsBusy}
-                      title="Unregister (keeps its folder on disk)"
+                      title="Unregister only — folder, login & sessions stay on disk; re-add the same name to reattach"
                     >
                       Remove
                     </button>
