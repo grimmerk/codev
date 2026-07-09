@@ -433,8 +433,10 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
 - **Batch 2 — in progress (order 2a→2e):**
   - *2a — ✅ Done* (branch `feat/codev-account-cli`): `codev account` CLI generates the
     registry + `accounts.sh` from one shared generator (§6.A/B); Vitest + CI added.
-  - *2b:* manage-accounts Settings tab — list/add/rename/remove + shell-integration
-    toggle (§6.D), plus a real `codev` binary on PATH.
+  - *2b (UI ✅, branch `feat/accounts-settings-ui`):* Accounts tab in Settings —
+    list/add/remove + set-default + shell-integration toggle (§6.D), as IPC wrappers
+    over the shared manager (one generator with the CLI). Rename deferred (labels name
+    dirs; remove+add covers it). Remaining 2b item: a real `codev` binary on PATH.
   - *2c:* account picker / per-launch override (§6.G, 4.2).
   - *2d:* pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
   - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it

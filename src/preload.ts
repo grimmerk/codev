@@ -5,6 +5,14 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getHomeDir: () => ipcRenderer.invoke('get-home-dir'),
+  // codev multi-account (Settings → Accounts)
+  getAccounts: () => ipcRenderer.invoke('accounts-get'),
+  addAccount: (label: string) => ipcRenderer.invoke('accounts-add', label),
+  removeAccount: (label: string) => ipcRenderer.invoke('accounts-remove', label),
+  setDefaultAccount: (label: string) =>
+    ipcRenderer.invoke('accounts-set-default', label),
+  setAccountsShellHook: (action: 'install' | 'uninstall') =>
+    ipcRenderer.invoke('accounts-shell-hook', action),
   getBannerSeen: () => ipcRenderer.invoke('get-banner-seen'),
   setBannerSeen: () => ipcRenderer.send('set-banner-seen'),
   invokeVSCode: (path: string, option: string) =>

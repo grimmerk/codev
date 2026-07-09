@@ -41,6 +41,17 @@ const labelStyle: React.CSSProperties = {
   color: THEME.text.primary,
 };
 
+const smallButtonStyle: React.CSSProperties = {
+  backgroundColor: '#333',
+  color: THEME.text.primary,
+  border: '1px solid #555',
+  borderRadius: '4px',
+  padding: '3px 10px',
+  fontSize: '12px',
+  cursor: 'pointer',
+  outline: 'none',
+};
+
 const PopupDefaultExample = ({
   workingFolderPath,
   saveCallback,
@@ -53,7 +64,7 @@ const PopupDefaultExample = ({
   saveCallback?: (key: string, value: string) => void;
   openCallback?: any;
   switcherMode?: string;
-  openToTab?: 'general' | 'sessions' | 'shortcuts' | null;
+  openToTab?: 'general' | 'sessions' | 'accounts' | 'shortcuts' | null;
   onOpenToTabConsumed?: () => void;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -69,7 +80,7 @@ const PopupDefaultExample = ({
   const [isMASBuild, setIsMASBuild] = useState(false);
   const [sessionStatusHooks, setSessionStatusHooks] = useState(true);
   const [appModeState, setAppModeState] = useState('normal');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'sessions' | 'shortcuts'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'sessions' | 'accounts' | 'shortcuts'>('general');
   const [ideDataAccessGranted, setIdeDataAccessGranted] = useState(false);
   const [shortcuts, setShortcuts] = useState({
     quickSwitcher: 'Command+Control+R',
@@ -82,6 +93,133 @@ const PopupDefaultExample = ({
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'downloading' | 'ready' | 'up-to-date' | 'error'>('idle');
   const [updateReleaseName, setUpdateReleaseName] = useState('');
   const [updateTimer, setUpdateTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+
+  // --- Accounts tab (codev multi-account, Batch 2b) ---
+  type AccountRow = {
+    label: string;
+    dir: string;
+    isDefault: boolean;
+    isCurrentDefault: boolean;
+    email?: string;
+    loggedIn?: boolean;
+  };
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [accountsShellInstalled, setAccountsShellInstalled] = useState(false);
+  const [accountsError, setAccountsError] = useState('');
+  const [accountsNotice, setAccountsNotice] = useState('');
+  const [newAccountLabel, setNewAccountLabel] = useState('');
+  const [accountsBusy, setAccountsBusy] = useState(false);
+
+  const refreshAccounts = async () => {
+    try {
+      const r = await window.electronAPI.getAccounts();
+      if (r.ok) {
+        setAccounts((r.accounts as AccountRow[]) || []);
+        setAccountsShellInstalled(!!r.shellInstalled);
+        setAccountsError('');
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to load accounts');
+      }
+    } catch (e) {
+      setAccountsNotice('');
+      setAccountsError((e as Error).message || 'Failed to load accounts');
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && settingsTab === 'accounts') {
+      // Fresh view: drop any stale notice/error from a previous visit.
+      setAccountsError('');
+      setAccountsNotice('');
+      refreshAccounts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, settingsTab]);
+
+  /** Serialize account mutations: busy-guard + shared error handling. */
+  const runAccountOp = async (op: () => Promise<void>) => {
+    if (accountsBusy) return;
+    setAccountsBusy(true);
+    setAccountsError('');
+    try {
+      await op();
+    } catch (e) {
+      setAccountsNotice('');
+      setAccountsError((e as Error).message || 'Account operation failed');
+    } finally {
+      setAccountsBusy(false);
+    }
+  };
+
+  const handleAddAccount = () => {
+    const label = newAccountLabel.trim();
+    if (!label) return;
+    runAccountOp(async () => {
+      const r = await window.electronAPI.addAccount(label);
+      if (r.ok) {
+        setNewAccountLabel('');
+        setAccountsNotice(
+          `Added "${label}". Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`,
+        );
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to add account');
+      }
+    });
+  };
+
+  const handleRemoveAccount = (label: string) => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.removeAccount(label);
+      if (r.ok) {
+        setAccountsNotice(`Removed "${label}" (its folder stays on disk).`);
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to remove account');
+      }
+    });
+  };
+
+  const handleSetDefaultAccount = (label: string) => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.setDefaultAccount(label);
+      if (r.ok) {
+        // Without the ~/.zshrc shell integration, the saved default isn't
+        // live in shells yet — say so instead of overpromising.
+        setAccountsNotice(
+          accountsShellInstalled
+            ? `Bare claude now resolves to "${label}" — open a new shell (or source ~/.zshrc).`
+            : `Default saved as "${label}" — install Shell integration below so bare claude uses it.`,
+        );
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to set default');
+      }
+    });
+  };
+
+  const handleAccountsShellToggle = () => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.setAccountsShellHook(
+        accountsShellInstalled ? 'uninstall' : 'install',
+      );
+      if (r.ok) {
+        setAccountsNotice(
+          accountsShellInstalled
+            ? 'Removed the CodeV block from ~/.zshrc (registry and account folders kept).'
+            : 'Added the source block to ~/.zshrc — open a new shell to use claude <label>.',
+        );
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to update ~/.zshrc');
+      }
+    });
+  };
 
   useEffect(() => {
     window.electronAPI.getAppVersion().then((version: string) => {
@@ -337,7 +475,7 @@ const PopupDefaultExample = ({
 
           {/* Settings tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid #333', padding: '0 16px' }}>
-            {(['general', 'sessions', 'shortcuts'] as const).map((tab) => (
+            {(['general', 'sessions', 'accounts', 'shortcuts'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => {
@@ -618,6 +756,101 @@ const PopupDefaultExample = ({
                   }}
                 />
               </label>
+            </div>
+          </div>
+          )}
+
+          {/* Accounts tab */}
+          {settingsTab === 'accounts' && (
+          <div style={{ padding: '4px 0' }}>
+            {accounts.map((a) => (
+              <div key={a.label} style={rowStyle}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={labelStyle}>
+                    {a.label}
+                    {a.isCurrentDefault && (
+                      <span style={{ color: THEME.primary, fontSize: '11px', marginLeft: '6px' }}>
+                        default
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ fontSize: '11px', color: THEME.text.secondary }}>
+                    {a.loggedIn
+                      ? `${a.email || 'logged in'} — launch: ${
+                          a.isCurrentDefault ? 'claude' : `claude ${a.label}`
+                        }`
+                      : `not logged in — log in & launch: claude ${a.label}`}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {!a.isCurrentDefault && (
+                    <button
+                      style={smallButtonStyle}
+                      onClick={() => handleSetDefaultAccount(a.label)}
+                      disabled={accountsBusy}
+                      title="Make bare `claude` resolve to this account"
+                    >
+                      Set default
+                    </button>
+                  )}
+                  {!a.isDefault && (
+                    <button
+                      style={{ ...smallButtonStyle, color: THEME.button.warning }}
+                      onClick={() => handleRemoveAccount(a.label)}
+                      disabled={accountsBusy}
+                      title="Unregister (keeps its folder on disk)"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <div style={rowStyle}>
+              <input
+                value={newAccountLabel}
+                onChange={(e) => setNewAccountLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddAccount();
+                }}
+                placeholder="account name (e.g. work)"
+                style={{ ...selectStyle, cursor: 'text', width: '170px' }}
+              />
+              <button
+                style={smallButtonStyle}
+                onClick={handleAddAccount}
+                disabled={accountsBusy}
+              >
+                Add account
+              </button>
+            </div>
+
+            <div style={rowStyle}>
+              <span style={labelStyle}>Shell integration (~/.zshrc)</span>
+              <button
+                style={smallButtonStyle}
+                onClick={handleAccountsShellToggle}
+                disabled={accountsBusy}
+              >
+                {accountsShellInstalled ? 'Uninstall' : 'Install'}
+              </button>
+            </div>
+
+            {(accountsError || accountsNotice) && (
+              <div
+                style={{
+                  padding: '4px 16px',
+                  fontSize: '11px',
+                  color: accountsError ? THEME.button.warning : THEME.text.folder,
+                }}
+              >
+                {accountsError || accountsNotice}
+              </div>
+            )}
+            <div style={{ padding: '4px 16px', fontSize: '11px', color: THEME.text.secondary }}>
+              Registry: ~/.config/codev/accounts.json — each account also has a
+              function form, e.g. claude-work
             </div>
           </div>
           )}
