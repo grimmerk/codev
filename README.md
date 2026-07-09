@@ -90,6 +90,8 @@ Tab completion included (zsh): `claude <TAB>` completes account names; `codev ac
 | Already running a second account by hand (own shell function + custom folder) | Register it with `codev account add <name> --dir <your-folder>` — **any folder works**; `~/.claude-<name>` is only the default. Identity and sessions attach immediately, no re-login. If your hand-rolled wrapper was named `claude`, retire it (it would fight the generated dispatcher). |
 | Renaming any account (default or not) | `codev account rename <old> <new>` — changes only the name side of the *name → folder* mapping; folders never move, so name ≠ folder suffix is fine. |
 
+> Not yet supported (tracked in [#127](https://github.com/grimmerk/codev/issues/127)): auto-detecting existing config folders for one-click registration, a UI flow for naming your existing default account, and a warning when `accounts.sh` overrides a hand-rolled `claude()` shell function.
+
 The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. CodeV refreshes `accounts.sh` on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
 
 **In the CodeV UI:**
