@@ -765,11 +765,24 @@ const PopupDefaultExample = ({
           {/* Accounts tab */}
           {settingsTab === 'accounts' && (
           <div style={{ padding: '4px 0' }}>
-            <div style={{ padding: '2px 16px 6px', fontSize: '11px', color: THEME.text.secondary }}>
-              Claude Code (Anthropic) accounts — each launches claude with its own config dir
+            <div
+              style={{
+                padding: '2px 16px 6px',
+                fontSize: '11px',
+                color: THEME.text.secondary,
+              }}
+            >
+              Claude Code (Anthropic) accounts — each launches claude with its
+              own config dir
             </div>
             {accounts.length === 0 && (
-              <div style={{ padding: '4px 16px', fontSize: '12px', color: THEME.text.secondary }}>
+              <div
+                style={{
+                  padding: '4px 16px',
+                  fontSize: '12px',
+                  color: THEME.text.secondary,
+                }}
+              >
                 No accounts registered yet — your existing ~/.claude login stays
                 the default. Add a second account below to go multi-account.
               </div>
