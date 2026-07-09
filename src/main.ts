@@ -650,7 +650,11 @@ const syncAccountsAppPath = () => {
     // so the codev() launcher can never run. Clear any appPath left over from
     // a previous direct-download install so it stops being advertised.
     if (isMAS()) {
-      if (accountManager.clearAppPath()) accountManager.regenerate();
+      // Unconditional regenerate (like the non-MAS branch): even when the
+      // registry is already clean, accounts.sh itself may still be stale
+      // (e.g. a prior clear succeeded but its regenerate failed).
+      accountManager.clearAppPath();
+      accountManager.regenerate();
       return;
     }
     // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root.
