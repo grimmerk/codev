@@ -640,8 +640,12 @@ ipcMain.handle('get-home-dir', () => {
  */
 const syncAccountsAppPath = () => {
   try {
+    // Skip MAS builds: they're sandboxed and ELECTRON_RUN_AS_NODE is not
+    // supported there, so a codev() launcher pointing at a MAS install could
+    // never run — don't record appPath / advertise it.
     if (
       app.isPackaged &&
+      !isMAS() &&
       require('fs').existsSync(accountManager.REGISTRY_PATH)
     ) {
       // process.execPath = …/CodeV.app/Contents/MacOS/CodeV → bundle root.
