@@ -325,6 +325,16 @@ detected rc, with **(c)** as manual fallback. Mirrors the existing Session-Statu
 toggle (write file with `0o755`, register a reference, idempotent, removable). Detect
 shell; warn if not zsh/bash.
 
+**Supported environments (current implementation, Batch 2a/2b):** the Install button /
+`codev account install` writes only `~/.zshrc` → **zsh** is the supported shell (the
+macOS default). The generated `accounts.sh` is bash-compatible — bash users can
+`source` it manually from `.bashrc` — while **fish is unsupported** (different function
+syntax; the `env`-prefixed commands CodeV injects at resume do parse in fish ≥3.1, but
+the dispatcher/whoami functions won't load there). Account-aware resume/launch covers
+every terminal CodeV supports (iTerm2, Terminal.app, Ghostty, cmux, embedded Term tab);
+VS Code sessions can't be account-switched (grimmerk/codev#121). rc-file shell
+detection remains future work.
+
 ### 6.D Add-account (login) bootstrap
 
 OAuth is interactive (browser) — CodeV cannot automate it, only orchestrate it.
