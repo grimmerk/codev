@@ -136,16 +136,19 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
  * (so the migration completes on the next write). Pure, for testability.
  */
 export function normalizeRegistry(raw: unknown): Registry {
-  const reg = (raw && typeof raw === 'object' ? raw : {}) as Registry;
-  if (!reg.version) reg.version = 1;
-  if (!Array.isArray(reg.accounts)) reg.accounts = [];
-  reg.accounts = reg.accounts.map(
+  const src = (raw && typeof raw === 'object' ? raw : {}) as Registry;
+  const accounts = (Array.isArray(src.accounts) ? src.accounts : []).map(
     (a: RegistryAccount & { isDefault?: boolean }) => {
       const { isDefault, ...rest } = a;
-      return { ...rest, isAnchor: a.isAnchor ?? isDefault ?? false };
+      return {
+        ...rest,
+        // When both flags are absent (partial hand-written entry), the dir is
+        // the ground truth: ~/.claude IS the anchor by definition.
+        isAnchor: a.isAnchor ?? isDefault ?? isAnchorDir(String(a.dir || '')),
+      };
     },
   );
-  return reg;
+  return { ...src, version: src.version || 1, accounts };
 }
 
 export function readRegistry(): Registry {

@@ -207,8 +207,8 @@ describe('generateAccountsSh', () => {
 });
 
 describe('normalizeRegistry', () => {
-  it('migrates the legacy isDefault field to isAnchor', () => {
-    const norm = normalizeRegistry({
+  it('migrates the legacy isDefault field to isAnchor (purely)', () => {
+    const input = {
       version: 1,
       defaultAccount: 'work',
       accounts: [
@@ -227,17 +227,43 @@ describe('normalizeRegistry', () => {
           isDefault: false, // legacy name
         },
       ],
-    });
+    };
+    const snapshot = JSON.stringify(input);
+    const norm = normalizeRegistry(input);
     expect(norm.accounts[0].isAnchor).toBe(true);
     expect(norm.accounts[1].isAnchor).toBe(false);
     // legacy key dropped so the migration completes on the next write
     expect('isDefault' in norm.accounts[0]).toBe(false);
+    // pure: the input object is untouched
+    expect(JSON.stringify(input)).toBe(snapshot);
     // and a legacy registry still generates a correct accounts.sh
     const sh = generateAccountsSh(norm);
     expect(sh).toContain(
       'claude-personal() { env -u CLAUDE_CONFIG_DIR claude "$@"; }',
     );
     expect(resolveDefaultLabel(norm)).toBe('work');
+  });
+
+  it('infers isAnchor from the dir when both flags are absent', () => {
+    const norm = normalizeRegistry({
+      version: 1,
+      accounts: [
+        {
+          label: 'x',
+          dir: path.join(HOME, '.claude'),
+          identityFile: path.join(HOME, '.claude.json'),
+          configDirEnv: null,
+        },
+        {
+          label: 'y',
+          dir: path.join(HOME, '.claude-y'),
+          identityFile: path.join(HOME, '.claude-y', '.claude.json'),
+          configDirEnv: path.join(HOME, '.claude-y'),
+        },
+      ],
+    });
+    expect(norm.accounts[0].isAnchor).toBe(true); // ~/.claude IS the anchor
+    expect(norm.accounts[1].isAnchor).toBe(false);
   });
 });
 

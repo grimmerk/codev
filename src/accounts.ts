@@ -105,12 +105,14 @@ export const getAccounts = (): CodevAccount[] => {
           String(a.dir || path.join(os.homedir(), '.claude')),
         );
         // isAnchor with legacy fallback: old registries wrote `isDefault`;
-        // if both are omitted, infer from the top-level defaultAccount label
-        // (tolerating partial hand-written entries).
+        // if both are omitted (partial hand-written entry), infer from the
+        // dir itself — ~/.claude IS the anchor by definition. Never infer
+        // from defaultAccount: that's the dispatcher target, a different
+        // concept (and would misroute once the default is a non-anchor).
         const isAnchor =
           a.isAnchor ??
           a.isDefault ??
-          (!!raw.defaultAccount && a.label === raw.defaultAccount);
+          path.resolve(dir) === path.join(os.homedir(), '.claude');
         const configDirEnv =
           a.configDirEnv === null || a.configDirEnv === undefined
             ? isAnchor
