@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.80
+
+- Feat: multi-account Batch 2c-lite — pick the account when launching a new session
+  - `⌥⌘+Enter` on a project opens a small account picker (↑↓ / Enter / Esc, or click) — external terminals (iTerm2/Terminal.app/Ghostty/cmux); a non-default pick launches via explicit `CLAUDE_CONFIG_DIR` + `command claude`, a default-account pick via `env -u CLAUDE_CONFIG_DIR claude`
+  - Plain `⌘+Enter` unchanged: opens instantly under the global default; single-account (or registry-less) setups never see the picker
+  - Search-bar hint shows `⌥⌘+Enter: pick account` only for multi-account setups, and updates live after account changes (no app restart)
+  - Tab completion for `claude <name>`: `claude <TAB>` completes account names (polite: skipped if another completion owns `claude`; other positions keep file completion)
+  - Removed the stray `|` (react-select's default separator) before the search-bar hint
+  - Accounts UI: per-row **Rename**; the first-ever add asks what to name your existing `~/.claude` login (defaults to `main`) instead of assuming `personal`; `default` is now a reserved account name
+  - `codev account rename <old> <new>` (CLI) — labels are renameable; folders never move (credentials are keyed by the folder path)
+  - README gains a Multi-Account section (shell commands, `codev account` CLI, UI map)
+  - Roadmap: 2d (folder→account auto-switch) dropped — one folder legitimately hosts sessions from multiple accounts; cross-account *resume* stays deferred to Batch 3 (copy-fork design)
+
 ## 1.0.79
 
 - Feat: multi-account Batch 2b (part 2) — `codev` command in your shell

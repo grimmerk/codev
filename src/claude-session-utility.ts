@@ -8,7 +8,11 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
-import { getScannableAccounts, getProjectsDir } from './accounts';
+import {
+  getScannableAccounts,
+  getProjectsDir,
+  getAccountByLabel,
+} from './accounts';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -1389,6 +1393,7 @@ export const launchNewClaudeSession = (
   projectPath: string,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
+  accountLabel?: string,
 ): void => {
   if (terminalApp === 'vscode') {
     const { execFile } = require('child_process');
@@ -1411,12 +1416,45 @@ export const launchNewClaudeSession = (
     return;
   }
   if (terminalApp === 'codev') {
+    // Embedded terminal spawns the user's shell; the account override isn't
+    // threaded through it yet (the 2c-lite picker targets external terminals).
+    if (accountLabel) {
+      console.log(
+        '[launchNewClaudeSession] account override ignored for codev terminal:',
+        accountLabel,
+      );
+    }
     if (launchInCodevTerminalCallback) {
       launchInCodevTerminalCallback(projectPath);
     }
     return;
   }
-  runCommandInTerminal(`cd "${projectPath}" && claude`, 'claude', projectPath, terminalApp, terminalMode);
+  // No accountLabel: bare `claude` → the accounts.sh dispatcher → the user's
+  // global default (2e). With an explicit account (2c-lite picker): bypass the
+  // dispatcher via `command claude` + explicit env, like buildResumeCommand.
+  let claudeCmd = 'claude';
+  if (accountLabel) {
+    const account = getAccountByLabel(accountLabel);
+    if (account?.label !== accountLabel) {
+      // Stale/unknown label (e.g. the account was removed after the picker
+      // loaded) — getAccountByLabel falls back to the default account, so
+      // abort instead of silently launching a different identity.
+      console.error(
+        '[launchNewClaudeSession] unknown account label, aborting:',
+        accountLabel,
+      );
+      return;
+    }
+    // Explicit pick of the default account: clear any inherited
+    // CLAUDE_CONFIG_DIR too (matches the generated accounts.sh launchers).
+    claudeCmd = account.configDirEnv
+      ? `CLAUDE_CONFIG_DIR='${account.configDirEnv.replace(/'/g, "'\\''")}' command claude`
+      : 'env -u CLAUDE_CONFIG_DIR claude';
+  }
+  // Pass claudeCmd as the 2nd arg too — Ghostty/cmux build their launch
+  // scripts from it (iTerm2/Terminal.app use fullCommand), so the account
+  // env prefix must be present in both.
+  runCommandInTerminal(`cd "${projectPath}" && ${claudeCmd}`, claudeCmd, projectPath, terminalApp, terminalMode);
 };
 
 /**

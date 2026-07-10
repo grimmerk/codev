@@ -269,7 +269,51 @@ const formatRelativeTime = (timestamp: string): string => {
 let loadTimes = 0;
 function SwitcherApp() {
   const optionPress = useRef(false);
-  const launchClaudeRef = useRef<'external' | 'codev' | null>(null);
+  const launchClaudeRef = useRef<'external' | 'codev' | 'external-pick' | null>(null);
+
+  // 2c-lite: ⌥⌘+Enter — pick the account for a new-session launch.
+  type LaunchAccount = {
+    label: string;
+    email?: string;
+    loggedIn?: boolean;
+    isCurrentDefault: boolean;
+  };
+  const [launchPicker, setLaunchPicker] = useState<{
+    path: string;
+    accounts: LaunchAccount[];
+  } | null>(null);
+  const [launchPickerIndex, setLaunchPickerIndex] = useState(0);
+  // Multi-account? → advertise ⌥⌘+Enter in the search-bar hint (single-account
+  // users see the unchanged short hint — no extra clutter).
+  const [isMultiAccountUI, setIsMultiAccountUI] = useState(false);
+
+  const openAccountPickerForLaunch = async (projectPath: string) => {
+    try {
+      const r = await window.electronAPI.getAccounts();
+      if (!r.ok) {
+        // The user explicitly asked to pick — don't guess an identity when
+        // the account list can't be loaded.
+        console.error('[account-picker] failed to load accounts:', r.error);
+        return;
+      }
+      const accounts = (r.accounts || []) as LaunchAccount[];
+      if (accounts.length <= 1) {
+        // Single account (or no registry): nothing to pick — launch as usual.
+        window.electronAPI.launchNewClaudeSession(projectPath);
+        return;
+      }
+      setLaunchPickerIndex(0);
+      setLaunchPicker({ path: projectPath, accounts });
+    } catch (e) {
+      console.error('[account-picker] failed to load accounts:', e);
+    }
+  };
+
+  const pickLaunchAccount = (account: LaunchAccount) => {
+    if (!launchPicker) return;
+    window.electronAPI.launchNewClaudeSession(launchPicker.path, account.label);
+    setLaunchPicker(null);
+  };
 
   const ref = useRef(null);
   const sessionSearchRef = useRef<HTMLInputElement>(null);
@@ -558,6 +602,22 @@ function SwitcherApp() {
       modeRef.current = 'terminal';
       setMode('terminal');
     });
+
+    // Account count decides whether the ⌥⌘+Enter picker hint is shown.
+    // Re-checked when the embedded Settings popup mutates accounts (same-window
+    // CustomEvent) and on window focus (covers CLI-side changes) — no restart
+    // needed for the hint to switch.
+    const refreshMultiAccountHint = () => {
+      window.electronAPI
+        .getAccounts()
+        .then((r) => {
+          if (r.ok) setIsMultiAccountUI(((r.accounts || []) as unknown[]).length > 1);
+        })
+        .catch(() => {});
+    };
+    refreshMultiAccountHint();
+    window.addEventListener('codev-accounts-changed', refreshMultiAccountHint);
+    window.addEventListener('focus', refreshMultiAccountHint);
 
     // If initial mode is sessions (from URL hash), fetch sessions immediately
     if (initialMode === 'sessions') {
@@ -1496,7 +1556,13 @@ function SwitcherApp() {
           // Clear on every keypress to prevent stale ref if onChange didn't fire
           launchClaudeRef.current = null;
           if (evt.key === 'Enter' && (evt.metaKey || evt.shiftKey)) {
-            launchClaudeRef.current = evt.shiftKey ? 'codev' : 'external';
+            // ⌥⌘+Enter: choose the account first (multi-account, 2c-lite)
+            launchClaudeRef.current =
+              evt.metaKey && evt.altKey
+                ? 'external-pick'
+                : evt.shiftKey
+                  ? 'codev'
+                  : 'external';
           }
         }}
         onInputChange={(evt) => {
@@ -1507,6 +1573,8 @@ function SwitcherApp() {
           launchClaudeRef.current = null;
           if (launchMode === 'codev') {
             window.electronAPI.launchNewClaudeSessionInCodev(evt.value);
+          } else if (launchMode === 'external-pick') {
+            openAccountPickerForLaunch(evt.value);
           } else if (launchMode === 'external') {
             window.electronAPI.launchNewClaudeSession(evt.value);
           } else {
@@ -1519,9 +1587,17 @@ function SwitcherApp() {
         }}
         // Custom components
         components={{
+          // Hide react-select's default vertical separator ("|" that looks
+          // like a stray cursor before the hint text).
+          IndicatorSeparator: () => null,
           DropdownIndicator: () => (
-            <div style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}>
-              {'\u2318+Enter: New Claude'}
+            <div
+              title="\u2325\u2318+Enter: choose the account first"
+              style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}
+            >
+              {isMultiAccountUI
+                ? '\u2318+Enter: New Claude \u00b7 \u2325\u2318+Enter: pick account'
+                : '\u2318+Enter: New Claude'}
             </div>
           ),
           Option: (props) => OptionUI(props, onDeleteClick, (path: string) => {
@@ -1679,6 +1755,86 @@ function SwitcherApp() {
           }),
         }}
       />
+      {launchPicker && (
+        <div
+          data-settings-panel
+          onClick={() => setLaunchPicker(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.45)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Escape') {
+                setLaunchPicker(null);
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setLaunchPickerIndex((i) => (i + 1) % launchPicker.accounts.length);
+              } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setLaunchPickerIndex(
+                  (i) => (i - 1 + launchPicker.accounts.length) % launchPicker.accounts.length,
+                );
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                pickLaunchAccount(launchPicker.accounts[launchPickerIndex]);
+              }
+            }}
+            tabIndex={0}
+            ref={(el) => el?.focus()}
+            style={{
+              marginTop: '120px',
+              minWidth: '320px',
+              background: '#252526',
+              border: '1px solid #454545',
+              borderRadius: '8px',
+              padding: '8px',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+              outline: 'none',
+            }}
+          >
+            <div style={{ fontSize: '11px', color: '#888', padding: '2px 8px 6px' }}>
+              New Claude in {launchPicker.path.split('/').pop()} as… (↑↓ · Enter · Esc)
+            </div>
+            {launchPicker.accounts.map((a, i) => (
+              <div
+                key={a.label}
+                onClick={() => pickLaunchAccount(a)}
+                onMouseEnter={() => setLaunchPickerIndex(i)}
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  backgroundColor: i === launchPickerIndex ? '#094771' : 'transparent',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                }}
+              >
+                <span style={{ color: '#e9e9e9', fontSize: '13px' }}>
+                  {a.label}
+                  {a.isCurrentDefault && (
+                    <span style={{ color: '#00BCD4', fontSize: '10px', marginLeft: '6px' }}>
+                      default
+                    </span>
+                  )}
+                </span>
+                <span style={{ color: '#888', fontSize: '11px' }}>
+                  {a.loggedIn ? a.email || '' : 'not logged in'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       </div>
       ))}
     </div>

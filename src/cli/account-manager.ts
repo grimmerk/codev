@@ -54,6 +54,11 @@ const ZSHRC_END = '# <<< codev accounts <<<';
 // Labels become shell function names + case branches, so keep them safe.
 const LABEL_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
+// 'default' is reserved: it already names the dispatcher's global-default
+// concept (the `default` badge, `codev account default`) — an account with
+// that name would be permanently confusing.
+const RESERVED_LABELS = new Set(['default']);
+
 export const expandHome = (p: string): string =>
   typeof p === 'string' && p.startsWith('~')
     ? path.join(os.homedir(), p.slice(1))
@@ -331,11 +336,11 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('    compadd account');
     L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
     L.push(
-      '    compadd list add default remove rm regenerate show install uninstall help',
+      '    compadd list add default remove rm rename regenerate show install uninstall help',
     );
     L.push('  elif (( CURRENT == 4 )) && [ "${words[2]}" = "account" ]; then');
     L.push('    case "${words[3]}" in');
-    if (allLabels) L.push(`      default) compadd ${allLabels} ;;`);
+    if (allLabels) L.push(`      default|rename) compadd ${allLabels} ;;`);
     if (removable) L.push(`      remove|rm) compadd ${removable} ;;`);
     L.push('    esac');
     L.push('  fi');
@@ -344,6 +349,30 @@ export function generateAccountsSh(reg: Registry): string {
       'if [ -n "${ZSH_VERSION:-}" ] && (( ${+functions[compdef]} )); then',
     );
     L.push('  compdef _codev codev');
+    L.push('fi');
+  }
+  // Account-label completion for the `claude <label>` dispatcher. Registered
+  // only when nothing else completes `claude` (checked via _comps), so an
+  // official Claude Code completion — if one ever ships — wins automatically.
+  // Independent of appPath — the dispatcher exists whenever accounts do.
+  const allLabelsForClaude = accounts.map((a) => a.label).join(' ');
+  if (allLabelsForClaude) {
+    L.push('');
+    L.push('# Complete account names for `claude <TAB>` (labels only; native');
+    L.push('# claude flags/subcommands still work — just not suggested).');
+    L.push('_claude_codev_accounts() {');
+    L.push('  if (( CURRENT == 2 )); then');
+    L.push('    # no label matches the typed prefix -> fall back to files');
+    L.push(`    compadd ${allLabelsForClaude} || _files`);
+    L.push('  else');
+    L.push('    # keep the default file completion for every other position');
+    L.push('    _files');
+    L.push('  fi');
+    L.push('}');
+    L.push(
+      'if [ -n "${ZSH_VERSION:-}" ] && (( ${+functions[compdef]} )) && [ -z "${_comps[claude]:-}" ]; then',
+    );
+    L.push('  compdef _claude_codev_accounts claude');
     L.push('fi');
   }
   L.push('');
@@ -394,12 +423,17 @@ export function regenerate(reg?: Registry): string {
 
 export function addAccount(
   label: string,
-  opts: { dir?: string } = {},
+  opts: { dir?: string; anchorName?: string } = {},
 ): RegistryAccount {
   if (!label) throw new Error('add: <label> is required');
   if (!LABEL_RE.test(label)) {
     throw new Error(
       `Invalid label "${label}" — use a letter followed by letters/digits/-/_`,
+    );
+  }
+  if (RESERVED_LABELS.has(label)) {
+    throw new Error(
+      `"${label}" is reserved (it names the bare-claude target) — pick another name`,
     );
   }
   const reg = readRegistry();
@@ -410,13 +444,37 @@ export function addAccount(
     opts.dir || path.join(os.homedir(), `.claude-${label}`),
   );
   assertSafeDir(dir);
+  // One folder = one account: a second mapping to the same dir would make
+  // CodeV double-scan its sessions and blur attribution.
+  const dupDir = reg.accounts.find(
+    (a) => path.resolve(expandHome(a.dir)) === path.resolve(dir),
+  );
+  if (dupDir) {
+    throw new Error(
+      `That folder is already registered as "${dupDir.label}" (${dir})`,
+    );
+  }
   const isDefault = isDefaultDir(dir);
   // Fresh registry + adding an EXTRA account: seed the anchor (~/.claude)
   // account first, so the machine's existing default install stays registered
   // and keeps the global default (instead of it silently moving to a
   // brand-new, not-yet-logged-in account).
   if (reg.accounts.length === 0 && !isDefault) {
-    const anchorLabel = label === 'personal' ? 'default' : 'personal';
+    // The anchor's name is the USER'S choice (UI first-add field / CLI
+    // --anchor-name); 'main' is only the neutral prefill — never assume
+    // 'personal' (the machine's first login may well be a company account).
+    const anchorLabel =
+      opts.anchorName || (label === 'main' ? 'primary' : 'main');
+    if (!LABEL_RE.test(anchorLabel) || RESERVED_LABELS.has(anchorLabel)) {
+      throw new Error(
+        `Invalid name "${anchorLabel}" for the existing ~/.claude account`,
+      );
+    }
+    if (anchorLabel === label) {
+      throw new Error(
+        'The new account and your existing (~/.claude) account need different names',
+      );
+    }
     const anchorIdentity = path.join(os.homedir(), '.claude.json');
     reg.accounts.push({
       label: anchorLabel,
@@ -475,6 +533,36 @@ export function removeAccount(label: string): string | undefined {
   writeRegistry(reg);
   regenerate(reg);
   return reassignedDefault;
+}
+
+/**
+ * Rename an account's label (the folder is NOT moved — `dir` is stored in the
+ * registry, so extra accounts keep working even when label ≠ folder suffix).
+ * This is also the only way to rename the anchor (~/.claude) account, whose
+ * auto-seeded "personal" label can't be changed via remove+add (the anchor is
+ * protected from removal).
+ */
+export function renameAccount(oldLabel: string, newLabel: string): void {
+  if (!newLabel || !LABEL_RE.test(newLabel)) {
+    throw new Error(
+      `Invalid label "${newLabel}" — use a letter followed by letters/digits/-/_`,
+    );
+  }
+  if (RESERVED_LABELS.has(newLabel)) {
+    throw new Error(
+      `"${newLabel}" is reserved (it names the bare-claude target) — pick another name`,
+    );
+  }
+  const reg = readRegistry();
+  const acct = reg.accounts.find((a) => a.label === oldLabel);
+  if (!acct) throw new Error(`No account "${oldLabel}"`);
+  if (reg.accounts.some((a) => a.label === newLabel)) {
+    throw new Error(`Account "${newLabel}" already exists`);
+  }
+  acct.label = newLabel;
+  if (reg.defaultAccount === oldLabel) reg.defaultAccount = newLabel;
+  writeRegistry(reg);
+  regenerate(reg);
 }
 
 export function setDefault(label: string): void {

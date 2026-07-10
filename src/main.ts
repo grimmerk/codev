@@ -678,9 +678,9 @@ ipcMain.handle('accounts-get', () => {
   }
 });
 
-ipcMain.handle('accounts-add', (_event, label: string) => {
+ipcMain.handle('accounts-add', (_event, label: string, anchorName?: string) => {
   try {
-    const added = accountManager.addAccount(label);
+    const added = accountManager.addAccount(label, { anchorName });
     invalidateAccountsCache();
     // Return the enriched (listed) shape so it matches CodevAccountInfo
     // (isCurrentDefault etc.), not the raw registry entry. The fallback
@@ -712,6 +712,20 @@ ipcMain.handle('accounts-remove', (_event, label: string) => {
     return { ok: false, error: (error as Error).message };
   }
 });
+
+ipcMain.handle(
+  'accounts-rename',
+  (_event, oldLabel: string, newLabel: string) => {
+    try {
+      accountManager.renameAccount(oldLabel, newLabel);
+      invalidateAccountsCache();
+      syncAccountsAppPath();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  },
+);
 
 ipcMain.handle('accounts-set-default', (_event, label: string) => {
   try {
@@ -2276,14 +2290,14 @@ ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath:
   openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode, customTitle);
 });
 
-ipcMain.on('launch-new-claude-session', async (_event, projectPath: string) => {
+ipcMain.on('launch-new-claude-session', async (_event, projectPath: string, accountLabel?: string) => {
   if (!existsSync(projectPath)) {
     console.log('[launch-new-claude-session] path does not exist:', projectPath);
     return;
   }
   const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
   const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
-  launchNewClaudeSession(projectPath, terminalApp, terminalMode);
+  launchNewClaudeSession(projectPath, terminalApp, terminalMode, accountLabel);
 });
 
 ipcMain.on('launch-new-claude-session-in-codev', (_event, projectPath: string) => {

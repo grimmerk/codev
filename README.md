@@ -41,6 +41,73 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 | cmux | Title match → TTY fallback | CLI new-workspace | Same as iTerm2 (requires cmux v0.63+); requires socket access in cmux Settings (`automation` or `allowAll`) |
 | VS Code | URI handler (session-level) | `open -b` + URI handler | Requires Claude Code VS Code extension v2.1.72+; `[VSCODE]` badge on active sessions; adaptive resume via IDE lock file polling (~0.5s if project already open) |
 
+### Multi-Account Support (Claude Code)
+
+Run multiple Claude Code accounts (e.g. personal + work) on one machine. Each account gets its own config dir (via `CLAUDE_CONFIG_DIR`); the default account stays at `~/.claude` untouched. The Sessions tab aggregates sessions from every account (non-default ones get a purple account badge), and each session always resumes under the account it belongs to.
+
+**Setup** — Settings → Accounts:
+
+1. **Add** an account (e.g. `work`) — writes the registry (`~/.config/codev/accounts.json`) and generates `~/.config/codev/accounts.sh`
+2. **Install** Shell integration — appends one marker-guarded `source` line to `~/.zshrc` (zsh; the generated file is bash-sourceable manually, fish unsupported)
+3. Open a new shell and log in: `claude work`
+
+**Shell commands** (from the generated `accounts.sh`):
+
+| Command | What it does |
+|---------|--------------|
+| `claude` | Launches the **global default** account (configurable, see below) |
+| `claude <name> […]` | Launches that account, full passthrough (e.g. `claude work -r`) |
+| `claude-<name> […]` | Function form of the same (e.g. `claude-work mcp list`) |
+| `claude-whoami` | Which account bare `claude` resolves to here, plus its auth status |
+| `claude-accounts` | Quick list of configured accounts |
+
+Tab completion included (zsh): `claude <TAB>` completes account names; `codev account <TAB>` completes subcommands and labels. (The `claude` completion is registered only when nothing else completes `claude` — if you already have one, account names won't be injected into it.)
+
+The **default account** can be launched three equivalent ways: bare `claude`, `claude <its-name>`, or `claude-<its-name>` (the UI's row shows this).
+
+**`codev account` CLI** (the account manager — same generator the Settings UI uses):
+
+| Command | What it does |
+|---------|--------------|
+| `codev account list` (`ls`) | Accounts + identity; `*` marks the bare-`claude` default |
+| `codev account add <name> [--dir D]` | Register an account (default dir `~/.claude-<name>`) |
+| `codev account default <name>` | Point bare `claude` at an account |
+| `codev account remove <name>` (`rm`) | Unregister; keeps its folder on disk |
+| `codev account rename <old> <new>` | Rename a label — the folder is not moved; also the way to rename the auto-seeded default account (`personal`) |
+| `codev account regenerate` (`regen`) | Rewrite `accounts.sh` from the registry |
+| `codev account show` (`preview`) | Dry-run print of the generated `accounts.sh` |
+| `codev account install` / `uninstall` | Add / remove the `~/.zshrc` source block |
+
+> **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`). One folder = one account: registering an already-registered folder under a second name is rejected.
+>
+> **Name vs folder.** The name is a mutable label; the folder is fixed at creation. They can diverge (after a rename) and the UI shows `· folder: …` on the row when they do. Folders deliberately never move on rename: Claude Code keys the account's credentials by the config-dir **path**, so moving the folder would orphan the login.
+>
+> **Remove is non-destructive.** It only unregisters that mapping: the account's folder, login, and session history all stay on disk. `codev account add <name>` (or the UI) later reattaches everything — identity and sessions reappear immediately, no re-login needed. **Caveat after a rename:** the folder keeps its *original* suffix (rename never moves folders), so re-attach with the folder-matching name — e.g. an account created as `work`, renamed to `ff`, then removed, re-attaches via `add work` (or any name with `--dir ~/.claude-work`), **not** `add ff`. Likewise, an account originally registered with a custom `--dir` always needs `--dir <original-folder>` again on re-add.
+
+**Common scenarios:**
+
+| You are… | What happens / what to do |
+|----------|---------------------------|
+| An existing Claude Code user opening CodeV for the first time | Accounts tab is **empty** (zero footprint — no registry is created until you act); your `~/.claude` login keeps working as before. When you add a second account, **you name your existing login at the same time** (a field appears; empty = `main`) and both get registered together. |
+| Renaming any account later | The **Rename** button on each row, or `codev account rename <old> <new>`. To pre-name your existing default before adding anything: `codev account add <name> --dir ~/.claude` (registers the default itself; no extra account created). `default` is a reserved name. |
+| Starting fresh: add first, log in later | Add a name (UI or CLI) → it shows "not logged in" → in a new shell, `claude <name>` runs Claude Code's login and creates the folder. |
+| Already running a second account by hand (own shell function + custom folder) | Register it with `codev account add <name> --dir <your-folder>` — **any folder works**; `~/.claude-<name>` is only the default. Identity and sessions attach immediately, no re-login. If your hand-rolled wrapper was named `claude`, retire it (it would fight the generated dispatcher). |
+| Wondering why a name maps to a different folder | Renames change only the name side of the *name → folder* mapping; folders never move (credentials are keyed by the folder path) — the UI shows `· folder: …` on the row when they diverge. |
+
+> Not yet supported: auto-detecting existing config folders for one-click registration, and a warning when `accounts.sh` overrides a hand-rolled `claude()` shell function ([#127](https://github.com/grimmerk/codev/issues/127)); continuing an existing conversation under a *different* account — "copy-fork" — needs transcript-level workarounds first ([#128](https://github.com/grimmerk/codev/issues/128)).
+
+The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. CodeV refreshes `accounts.sh` on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
+
+**In the CodeV UI:**
+
+| Where | What |
+|-------|------|
+| Settings → Accounts | List/add/remove accounts, set the global default, install shell integration |
+| Sessions tab | Sessions from all accounts with account badges; resume uses each session's own account |
+| Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
+
+**Gotcha:** inside a Claude Code session, `!claude auth status` reports the *global default* (the shell snapshot carries the dispatcher function), not the session's account — use `!command claude auth status` instead. Full design + details: [docs/multi-account-support-design.md](docs/multi-account-support-design.md).
+
 ### Embedded Terminal
 
 CodeV includes a built-in terminal tab (powered by xterm.js + node-pty, same technology as VS Code's integrated terminal). Press `⌃+⌘+T` from anywhere (global shortcut) or `⌘+3` when CodeV is in foreground to open it.

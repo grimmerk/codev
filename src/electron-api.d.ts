@@ -23,12 +23,16 @@ interface IElectronAPI {
     accounts?: CodevAccountInfo[];
     shellInstalled?: boolean;
   }>;
-  addAccount: (label: string) => Promise<{
+  addAccount: (label: string, anchorName?: string) => Promise<{
     ok: boolean;
     error?: string;
     account?: CodevAccountInfo;
   }>;
   removeAccount: (label: string) => Promise<{ ok: boolean; error?: string }>;
+  renameAccount: (
+    oldLabel: string,
+    newLabel: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   setDefaultAccount: (label: string) => Promise<{ ok: boolean; error?: string }>;
   setAccountsShellHook: (action: 'install' | 'uninstall') => Promise<{
     ok: boolean;
@@ -98,7 +102,7 @@ interface IElectronAPI {
   scanClosedVSCodeSessions: (activeSessionIds: string[]) => Promise<any[]>;
   refreshSessionPreview: (sessions: any[]) => Promise<Record<string, { lastUserMessage: string; lastAssistantMessage: string }>>;
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => void;
-  launchNewClaudeSession: (projectPath: string) => void;
+  launchNewClaudeSession: (projectPath: string, accountLabel?: string) => void;
   launchNewClaudeSessionInCodev: (projectPath: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;
   loadSessionEnrichment: (sessions: any[]) => Promise<{ titles: Record<string, string>; branches: Record<string, string>; prLinks: Record<string, { prNumber: number; prUrl: string }> }>;

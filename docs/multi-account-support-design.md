@@ -453,18 +453,41 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     registry + `accounts.sh` from one shared generator (§6.A/B); Vitest + CI added.
   - *2b (UI ✅, branch `feat/accounts-settings-ui`):* Accounts tab in Settings —
     list/add/remove + set-default + shell-integration toggle (§6.D), as IPC wrappers
-    over the shared manager (one generator with the CLI). Rename deferred (labels name
-    dirs; remove+add covers it).
+    over the shared manager (one generator with the CLI). (Rename was deferred here,
+    then shipped in 2c-lite below — CLI + per-row UI.)
   - *2b part 2 (✅, branch `feat/codev-path-binary`):* the `codev` command — a
     `codev()` function in accounts.sh runs the CLI bundled inside CodeV.app via
     `ELECTRON_RUN_AS_NODE` (no system Node; no sudo/PATH edits). The app records its
     real `.app` location in the registry (`appPath`) on every launch and refreshes
     accounts.sh, so app moves and generator updates self-heal. CLI is tsc-compiled
     into `resources/cli` (extraResource) at build time.
-  - *2c:* account picker / per-launch override (§6.G, 4.2).
-  - *2d:* pyenv-style folder auto-switch + terminal-side resume-to-right-account (§6.H).
-  - *2e:* configurable global-default (bare `claude` → chosen account) — last, since it
-    also needs the CLI/UI to manage.
+  - *2c-lite (✅, branch `feat/new-session-account-picker`):* NEW-session account
+    picker — ⌥⌘+Enter on a project opens a picker (⌘+Enter unchanged → global
+    default; single-account setups never see it); launches with explicit
+    `CLAUDE_CONFIG_DIR` + `command claude` (an anchor-account pick uses
+    `env -u CLAUDE_CONFIG_DIR claude` instead — §3.4). Post-review naming UX: per-row UI Rename +
+    `codev account rename` (label-only — folders never move; credentials are keyed by
+    the config-dir path); the first-ever add asks what to name the existing ~/.claude
+    login (defaults to `main` — or `primary` when the new account itself is named
+    `main` — replacing the presumptuous auto-`personal`); `default` is
+    a reserved label (it names the dispatcher-target concept). Cross-account *resume*
+    (the other half of §6.G) stays deferred to Batch 3 as explicit copy-fork — a transcript lives in
+    its own account's projects dir, so "resume under another account" must copy, never
+    link. "This repo always opens under X" belongs to 2d's projectMap.
+  - *2d — ❌ dropped (2026-07-10):* pyenv-style folder auto-switch (§6.H). Rationale:
+    in practice one folder hosts sessions from MULTIPLE accounts (we test exactly this
+    way), so a folder→account default would guess wrong precisely where the account
+    choice matters; stacking a third decision layer (global default → folder default →
+    picker) adds "why did bare claude open work here?" confusion for thin value. The
+    need is covered by 2e (global default) + 2c-lite (explicit per-launch picker).
+    Technically it was feasible (a default, not a constraint — resume always follows
+    the session's own account); dropped on value, not feasibility.
+  - *2e — ✅ shipped with 2a (PR #123, v1.0.77):* configurable global-default —
+    `codev account default <label>` / Settings → Set default routes bare `claude`
+    through the dispatcher `*)` to the chosen account. CodeV bypasses the dispatcher
+    only for *account-explicit* operations (resuming a session under its own account,
+    picker launches) via `command claude` / explicit env; the plain ⌘+Enter new-session
+    path deliberately stays on bare `claude` so the dispatcher's global default applies.
 - **Batch 3 — later:** cross-account symlink reuse of global files
   (CLAUDE.md / skills / commands / plugins / settings, §5).
 

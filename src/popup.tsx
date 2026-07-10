@@ -109,7 +109,19 @@ const PopupDefaultExample = ({
   const [accountsError, setAccountsError] = useState('');
   const [accountsNotice, setAccountsNotice] = useState('');
   const [newAccountLabel, setNewAccountLabel] = useState('');
+  // First-ever add also registers the existing ~/.claude login — the USER
+  // picks its name. Empty means "let the manager decide" ('main', or
+  // 'primary' when the new account itself is named main) so the backend
+  // fallback stays the single source of truth.
+  const [anchorNameInput, setAnchorNameInput] = useState('');
+  const [renamingLabel, setRenamingLabel] = useState<string | null>(null);
+  const [renameInput, setRenameInput] = useState('');
   const [accountsBusy, setAccountsBusy] = useState(false);
+  // Footer example uses a REAL account name (prefer a non-default one) so
+  // nobody reads it as a fixed keyword; the example clause is hidden entirely
+  // when no account is registered (the commands wouldn't exist yet).
+  const exampleAccountLabel =
+    accounts.find((a) => !a.isCurrentDefault)?.label || accounts[0]?.label;
 
   const refreshAccounts = async () => {
     try {
@@ -119,6 +131,9 @@ const PopupDefaultExample = ({
         setAccountsLoaded(true);
         setAccountsShellInstalled(!!r.shellInstalled);
         setAccountsError('');
+        // Tell the surrounding switcher UI (same window) accounts changed,
+        // e.g. so the ⌥⌘+Enter hint updates without an app restart.
+        window.dispatchEvent(new CustomEvent('codev-accounts-changed'));
       } else {
         setAccountsNotice('');
         setAccountsError(r.error || 'Failed to load accounts');
@@ -157,14 +172,27 @@ const PopupDefaultExample = ({
   const handleAddAccount = () => {
     const label = newAccountLabel.trim();
     if (!label) return;
+    const isFirstAdd = accountsLoaded && accounts.length === 0;
+    // Pass undefined when untouched so the manager's fallback applies
+    // ('main', or 'primary' when the new account itself is named main).
+    const anchorName = isFirstAdd
+      ? anchorNameInput.trim() || undefined
+      : undefined;
+    const effectiveAnchor = isFirstAdd
+      ? anchorName || (label === 'main' ? 'primary' : 'main')
+      : undefined;
     runAccountOp(async () => {
-      const r = await window.electronAPI.addAccount(label);
+      const r = await window.electronAPI.addAccount(label, anchorName);
       if (r.ok) {
         setNewAccountLabel('');
+        const dir = r.account?.dir || `~/.claude-${label}`;
+        const anchorNote = effectiveAnchor
+          ? ` Your existing login is registered as "${effectiveAnchor}".`
+          : '';
         setAccountsNotice(
           accountsShellInstalled
-            ? `Added "${label}". Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`
-            : `Added "${label}". Install Shell integration below, open a new shell, then log in with: claude ${label}.`,
+            ? `Added "${label}" → ${dir}.${anchorNote} Log in with: claude ${label} — then open a new shell (or source ~/.zshrc).`
+            : `Added "${label}" → ${dir}.${anchorNote} Install Shell integration below, open a new shell, then log in with: claude ${label}.`,
         );
         await refreshAccounts();
       } else {
@@ -176,13 +204,39 @@ const PopupDefaultExample = ({
 
   const handleRemoveAccount = (label: string) => {
     runAccountOp(async () => {
+      // Capture the folder before it leaves the list — after a rename the
+      // label no longer matches the folder suffix, so "add the same name
+      // back" would point at the WRONG (empty) folder.
+      const removedDir = accounts.find((a) => a.label === label)?.dir;
       const r = await window.electronAPI.removeAccount(label);
       if (r.ok) {
-        setAccountsNotice(`Removed "${label}" (its folder stays on disk).`);
+        setAccountsNotice(
+          `Removed "${label}" — folder kept${removedDir ? ` (${removedDir})` : ''}, login and sessions intact. Re-attach later by adding a name that matches the folder suffix, or: codev account add <name> --dir <folder>.`,
+        );
         await refreshAccounts();
       } else {
         setAccountsNotice('');
         setAccountsError(r.error || 'Failed to remove account');
+      }
+    });
+  };
+
+  const handleRenameAccount = (oldLabel: string, newLabel: string) => {
+    if (!newLabel || newLabel === oldLabel) {
+      setRenamingLabel(null);
+      return;
+    }
+    runAccountOp(async () => {
+      const r = await window.electronAPI.renameAccount(oldLabel, newLabel);
+      if (r.ok) {
+        setRenamingLabel(null);
+        setAccountsNotice(
+          `Renamed "${oldLabel}" → "${newLabel}" — folder unchanged; open a new shell for claude ${newLabel}.`,
+        );
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to rename');
       }
     });
   };
@@ -775,7 +829,7 @@ const PopupDefaultExample = ({
               }}
             >
               Claude Code (Anthropic) accounts — each launches claude with its
-              own config dir
+              own config dir. Names are renameable labels; folders never move.
             </div>
             {/* Only after a successful load — avoids flashing while the IPC
                 call is in flight and contradicting an error message. */}
@@ -788,13 +842,15 @@ const PopupDefaultExample = ({
                 }}
               >
                 No accounts registered yet — your existing ~/.claude login stays
-                the default. Add a second account below to go multi-account.
+                the default. Add a second account below to go multi-account;
+                your existing login is registered at the same time, with the
+                name you set below.
               </div>
             )}
             {accounts.map((a) => (
               <div key={a.label} style={rowStyle}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={labelStyle}>
+                  <span style={labelStyle} title={`Config dir: ${a.dir}`}>
                     {a.label}
                     {a.isCurrentDefault && (
                       <span style={{ color: THEME.primary, fontSize: '11px', marginLeft: '6px' }}>
@@ -805,36 +861,104 @@ const PopupDefaultExample = ({
                   <span style={{ fontSize: '11px', color: THEME.text.secondary }}>
                     {a.loggedIn
                       ? `${a.email || 'logged in'} — launch: ${
-                          a.isCurrentDefault ? 'claude' : `claude ${a.label}`
+                          a.isCurrentDefault
+                            ? `claude (or claude ${a.label})`
+                            : `claude ${a.label}`
                         }`
                       : `not logged in — log in & launch: claude ${a.label}`}
+                    {/* Name and folder can diverge (rename never moves
+                        folders) — surface the folder when they do. */}
+                    {!a.dir.endsWith(`/.claude-${a.label}`) && (
+                      <span style={{ color: '#777' }}>
+                        {` · folder: ${a.dir.replace(/^\/Users\/[^/]+/, '~')}`}
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  {!a.isCurrentDefault && (
-                    <button
-                      style={smallButtonStyle}
-                      onClick={() => handleSetDefaultAccount(a.label)}
-                      disabled={accountsBusy}
-                      title="Make bare `claude` resolve to this account"
-                    >
-                      Set default
-                    </button>
-                  )}
-                  {!a.isDefault && (
-                    <button
-                      style={{ ...smallButtonStyle, color: THEME.button.warning }}
-                      onClick={() => handleRemoveAccount(a.label)}
-                      disabled={accountsBusy}
-                      title="Unregister (keeps its folder on disk)"
-                    >
-                      Remove
-                    </button>
+                  {renamingLabel === a.label ? (
+                    <>
+                      <input
+                        value={renameInput}
+                        onChange={(e) => setRenameInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleRenameAccount(a.label, renameInput.trim());
+                          } else if (e.key === 'Escape') {
+                            setRenamingLabel(null);
+                          }
+                        }}
+                        autoFocus
+                        style={{ ...selectStyle, cursor: 'text', width: '110px' }}
+                      />
+                      <button
+                        style={smallButtonStyle}
+                        onClick={() => handleRenameAccount(a.label, renameInput.trim())}
+                        disabled={accountsBusy}
+                      >
+                        Save
+                      </button>
+                      <button
+                        style={smallButtonStyle}
+                        onClick={() => setRenamingLabel(null)}
+                        disabled={accountsBusy}
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        style={smallButtonStyle}
+                        onClick={() => {
+                          setRenamingLabel(a.label);
+                          setRenameInput(a.label);
+                        }}
+                        disabled={accountsBusy}
+                        title="Rename the label — the folder never moves"
+                      >
+                        Rename
+                      </button>
+                      {!a.isCurrentDefault && (
+                        <button
+                          style={smallButtonStyle}
+                          onClick={() => handleSetDefaultAccount(a.label)}
+                          disabled={accountsBusy}
+                          title="Make bare `claude` resolve to this account"
+                        >
+                          Set default
+                        </button>
+                      )}
+                      {!a.isDefault && (
+                        <button
+                          style={{ ...smallButtonStyle, color: THEME.button.warning }}
+                          onClick={() => handleRemoveAccount(a.label)}
+                          disabled={accountsBusy}
+                          title="Unregister only — folder, login & sessions stay on disk; re-add the same name to reattach"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
             ))}
 
+            {accountsLoaded && accounts.length === 0 && (
+              <div style={rowStyle}>
+                <span style={{ fontSize: '12px', color: THEME.text.secondary }}>
+                  …and your existing ~/.claude login will be named
+                </span>
+                <input
+                  value={anchorNameInput}
+                  onChange={(e) => setAnchorNameInput(e.target.value)}
+                  placeholder="main"
+                  disabled={accountsBusy}
+                  style={{ ...selectStyle, cursor: 'text', width: '110px' }}
+                />
+              </div>
+            )}
             <div style={rowStyle}>
               <input
                 value={newAccountLabel}
@@ -852,6 +976,11 @@ const PopupDefaultExample = ({
               >
                 Add account
               </button>
+            </div>
+            <div style={{ padding: '0 16px 4px', fontSize: '10px', color: '#777' }}>
+              Add creates or attaches the folder ~/.claude-&lt;name&gt; — to
+              attach an existing custom folder: codev account add &lt;name&gt;
+              --dir &lt;folder&gt;
             </div>
 
             <div style={rowStyle}>
@@ -877,8 +1006,11 @@ const PopupDefaultExample = ({
               </div>
             )}
             <div style={{ padding: '4px 16px', fontSize: '11px', color: THEME.text.secondary }}>
-              Registry: ~/.config/codev/accounts.json — each account also has a
-              function form, e.g. claude-work
+              Registry: ~/.config/codev/accounts.json
+              {accounts.length > 0 &&
+                (accountsShellInstalled
+                  ? ` — launch any account above by its name: claude ${exampleAccountLabel} and claude-${exampleAccountLabel} are equivalent`
+                  : ' — install Shell integration above to launch accounts by name from the terminal')}
             </div>
           </div>
           )}

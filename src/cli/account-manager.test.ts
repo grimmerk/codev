@@ -142,11 +142,22 @@ describe('generateAccountsSh', () => {
     expect(sh).toContain('_codev() {');
     expect(sh).toContain('compdef _codev codev');
     expect(sh).toContain(
-      'compadd list add default remove rm regenerate show install uninstall help',
+      'compadd list add default remove rm rename regenerate show install uninstall help',
     );
-    expect(sh).toContain('default) compadd personal work ;;');
+    expect(sh).toContain('default|rename) compadd personal work ;;');
     // anchor (personal) is not removable
     expect(sh).toContain('remove|rm) compadd work ;;');
+  });
+
+  it('completes account labels for `claude <TAB>` without clobbering', () => {
+    // Works even without appPath — the dispatcher exists whenever accounts do.
+    const sh = generateAccountsSh(reg());
+    expect(sh).toContain('_claude_codev_accounts() {');
+    expect(sh).toContain('compadd personal work');
+    // polite registration: only when nothing else completes `claude`
+    expect(sh).toContain('[ -z "${_comps[claude]:-}" ]');
+    // non-label positions keep the default file completion
+    expect(sh).toContain('_files');
   });
 
   it('uses the recorded appExec so a renamed .app bundle still works', () => {
