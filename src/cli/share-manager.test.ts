@@ -164,6 +164,32 @@ describe('unshareItem', () => {
     );
   });
 
+  it('a failed restore-backup leaves the link untouched', () => {
+    const source = path.join(anchorDir, 'CLAUDE.md');
+    const target = path.join(accountDir, 'CLAUDE.md');
+    write(source, 'x');
+    shareItem(source, target, 'link'); // no own content displaced → no backup
+
+    expect(() => unshareItem(target, { restoreBackup: true })).toThrow(
+      /No .*backup/,
+    );
+    // validation happens BEFORE unlinking — the share is still intact
+    expect(getShareState(target)).toEqual({ kind: 'linked', to: source });
+  });
+
+  it('rapid re-shares get unique backup names (1s timestamp collision)', () => {
+    const source = path.join(anchorDir, 'CLAUDE.md');
+    const target = path.join(accountDir, 'CLAUDE.md');
+    write(source, 'anchor');
+    write(target, 'own v1');
+    shareItem(source, target, 'link');
+    unshareItem(target);
+    write(target, 'own v2');
+    shareItem(source, target, 'link'); // same second → must not clobber bak 1
+
+    expect(listBackups(target)).toHaveLength(2);
+  });
+
   it("refuses to unshare the account's own real file", () => {
     const target = path.join(accountDir, 'CLAUDE.md');
     write(target, 'own');

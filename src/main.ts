@@ -752,6 +752,10 @@ ipcMain.handle(
   'accounts-share',
   (_event, label: string, item: string, mode: 'link' | 'copy') => {
     try {
+      // A malformed payload must fail, not silently fork a copy.
+      if (mode !== 'link' && mode !== 'copy') {
+        return { ok: false, error: `Unknown share mode "${String(mode)}"` };
+      }
       const r = shareManager.shareFor(
         label,
         item as shareManager.ShareItemKey,

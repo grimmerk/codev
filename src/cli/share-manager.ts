@@ -52,13 +52,19 @@ export interface ShareStatus {
 // path-based core (tmpdir-testable)
 // ---------------------------------------------------------------------------
 
-/** Timestamped backup sibling: `<target>.codev-bak-<ts>`. */
-const backupName = (targetPath: string): string =>
-  `${targetPath}.codev-bak-${new Date()
+/** Timestamped backup sibling: `<target>.codev-bak-<ts>` (uniquified — the
+ * timestamp has 1s precision, so rapid re-shares get a numeric suffix). */
+const backupName = (targetPath: string): string => {
+  const base = `${targetPath}.codev-bak-${new Date()
     .toISOString()
     .replace(/[:.]/g, '-')
     .replace('T', '_')
     .slice(0, 19)}`;
+  let candidate = base;
+  let i = 1;
+  while (fs.existsSync(candidate)) candidate = `${base}-${i++}`;
+  return candidate;
+};
 
 /** Existing backups for a target, newest first. */
 export function listBackups(targetPath: string): string[] {
@@ -187,22 +193,28 @@ export function unshareItem(
     path.dirname(targetPath),
     fs.readlinkSync(targetPath),
   );
-  fs.unlinkSync(targetPath);
 
-  if (opts.keepCopy) {
-    if (!fs.existsSync(resolved)) {
-      throw new Error(`Link target is gone, nothing to copy: ${resolved}`);
+  // Validate the requested replacement BEFORE removing the link, so a failed
+  // restore/keep-copy leaves the share untouched instead of half-undone.
+  let newestBackup: string | undefined;
+  if (opts.keepCopy && !fs.existsSync(resolved)) {
+    throw new Error(`Link target is gone, nothing to copy: ${resolved}`);
+  }
+  if (opts.restoreBackup) {
+    [newestBackup] = listBackups(targetPath);
+    if (!newestBackup) {
+      throw new Error(`No .codev-bak-* backup found for ${targetPath}`);
     }
+  }
+
+  fs.unlinkSync(targetPath);
+  if (opts.keepCopy) {
     fs.cpSync(resolved, targetPath, { recursive: true });
     return {};
   }
-  if (opts.restoreBackup) {
-    const [newest] = listBackups(targetPath);
-    if (!newest) {
-      throw new Error(`No .codev-bak-* backup found for ${targetPath}`);
-    }
-    fs.renameSync(newest, targetPath);
-    return { restoredFrom: newest };
+  if (opts.restoreBackup && newestBackup) {
+    fs.renameSync(newestBackup, targetPath);
+    return { restoredFrom: newestBackup };
   }
   return {};
 }
@@ -302,8 +314,10 @@ export function itemPathsFor(
     if (item === 'claude-md') {
       throw new Error('--entry only applies to skills/commands');
     }
-    if (entry.includes('/') || entry.startsWith('.')) {
-      throw new Error(`Invalid entry name "${entry}"`);
+    if (entry.includes('/') || entry.startsWith('.') || entry.startsWith('-')) {
+      throw new Error(
+        `Invalid entry name "${entry}" (a leading "-" usually means misordered flags)`,
+      );
     }
     return {
       source: path.join(expand(anchor.dir), rel, entry),

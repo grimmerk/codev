@@ -1,7 +1,7 @@
 /** Enhanced popup menu for working folder selection and app settings */
 import Button from '@atlaskit/button';
 import Popup from '@atlaskit/popup';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { closeAppClick, openFolderSelector } from './switcher-ui';
 
 // Brand color theme matching app.tsx
@@ -257,9 +257,15 @@ const PopupDefaultExample = ({
     });
   };
 
+  // Guards rapid toggling between accounts: a stale response for a
+  // previously-requested label must not render under the current panel.
+  const shareReqRef = useRef<string | null>(null);
+
   const loadShareStatus = async (label: string) => {
+    shareReqRef.current = label;
     try {
       const r = await window.electronAPI.getAccountShareStatus(label);
+      if (shareReqRef.current !== label) return; // stale response
       if (r.ok) {
         setShareStatus(r.status || null);
       } else {
@@ -267,6 +273,7 @@ const PopupDefaultExample = ({
         setAccountsError(r.error || 'Failed to load sharing status');
       }
     } catch (e) {
+      if (shareReqRef.current !== label) return;
       setShareStatus(null);
       setAccountsError((e as Error).message);
     }

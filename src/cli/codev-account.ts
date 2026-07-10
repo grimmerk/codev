@@ -218,15 +218,16 @@ function main(): number {
         return 0;
       }
       assertShareItem(item);
-      const mode = rest.includes('--copy')
-        ? ('copy' as const)
-        : rest.includes('--link')
-          ? ('link' as const)
-          : null;
-      if (!mode) {
-        console.error('share: pass --link (stay in sync) or --copy (fork)');
+      const wantLink = rest.includes('--link');
+      const wantCopy = rest.includes('--copy');
+      if (wantLink === wantCopy) {
+        // neither, or ambiguously both
+        console.error(
+          'share: pass exactly one of --link (stay in sync) or --copy (fork)',
+        );
         return 1;
       }
+      const mode = wantCopy ? ('copy' as const) : ('link' as const);
       const r = share.shareFor(name, item, mode, entry);
       console.log(
         `✓ ${mode === 'link' ? 'Linked' : 'Copied'} ${item}${entry ? `/${entry}` : ''} → ${r.target}`,

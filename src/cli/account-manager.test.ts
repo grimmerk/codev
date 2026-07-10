@@ -152,6 +152,9 @@ describe('generateAccountsSh', () => {
     );
     // item + key completion at position 5
     expect(sh).toContain('share|unshare) compadd claude-md skills commands ;;');
+    expect(sh).toContain(
+      'sync-settings) compadd statusLine model effortLevel theme ;;',
+    );
   });
 
   it('completes account labels for `claude <TAB>` without clobbering', () => {
