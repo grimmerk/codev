@@ -488,8 +488,14 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     only for *account-explicit* operations (resuming a session under its own account,
     picker launches) via `command claude` / explicit env; the plain ⌘+Enter new-session
     path deliberately stays on bare `claude` so the dispatcher's global default applies.
-- **Batch 3 — later:** cross-account symlink reuse of global files
-  (CLAUDE.md / skills / commands / plugins / settings, §5).
+- **Batch 3 — ✅ core shipped** (branch `feat/account-sharing`; PR-A = the isAnchor
+  refactor #129): share engine (`src/cli/share-manager.ts`, path-based + real-fs
+  tmpdir tests) + `codev account share/unshare/sync-settings` + per-account UI
+  Sharing panel. Link/copy/skip per item; `.codev-bak-*` collision backups double as
+  the unshare restore path. `plugins/` excluded by experiment (per-account install
+  registry with absolute installPaths); its need is covered by per-account installs +
+  the `enabledPlugins` settings key. Remaining backlog: #127 (detect existing config
+  dirs + one-click register), #128 (copy-fork resume), #121 (VS Code).
 
 ---
 

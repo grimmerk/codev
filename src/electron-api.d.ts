@@ -40,6 +40,34 @@ interface IElectronAPI {
     changed?: boolean;
     path?: string;
   }>;
+  getAccountShareStatus: (label: string) => Promise<{
+    ok: boolean;
+    error?: string;
+    status?: Record<
+      'claude-md' | 'skills' | 'commands',
+      {
+        state: {
+          kind: 'none' | 'own' | 'linked' | 'broken-link' | 'mixed';
+          to?: string;
+          linked?: string[];
+          own?: string[];
+        };
+        backups: string[];
+        source: string;
+        target: string;
+      }
+    >;
+  }>;
+  shareAccountItem: (
+    label: string,
+    item: string,
+    mode: 'link' | 'copy',
+  ) => Promise<{ ok: boolean; error?: string; backedUpTo?: string }>;
+  unshareAccountItem: (
+    label: string,
+    item: string,
+    opts: { restoreBackup?: boolean; keepCopy?: boolean },
+  ) => Promise<{ ok: boolean; error?: string; restoredFrom?: string }>;
   getBannerSeen: () => Promise<boolean>;
   setBannerSeen: () => void;
   invokeVSCode: (path: string, option: string) => void;

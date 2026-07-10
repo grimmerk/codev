@@ -14,7 +14,11 @@
  * `codev account` binary on PATH is wired up in Batch 2b.
  */
 
+import * as os from 'os';
+
 import * as manager from './account-manager';
+import * as share from './share-manager';
+import type { ShareItemKey, ShareState } from './share-manager';
 
 const USAGE = `codev account — manage CodeV multi-account registry
 
@@ -28,6 +32,17 @@ Usage:
   codev account default <label>      Set which account bare \`claude\` resolves to
   codev account remove <label>       Unregister an account (leaves its dir on disk)
   codev account rename <old> <new>   Rename an account's label (folder is not moved)
+  codev account share <name>         Sharing status (claude-md / skills / commands)
+  codev account share <name> <item> --link|--copy [--entry E]
+                                     Share the anchor's <item> into <name>
+                                     (link = stay in sync; copy = independent fork)
+  codev account unshare <name> <item> [--entry E] [--restore-backup|--keep-copy]
+                                     Remove the link (source untouched);
+                                     --restore-backup = undo a share that displaced
+                                     own content; --keep-copy = keep a real copy
+  codev account sync-settings <name> <key...>
+                                     Copy settings.json keys from the anchor
+                                     (allowed: statusLine, model, effortLevel, theme)
   codev account regenerate           Rewrite ~/.config/codev/accounts.sh from the registry
   codev account show                 Print the generated accounts.sh (dry run, writes nothing)
   codev account install              Add the source line to ~/.zshrc (idempotent)
@@ -43,6 +58,49 @@ function reloadHint(): void {
 function getFlag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+function assertShareItem(item: string): asserts item is ShareItemKey {
+  if (!(share.SHARE_ITEMS as string[]).includes(item)) {
+    throw new Error(
+      `Unknown item "${item}" — one of: ${share.SHARE_ITEMS.join(', ')}`,
+    );
+  }
+}
+
+const tildify = (p: string): string =>
+  p.startsWith(os.homedir()) ? `~${p.slice(os.homedir().length)}` : p;
+
+function describeShareState(s: ShareState): string {
+  switch (s.kind) {
+    case 'none':
+      return 'none';
+    case 'own':
+      return 'own (not shared)';
+    case 'linked':
+      return `linked → ${tildify(s.to)}`;
+    case 'broken-link':
+      return `BROKEN link → ${tildify(s.to)}`;
+    case 'mixed':
+      return `mixed (${s.linked.length} linked: ${s.linked.join(', ')}; ${s.own.length} own)`;
+  }
+}
+
+function printShareStatus(name: string): void {
+  const status = share.shareStatusFor(name);
+  console.log(`Sharing status for "${name}" (source = anchor ~/.claude):`);
+  for (const item of share.SHARE_ITEMS) {
+    const st = status[item];
+    const backups = st.backups.length
+      ? `   [${st.backups.length} backup${st.backups.length > 1 ? 's' : ''}]`
+      : '';
+    console.log(
+      `  ${item.padEnd(10)} ${describeShareState(st.state)}${backups}`,
+    );
+  }
+  console.log(
+    "  share with: codev account share <name> <item> --link (or --copy); plugins/settings keys via 'sync-settings'",
+  );
 }
 
 function printList(): void {
@@ -139,6 +197,103 @@ function main(): number {
       console.log(`✓ Unregistered "${label}" (its dir is left on disk)`);
       if (newDefault) console.log(`  default account is now "${newDefault}"`);
       reloadHint();
+      return 0;
+    }
+
+    case 'share': {
+      const entry = getFlag(rest, '--entry');
+      const skip = new Set<number>();
+      const ei = rest.indexOf('--entry');
+      if (ei >= 0) skip.add(ei + 1);
+      const positional = rest.filter(
+        (a, i) => !a.startsWith('-') && !skip.has(i),
+      );
+      const [name, item] = positional;
+      if (!name) {
+        console.error('share: <name> is required');
+        return 1;
+      }
+      if (!item) {
+        printShareStatus(name);
+        return 0;
+      }
+      assertShareItem(item);
+      const mode = rest.includes('--copy')
+        ? ('copy' as const)
+        : rest.includes('--link')
+          ? ('link' as const)
+          : null;
+      if (!mode) {
+        console.error('share: pass --link (stay in sync) or --copy (fork)');
+        return 1;
+      }
+      const r = share.shareFor(name, item, mode, entry);
+      console.log(
+        `✓ ${mode === 'link' ? 'Linked' : 'Copied'} ${item}${entry ? `/${entry}` : ''} → ${r.target}`,
+      );
+      if (r.backedUpTo) {
+        console.log(
+          `  previous content backed up: ${r.backedUpTo} (unshare --restore-backup undoes this)`,
+        );
+      }
+      console.log('  new Claude Code sessions pick this up immediately');
+      return 0;
+    }
+
+    case 'unshare': {
+      const entry = getFlag(rest, '--entry');
+      const skip = new Set<number>();
+      const ei = rest.indexOf('--entry');
+      if (ei >= 0) skip.add(ei + 1);
+      const positional = rest.filter(
+        (a, i) => !a.startsWith('-') && !skip.has(i),
+      );
+      const [name, item] = positional;
+      if (!name || !item) {
+        console.error('unshare: <name> and <item> are required');
+        return 1;
+      }
+      assertShareItem(item);
+      const r = share.unshareFor(
+        name,
+        item,
+        {
+          restoreBackup: rest.includes('--restore-backup'),
+          keepCopy: rest.includes('--keep-copy'),
+        },
+        entry,
+      );
+      console.log(`✓ Unshared ${item}${entry ? `/${entry}` : ''}`);
+      if (r.restoredFrom) {
+        console.log(`  restored your previous content from ${r.restoredFrom}`);
+      } else if (rest.includes('--keep-copy')) {
+        console.log('  kept an independent copy of the shared content');
+      } else {
+        console.log(
+          '  the source is untouched — share --link again to re-attach',
+        );
+      }
+      return 0;
+    }
+
+    case 'sync-settings': {
+      const [name, ...keys] = rest.filter((a) => !a.startsWith('-'));
+      if (!name || keys.length === 0) {
+        console.error(
+          `sync-settings: <name> and at least one key are required (allowed: ${share.SYNCABLE_SETTINGS_KEYS.join(', ')})`,
+        );
+        return 1;
+      }
+      const r = share.syncSettingsFor(name, keys);
+      if (r.copied.length) {
+        console.log(`✓ Copied from the anchor: ${r.copied.join(', ')}`);
+      }
+      if (r.missingInSource.length) {
+        console.log(
+          `  not set on the anchor (skipped): ${r.missingInSource.join(', ')}`,
+        );
+      }
+      console.log('  applies to NEW Claude Code sessions of that account');
       return 0;
     }
 

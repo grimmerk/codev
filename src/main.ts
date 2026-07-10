@@ -44,6 +44,7 @@ import {
   SessionStatus,
 } from './session-status-hooks';
 import * as accountManager from './cli/account-manager';
+import * as shareManager from './cli/share-manager';
 import { invalidateAccountsCache } from './accounts';
 import {
   deleteRecentProjectRecord,
@@ -737,6 +738,52 @@ ipcMain.handle('accounts-set-default', (_event, label: string) => {
     return { ok: false, error: (error as Error).message };
   }
 });
+
+// --- cross-account sharing (Batch 3) — thin wrappers over share-manager ---
+ipcMain.handle('accounts-share-status', (_event, label: string) => {
+  try {
+    return { ok: true, status: shareManager.shareStatusFor(label) };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+});
+
+ipcMain.handle(
+  'accounts-share',
+  (_event, label: string, item: string, mode: 'link' | 'copy') => {
+    try {
+      const r = shareManager.shareFor(
+        label,
+        item as shareManager.ShareItemKey,
+        mode,
+      );
+      return { ok: true, backedUpTo: r.backedUpTo };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  },
+);
+
+ipcMain.handle(
+  'accounts-unshare',
+  (
+    _event,
+    label: string,
+    item: string,
+    opts: { restoreBackup?: boolean; keepCopy?: boolean },
+  ) => {
+    try {
+      const r = shareManager.unshareFor(
+        label,
+        item as shareManager.ShareItemKey,
+        opts || {},
+      );
+      return { ok: true, restoredFrom: r.restoredFrom };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  },
+);
 
 ipcMain.handle(
   'accounts-shell-hook',

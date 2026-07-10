@@ -1,7 +1,7 @@
 /** Enhanced popup menu for working folder selection and app settings */
 import Button from '@atlaskit/button';
 import Popup from '@atlaskit/popup';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { closeAppClick, openFolderSelector } from './switcher-ui';
 
 // Brand color theme matching app.tsx
@@ -116,6 +116,22 @@ const PopupDefaultExample = ({
   const [anchorNameInput, setAnchorNameInput] = useState('');
   const [renamingLabel, setRenamingLabel] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState('');
+  // Cross-account sharing panel (Batch 3): which account's panel is open +
+  // its per-item status from the share engine.
+  type ShareEntry = {
+    state: {
+      kind: 'none' | 'own' | 'linked' | 'broken-link' | 'mixed';
+      to?: string;
+      linked?: string[];
+      own?: string[];
+    };
+    backups: string[];
+    source: string;
+    target: string;
+  };
+  type ShareStatusMap = Record<'claude-md' | 'skills' | 'commands', ShareEntry>;
+  const [sharingLabel, setSharingLabel] = useState<string | null>(null);
+  const [shareStatus, setShareStatus] = useState<ShareStatusMap | null>(null);
   const [accountsBusy, setAccountsBusy] = useState(false);
   // Footer example uses a REAL account name (prefer a non-default one) so
   // nobody reads it as a fixed keyword; the example clause is hidden entirely
@@ -237,6 +253,70 @@ const PopupDefaultExample = ({
       } else {
         setAccountsNotice('');
         setAccountsError(r.error || 'Failed to rename');
+      }
+    });
+  };
+
+  const loadShareStatus = async (label: string) => {
+    try {
+      const r = await window.electronAPI.getAccountShareStatus(label);
+      if (r.ok) {
+        setShareStatus(r.status || null);
+      } else {
+        setShareStatus(null);
+        setAccountsError(r.error || 'Failed to load sharing status');
+      }
+    } catch (e) {
+      setShareStatus(null);
+      setAccountsError((e as Error).message);
+    }
+  };
+
+  const toggleSharing = (label: string) => {
+    if (sharingLabel === label) {
+      setSharingLabel(null);
+      setShareStatus(null);
+      return;
+    }
+    setSharingLabel(label);
+    setShareStatus(null);
+    loadShareStatus(label);
+  };
+
+  const handleShare = (label: string, item: string, mode: 'link' | 'copy') => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.shareAccountItem(label, item, mode);
+      if (r.ok) {
+        setAccountsNotice(
+          `${mode === 'link' ? 'Linked' : 'Copied'} ${item}${
+            r.backedUpTo ? ' (previous content backed up)' : ''
+          } — new sessions of "${label}" pick it up.`,
+        );
+        await loadShareStatus(label);
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Share failed');
+      }
+    });
+  };
+
+  const handleUnshare = (
+    label: string,
+    item: string,
+    opts: { restoreBackup?: boolean },
+  ) => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.unshareAccountItem(label, item, opts);
+      if (r.ok) {
+        setAccountsNotice(
+          opts.restoreBackup
+            ? `Unlinked ${item} and restored the previous content.`
+            : `Unlinked ${item} — the source is untouched; Link again anytime.`,
+        );
+        await loadShareStatus(label);
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Unshare failed');
       }
     });
   };
@@ -848,7 +928,8 @@ const PopupDefaultExample = ({
               </div>
             )}
             {accounts.map((a) => (
-              <div key={a.label} style={rowStyle}>
+              <Fragment key={a.label}>
+              <div style={rowStyle}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <span style={labelStyle} title={`Config dir: ${a.dir}`}>
                     {a.label}
@@ -908,6 +989,22 @@ const PopupDefaultExample = ({
                     </>
                   ) : (
                     <>
+                      {!a.isAnchor && (
+                        <button
+                          style={{
+                            ...smallButtonStyle,
+                            color:
+                              sharingLabel === a.label
+                                ? THEME.primary
+                                : smallButtonStyle.color,
+                          }}
+                          onClick={() => toggleSharing(a.label)}
+                          disabled={accountsBusy}
+                          title="Share the anchor's CLAUDE.md / skills / commands with this account"
+                        >
+                          Sharing
+                        </button>
+                      )}
                       <button
                         style={smallButtonStyle}
                         onClick={() => {
@@ -943,6 +1040,133 @@ const PopupDefaultExample = ({
                   )}
                 </div>
               </div>
+              {sharingLabel === a.label && (
+                <div style={{ padding: '0 16px 8px 28px' }}>
+                  <div
+                    style={{
+                      fontSize: '11px',
+                      color: THEME.text.secondary,
+                      paddingBottom: '4px',
+                    }}
+                  >
+                    Share from the anchor (~/.claude) — Link stays in sync;
+                    Copy is an independent fork
+                  </div>
+                  {!shareStatus && (
+                    <div style={{ fontSize: '11px', color: '#777' }}>
+                      Loading…
+                    </div>
+                  )}
+                  {shareStatus &&
+                    (['claude-md', 'skills', 'commands'] as const).map(
+                      (item) => {
+                        const st = shareStatus[item];
+                        if (!st) return null;
+                        const tilde = (p: string) =>
+                          p.replace(/^\/Users\/[^/]+/, '~');
+                        const desc =
+                          st.state.kind === 'linked'
+                            ? `linked → ${tilde(st.state.to || '')}`
+                            : st.state.kind === 'broken-link'
+                              ? 'BROKEN link'
+                              : st.state.kind === 'mixed'
+                                ? `mixed (${st.state.linked?.length ?? 0} linked, ${st.state.own?.length ?? 0} own)`
+                                : st.state.kind === 'own'
+                                  ? 'own (not shared)'
+                                  : 'none';
+                        return (
+                          <div
+                            key={item}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '3px 0',
+                            }}
+                          >
+                            <span style={{ fontSize: '12px', color: '#ccc' }}>
+                              {item}
+                              <span
+                                style={{
+                                  color: '#777',
+                                  marginLeft: '8px',
+                                  fontSize: '11px',
+                                }}
+                              >
+                                {desc}
+                              </span>
+                            </span>
+                            <span style={{ display: 'flex', gap: '6px' }}>
+                              {(st.state.kind === 'none' ||
+                                st.state.kind === 'own') && (
+                                <>
+                                  <button
+                                    style={smallButtonStyle}
+                                    onClick={() =>
+                                      handleShare(a.label, item, 'link')
+                                    }
+                                    disabled={accountsBusy}
+                                    title="Symlink to the anchor's copy (stays in sync; existing content is backed up first)"
+                                  >
+                                    Link
+                                  </button>
+                                  <button
+                                    style={smallButtonStyle}
+                                    onClick={() =>
+                                      handleShare(a.label, item, 'copy')
+                                    }
+                                    disabled={accountsBusy}
+                                    title="Copy the anchor's version as an independent fork"
+                                  >
+                                    Copy
+                                  </button>
+                                </>
+                              )}
+                              {(st.state.kind === 'linked' ||
+                                st.state.kind === 'broken-link') && (
+                                <>
+                                  <button
+                                    style={smallButtonStyle}
+                                    onClick={() =>
+                                      handleUnshare(a.label, item, {})
+                                    }
+                                    disabled={accountsBusy}
+                                    title="Remove the link — the anchor's copy is untouched"
+                                  >
+                                    Unlink
+                                  </button>
+                                  {st.backups.length > 0 && (
+                                    <button
+                                      style={smallButtonStyle}
+                                      onClick={() =>
+                                        handleUnshare(a.label, item, {
+                                          restoreBackup: true,
+                                        })
+                                      }
+                                      disabled={accountsBusy}
+                                      title="Remove the link AND restore the content this account had before sharing"
+                                    >
+                                      Unlink & restore
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                              {st.state.kind === 'mixed' && (
+                                <span
+                                  style={{ fontSize: '10px', color: '#777' }}
+                                >
+                                  per-entry — manage via codev account share
+                                  --entry
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      },
+                    )}
+                </div>
+              )}
+              </Fragment>
             ))}
 
             {accountsLoaded && accounts.length === 0 && (
