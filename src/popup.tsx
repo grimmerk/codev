@@ -825,6 +825,13 @@ const PopupDefaultExample = ({
                             : `claude ${a.label}`
                         }`
                       : `not logged in — log in & launch: claude ${a.label}`}
+                    {/* Name and folder can diverge (rename never moves
+                        folders) — surface the folder when they do. */}
+                    {!a.dir.endsWith(`/.claude-${a.label}`) && (
+                      <span style={{ color: '#777' }}>
+                        {` · folder: ${a.dir.replace(/^\/Users\/[^/]+/, '~')}`}
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -869,6 +876,11 @@ const PopupDefaultExample = ({
               >
                 Add account
               </button>
+            </div>
+            <div style={{ padding: '0 16px 4px', fontSize: '10px', color: '#777' }}>
+              Add creates or attaches the folder ~/.claude-&lt;name&gt; — to
+              attach an existing custom folder: codev account add &lt;name&gt;
+              --dir &lt;folder&gt;
             </div>
 
             <div style={rowStyle}>
