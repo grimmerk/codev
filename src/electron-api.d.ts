@@ -68,6 +68,15 @@ interface IElectronAPI {
     item: string,
     opts: { restoreBackup?: boolean; keepCopy?: boolean },
   ) => Promise<{ ok: boolean; error?: string; restoredFrom?: string }>;
+  syncAccountSettings: (
+    label: string,
+    keys: string[],
+  ) => Promise<{
+    ok: boolean;
+    error?: string;
+    copied?: string[];
+    missingInSource?: string[];
+  }>;
   getBannerSeen: () => Promise<boolean>;
   setBannerSeen: () => void;
   invokeVSCode: (path: string, option: string) => void;

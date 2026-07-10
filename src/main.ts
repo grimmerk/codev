@@ -790,6 +790,18 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  'accounts-sync-settings',
+  (_event, label: string, keys: string[]) => {
+    try {
+      const r = shareManager.syncSettingsFor(label, keys);
+      return { ok: true, copied: r.copied, missingInSource: r.missingInSource };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  },
+);
+
+ipcMain.handle(
   'accounts-shell-hook',
   (_event, action: 'install' | 'uninstall') => {
     try {

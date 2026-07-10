@@ -348,6 +348,22 @@ const PopupDefaultExample = ({
     });
   };
 
+  const handleSyncSetting = (label: string, key: string) => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.syncAccountSettings(label, [key]);
+      if (r.ok) {
+        setAccountsNotice(
+          r.copied && r.copied.length
+            ? `Copied ${key} from the anchor — applies to NEW sessions of "${label}".`
+            : `${key} is not set on the anchor — nothing to copy.`,
+        );
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Sync failed');
+      }
+    });
+  };
+
   const handleSetDefaultAccount = (label: string) => {
     runAccountOp(async () => {
       const r = await window.electronAPI.setDefaultAccount(label);
@@ -1191,6 +1207,44 @@ const PopupDefaultExample = ({
                         );
                       },
                     )}
+                  {shareStatus && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '3px 0',
+                      }}
+                    >
+                      <span style={{ fontSize: '12px', color: '#ccc' }}>
+                        settings
+                        <span
+                          style={{
+                            color: '#777',
+                            marginLeft: '8px',
+                            fontSize: '11px',
+                          }}
+                        >
+                          copy a key from the anchor (one-time)
+                        </span>
+                      </span>
+                      <span style={{ display: 'flex', gap: '6px' }}>
+                        {(
+                          ['statusLine', 'model', 'effortLevel', 'theme'] as const
+                        ).map((k) => (
+                          <button
+                            key={k}
+                            style={smallButtonStyle}
+                            onClick={() => handleSyncSetting(a.label, k)}
+                            disabled={accountsBusy}
+                            title={`Copy the anchor's ${k} into this account's settings.json`}
+                          >
+                            {k}
+                          </button>
+                        ))}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
               </Fragment>

@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     item: string,
     opts: { restoreBackup?: boolean; keepCopy?: boolean },
   ) => ipcRenderer.invoke('accounts-unshare', label, item, opts),
+  syncAccountSettings: (label: string, keys: string[]) =>
+    ipcRenderer.invoke('accounts-sync-settings', label, keys),
   getBannerSeen: () => ipcRenderer.invoke('get-banner-seen'),
   setBannerSeen: () => ipcRenderer.send('set-banner-seen'),
   invokeVSCode: (path: string, option: string) =>
