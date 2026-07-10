@@ -468,7 +468,8 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     `env -u CLAUDE_CONFIG_DIR claude` instead — §3.4). Post-review naming UX: per-row UI Rename +
     `codev account rename` (label-only — folders never move; credentials are keyed by
     the config-dir path); the first-ever add asks what to name the existing ~/.claude
-    login (defaults to `main`, replacing the presumptuous auto-`personal`); `default` is
+    login (defaults to `main` — or `primary` when the new account itself is named
+    `main` — replacing the presumptuous auto-`personal`); `default` is
     a reserved label (it names the dispatcher-target concept). Cross-account *resume*
     (the other half of §6.G) stays deferred to Batch 3 as explicit copy-fork — a transcript lives in
     its own account's projects dir, so "resume under another account" must copy, never
