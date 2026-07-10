@@ -357,7 +357,8 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('# claude flags/subcommands still work — just not suggested).');
     L.push('_claude_codev_accounts() {');
     L.push('  if (( CURRENT == 2 )); then');
-    L.push(`    compadd ${allLabelsForClaude}`);
+    L.push('    # no label matches the typed prefix -> fall back to files');
+    L.push(`    compadd ${allLabelsForClaude} || _files`);
     L.push('  else');
     L.push('    # keep the default file completion for every other position');
     L.push('    _files');

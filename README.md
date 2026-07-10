@@ -61,7 +61,7 @@ Run multiple Claude Code accounts (e.g. personal + work) on one machine. Each ac
 | `claude-whoami` | Which account bare `claude` resolves to here, plus its auth status |
 | `claude-accounts` | Quick list of configured accounts |
 
-Tab completion included (zsh): `claude <TAB>` completes account names; `codev account <TAB>` completes subcommands and labels.
+Tab completion included (zsh): `claude <TAB>` completes account names; `codev account <TAB>` completes subcommands and labels. (The `claude` completion is registered only when nothing else completes `claude` — if you already have one, account names won't be injected into it.)
 
 The **default account** can be launched three equivalent ways: bare `claude`, `claude <its-name>`, or `claude-<its-name>` (the UI's row shows this).
 
@@ -82,7 +82,7 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 >
 > **Name vs folder.** The name is a mutable label; the folder is fixed at creation. They can diverge (after a rename) and the UI shows `· folder: …` on the row when they do. Folders deliberately never move on rename: Claude Code keys the account's credentials by the config-dir **path**, so moving the folder would orphan the login.
 >
-> **Remove is non-destructive.** It only unregisters that mapping: the account's folder, login, and session history all stay on disk. `codev account add <name>` (or the UI) later reattaches everything — identity and sessions reappear immediately, no re-login needed. **Caveat after a rename:** the folder keeps its *original* suffix (rename never moves folders), so re-attach with the folder-matching name — e.g. an account created as `work`, renamed to `ff`, then removed, re-attaches via `add work` (or any name with `--dir ~/.claude-work`), **not** `add ff`.
+> **Remove is non-destructive.** It only unregisters that mapping: the account's folder, login, and session history all stay on disk. `codev account add <name>` (or the UI) later reattaches everything — identity and sessions reappear immediately, no re-login needed. **Caveat after a rename:** the folder keeps its *original* suffix (rename never moves folders), so re-attach with the folder-matching name — e.g. an account created as `work`, renamed to `ff`, then removed, re-attaches via `add work` (or any name with `--dir ~/.claude-work`), **not** `add ff`. Likewise, an account originally registered with a custom `--dir` always needs `--dir <original-folder>` again on re-add.
 
 **Common scenarios:**
 
@@ -104,7 +104,7 @@ The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_
 |-------|------|
 | Settings → Accounts | List/add/remove accounts, set the global default, install shell integration |
 | Sessions tab | Sessions from all accounts with account badges; resume uses each session's own account |
-| Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default) |
+| Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
 
 **Gotcha:** inside a Claude Code session, `!claude auth status` reports the *global default* (the shell snapshot carries the dispatcher function), not the session's account — use `!command claude auth status` instead. Full design + details: [docs/multi-account-support-design.md](docs/multi-account-support-design.md).
 

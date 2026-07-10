@@ -3,7 +3,7 @@
 ## 1.0.80
 
 - Feat: multi-account Batch 2c-lite — pick the account when launching a new session
-  - `⌥⌘+Enter` on a project opens a small account picker (↑↓ / Enter / Esc, or click); the chosen account launches via explicit `CLAUDE_CONFIG_DIR` + `command claude` (correct on iTerm2/Terminal.app/Ghostty/cmux)
+  - `⌥⌘+Enter` on a project opens a small account picker (↑↓ / Enter / Esc, or click) — external terminals (iTerm2/Terminal.app/Ghostty/cmux); a non-default pick launches via explicit `CLAUDE_CONFIG_DIR` + `command claude`, a default-account pick via `env -u CLAUDE_CONFIG_DIR claude`
   - Plain `⌘+Enter` unchanged: opens instantly under the global default; single-account (or registry-less) setups never see the picker
   - Search-bar hint shows `⌥⌘+Enter: pick account` only for multi-account setups, and updates live after account changes (no app restart)
   - Tab completion for `claude <name>`: `claude <TAB>` completes account names (polite: skipped if another completion owns `claude`; other positions keep file completion)

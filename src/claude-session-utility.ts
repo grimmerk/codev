@@ -1435,9 +1435,21 @@ export const launchNewClaudeSession = (
   let claudeCmd = 'claude';
   if (accountLabel) {
     const account = getAccountByLabel(accountLabel);
-    claudeCmd = account?.configDirEnv
+    if (account?.label !== accountLabel) {
+      // Stale/unknown label (e.g. the account was removed after the picker
+      // loaded) — getAccountByLabel falls back to the default account, so
+      // abort instead of silently launching a different identity.
+      console.error(
+        '[launchNewClaudeSession] unknown account label, aborting:',
+        accountLabel,
+      );
+      return;
+    }
+    // Explicit pick of the default account: clear any inherited
+    // CLAUDE_CONFIG_DIR too (matches the generated accounts.sh launchers).
+    claudeCmd = account.configDirEnv
       ? `CLAUDE_CONFIG_DIR='${account.configDirEnv.replace(/'/g, "'\\''")}' command claude`
-      : 'command claude';
+      : 'env -u CLAUDE_CONFIG_DIR claude';
   }
   // Pass claudeCmd as the 2nd arg too — Ghostty/cmux build their launch
   // scripts from it (iTerm2/Terminal.app use fullCommand), so the account

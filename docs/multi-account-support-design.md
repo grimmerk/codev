@@ -478,8 +478,10 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
     the session's own account); dropped on value, not feasibility.
   - *2e — ✅ shipped with 2a (PR #123, v1.0.77):* configurable global-default —
     `codev account default <label>` / Settings → Set default routes bare `claude`
-    through the dispatcher `*)` to the chosen account; CodeV resume/launch bypass the
-    dispatcher with `command claude` so explicit account choices can't be re-routed.
+    through the dispatcher `*)` to the chosen account. CodeV bypasses the dispatcher
+    only for *account-explicit* operations (resuming a session under its own account,
+    picker launches) via `command claude` / explicit env; the plain ⌘+Enter new-session
+    path deliberately stays on bare `claude` so the dispatcher's global default applies.
 - **Batch 3 — later:** cross-account symlink reuse of global files
   (CLAUDE.md / skills / commands / plugins / settings, §5).
 

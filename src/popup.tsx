@@ -917,7 +917,9 @@ const PopupDefaultExample = ({
             <div style={{ padding: '4px 16px', fontSize: '11px', color: THEME.text.secondary }}>
               Registry: ~/.config/codev/accounts.json
               {accounts.length > 0 &&
-                ` — launch any account above by its name: claude ${exampleAccountLabel} and claude-${exampleAccountLabel} are equivalent`}
+                (accountsShellInstalled
+                  ? ` — launch any account above by its name: claude ${exampleAccountLabel} and claude-${exampleAccountLabel} are equivalent`
+                  : ' — install Shell integration above to launch accounts by name from the terminal')}
             </div>
           </div>
           )}

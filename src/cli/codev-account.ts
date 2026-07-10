@@ -107,7 +107,11 @@ function main(): number {
       const [oldLabel, newLabel] = rest;
       manager.renameAccount(oldLabel, newLabel);
       console.log(`✓ Renamed "${oldLabel}" → "${newLabel}" (folder unchanged)`);
-      reloadHint();
+      // A plain `source ~/.zshrc` adds the new functions but does NOT unset
+      // the old claude-<oldLabel> in the current shell — recommend a new one.
+      console.log(
+        `  → open a NEW shell (sourcing would keep the old claude-${oldLabel} defined here)`,
+      );
       return 0;
     }
 
