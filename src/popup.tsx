@@ -287,8 +287,28 @@ const PopupDefaultExample = ({
     }
     setSharingLabel(label);
     setShareStatus(null);
-    loadShareStatus(label);
+    // loading is owned by the effects below (open + focus refresh)
   };
+
+  // Own the panel's freshness: load on open, and RE-load when the window
+  // regains focus — the user may have changed the underlying files from a
+  // terminal (e.g. echo > CLAUDE.md) while the panel sat open. (User-reported:
+  // the panel showed a stale state until an app restart.)
+  useEffect(() => {
+    if (isOpen && settingsTab === 'accounts' && sharingLabel) {
+      loadShareStatus(sharingLabel);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, settingsTab, sharingLabel]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      if (sharingLabel) loadShareStatus(sharingLabel);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharingLabel]);
 
   const handleShare = (label: string, item: string, mode: 'link' | 'copy') => {
     runAccountOp(async () => {
@@ -1009,7 +1029,7 @@ const PopupDefaultExample = ({
                           disabled={accountsBusy}
                           title="Share the anchor's CLAUDE.md / skills / commands with this account"
                         >
-                          Sharing
+                          Sharing {sharingLabel === a.label ? '▾' : '▸'}
                         </button>
                       )}
                       <button
