@@ -25,8 +25,12 @@ export interface RegistryAccount {
   label: string;
   dir: string; // config dir (session data lives under <dir>/projects, /sessions)
   identityFile: string; // .claude.json path
-  configDirEnv: string | null; // CLAUDE_CONFIG_DIR at launch; null => default account
-  isDefault: boolean; // the anchor ~/.claude account (HOME .claude.json)
+  configDirEnv: string | null; // CLAUDE_CONFIG_DIR at launch; null => anchor account
+  // The anchor is the machine's ~/.claude account (identity at HOME
+  // .claude.json, launched with NO CLAUDE_CONFIG_DIR). Distinct from the
+  // GLOBAL DEFAULT (`defaultAccount` below, what bare `claude` opens) — the
+  // field was historically called `isDefault`, which conflated the two.
+  isAnchor: boolean;
   email?: string;
   org?: string;
   subscription?: string;
@@ -82,8 +86,8 @@ const toTildePath = (p: string): string => {
     : p;
 };
 
-/** Is this dir the special DEFAULT account (~/.claude, HOME .claude.json)? */
-const isDefaultDir = (dir: string): boolean =>
+/** Is this dir the ANCHOR account's (~/.claude, HOME .claude.json)? */
+const isAnchorDir = (dir: string): boolean =>
   path.resolve(expandHome(dir)) === defaultDir();
 
 // Registry dirs get embedded (double-quoted) into the generated accounts.sh and
@@ -126,16 +130,31 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
 // registry read / write
 // ---------------------------------------------------------------------------
 
+/**
+ * Normalize a parsed registry: legacy entries used `isDefault` for what is
+ * really the ANCHOR flag — accept it, expose `isAnchor`, and drop the old key
+ * (so the migration completes on the next write). Pure, for testability.
+ */
+export function normalizeRegistry(raw: unknown): Registry {
+  const reg = (raw && typeof raw === 'object' ? raw : {}) as Registry;
+  if (!reg.version) reg.version = 1;
+  if (!Array.isArray(reg.accounts)) reg.accounts = [];
+  reg.accounts = reg.accounts.map(
+    (a: RegistryAccount & { isDefault?: boolean }) => {
+      const { isDefault, ...rest } = a;
+      return { ...rest, isAnchor: a.isAnchor ?? isDefault ?? false };
+    },
+  );
+  return reg;
+}
+
 export function readRegistry(): Registry {
   if (!fs.existsSync(REGISTRY_PATH)) {
     // No hardcoded default — the first added account becomes the default, and
     // resolveDefaultLabel falls back to the anchor. Avoids a dangling reference.
     return { version: 1, accounts: [] };
   }
-  const raw = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf-8')) as Registry;
-  if (!raw.version) raw.version = 1;
-  if (!Array.isArray(raw.accounts)) raw.accounts = [];
-  return raw;
+  return normalizeRegistry(JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf-8')));
 }
 
 export function writeRegistry(reg: Registry): void {
@@ -167,7 +186,7 @@ export function resolveDefaultLabel(reg: Registry): string | undefined {
   ) {
     return reg.defaultAccount;
   }
-  const anchor = accounts.find((a) => a.isDefault) || accounts[0];
+  const anchor = accounts.find((a) => a.isAnchor) || accounts[0];
   return anchor ? anchor.label : undefined;
 }
 
@@ -326,7 +345,7 @@ export function generateAccountsSh(reg: Registry): string {
     // bash-sourceable; registration is guarded for zsh + a loaded compinit.
     const allLabels = accounts.map((a) => a.label).join(' ');
     const removable = accounts
-      .filter((a) => !a.isDefault)
+      .filter((a) => !a.isAnchor)
       .map((a) => a.label)
       .join(' ');
     L.push('');
@@ -454,12 +473,12 @@ export function addAccount(
       `That folder is already registered as "${dupDir.label}" (${dir})`,
     );
   }
-  const isDefault = isDefaultDir(dir);
+  const isAnchor = isAnchorDir(dir);
   // Fresh registry + adding an EXTRA account: seed the anchor (~/.claude)
   // account first, so the machine's existing default install stays registered
   // and keeps the global default (instead of it silently moving to a
   // brand-new, not-yet-logged-in account).
-  if (reg.accounts.length === 0 && !isDefault) {
+  if (reg.accounts.length === 0 && !isAnchor) {
     // The anchor's name is the USER'S choice (UI first-add field / CLI
     // --anchor-name); 'main' is only the neutral prefill — never assume
     // 'personal' (the machine's first login may well be a company account).
@@ -481,20 +500,20 @@ export function addAccount(
       dir: defaultDir(),
       identityFile: anchorIdentity,
       configDirEnv: null,
-      isDefault: true,
+      isAnchor: true,
       ...readIdentity(anchorIdentity),
     });
     reg.defaultAccount = anchorLabel;
   }
-  const identityFile = isDefault
+  const identityFile = isAnchor
     ? path.join(os.homedir(), '.claude.json')
     : path.join(dir, '.claude.json');
   const entry: RegistryAccount = {
     label,
     dir,
     identityFile,
-    configDirEnv: isDefault ? null : dir,
-    isDefault,
+    configDirEnv: isAnchor ? null : dir,
+    isAnchor,
     loggedIn: false,
     ...readIdentity(identityFile),
   };
@@ -516,7 +535,7 @@ export function removeAccount(label: string): string | undefined {
   if (reg.accounts.length === 1) {
     throw new Error('Refusing to remove the only configured account');
   }
-  if (reg.accounts[idx].isDefault) {
+  if (reg.accounts[idx].isAnchor) {
     throw new Error(
       `"${label}" is the anchor (~/.claude) account and can't be unregistered`,
     );
@@ -526,7 +545,7 @@ export function removeAccount(label: string): string | undefined {
   // removing a non-default account leaves the default untouched.
   let reassignedDefault: string | undefined;
   if (reg.defaultAccount === label) {
-    const anchor = reg.accounts.find((a) => a.isDefault) || reg.accounts[0];
+    const anchor = reg.accounts.find((a) => a.isAnchor) || reg.accounts[0];
     reg.defaultAccount = anchor.label;
     reassignedDefault = anchor.label;
   }

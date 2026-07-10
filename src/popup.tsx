@@ -98,7 +98,7 @@ const PopupDefaultExample = ({
   type AccountRow = {
     label: string;
     dir: string;
-    isDefault: boolean;
+    isAnchor: boolean;
     isCurrentDefault: boolean;
     email?: string;
     loggedIn?: boolean;
@@ -929,7 +929,7 @@ const PopupDefaultExample = ({
                           Set default
                         </button>
                       )}
-                      {!a.isDefault && (
+                      {!a.isAnchor && (
                         <button
                           style={{ ...smallButtonStyle, color: THEME.button.warning }}
                           onClick={() => handleRemoveAccount(a.label)}

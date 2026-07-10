@@ -6,7 +6,7 @@ type IpcCallback = (event: Electron.IpcRendererEvent, ...args: any[]) => void;
 interface CodevAccountInfo {
   label: string;
   dir: string;
-  isDefault: boolean; // the anchor ~/.claude account
+  isAnchor: boolean; // the anchor ~/.claude account (not the dispatcher default)
   isCurrentDefault: boolean; // what bare `claude` resolves to
   email?: string;
   org?: string;

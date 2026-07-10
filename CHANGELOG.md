@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.81
+
+- Refactor: registry field `isDefault` → `isAnchor` (naming collision fix)
+  - The per-account flag marks the **anchor** (`~/.claude`) account; the *dispatcher default* is the top-level `defaultAccount` — the old name conflated the two (an account could read `isDefault: true` while not being the bare-`claude` default)
+  - Backward compatible: legacy `isDefault` registries are read as-is and migrate to `isAnchor` on the next write; no behavior change
+
 ## 1.0.80
 
 - Feat: multi-account Batch 2c-lite — pick the account when launching a new session

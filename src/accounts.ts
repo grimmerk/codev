@@ -21,10 +21,13 @@ import * as fs from 'fs';
 
 export interface CodevAccount {
   label: string;
-  dir: string; // config dir for session scanning (default account: ~/.claude)
-  configDirEnv: string | null; // CLAUDE_CONFIG_DIR at launch; null => default account (unset)
-  identityFile: string; // .claude.json path (HOME for default, <dir>/.claude.json otherwise)
-  isDefault: boolean;
+  dir: string; // config dir for session scanning (anchor account: ~/.claude)
+  configDirEnv: string | null; // CLAUDE_CONFIG_DIR at launch; null => anchor account (unset)
+  identityFile: string; // .claude.json path (HOME for the anchor, <dir>/.claude.json otherwise)
+  // The anchor is the ~/.claude account — distinct from the GLOBAL DEFAULT
+  // (registry `defaultAccount`, what bare `claude` opens). Historically this
+  // field was called `isDefault`, which conflated the two concepts.
+  isAnchor: boolean;
   email?: string;
   org?: string;
   subscription?: string;
@@ -37,7 +40,8 @@ interface RawAccount {
   dir?: string;
   configDirEnv?: string | null;
   identityFile?: string;
-  isDefault?: boolean;
+  isAnchor?: boolean;
+  isDefault?: boolean; // legacy name for isAnchor (pre-1.0.81 registries)
   email?: string;
   org?: string;
   subscription?: string;
@@ -59,12 +63,12 @@ const REGISTRY_PATH = path.join(
 const expandHome = (p: string): string =>
   p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p;
 
-const makeDefaultAccount = (): CodevAccount => ({
+const makeAnchorAccount = (): CodevAccount => ({
   label: 'default',
   dir: path.join(os.homedir(), '.claude'),
   configDirEnv: null,
   identityFile: path.join(os.homedir(), '.claude.json'),
-  isDefault: true,
+  isAnchor: true,
 });
 
 let cached: CodevAccount[] | null = null;
@@ -88,7 +92,7 @@ export const getAccounts = (): CodevAccount[] => {
   let accounts: CodevAccount[];
   try {
     if (!fs.existsSync(REGISTRY_PATH)) {
-      accounts = [makeDefaultAccount()];
+      accounts = [makeAnchorAccount()];
     } else {
       const raw = JSON.parse(
         fs.readFileSync(REGISTRY_PATH, 'utf-8'),
@@ -100,20 +104,22 @@ export const getAccounts = (): CodevAccount[] => {
         const dir = expandHome(
           String(a.dir || path.join(os.homedir(), '.claude')),
         );
-        // Tolerate a partial registry entry: if isDefault is omitted, infer it
-        // from the top-level defaultAccount label.
-        const isDefault =
+        // isAnchor with legacy fallback: old registries wrote `isDefault`;
+        // if both are omitted, infer from the top-level defaultAccount label
+        // (tolerating partial hand-written entries).
+        const isAnchor =
+          a.isAnchor ??
           a.isDefault ??
           (!!raw.defaultAccount && a.label === raw.defaultAccount);
         const configDirEnv =
           a.configDirEnv === null || a.configDirEnv === undefined
-            ? isDefault
+            ? isAnchor
               ? null
               : dir
             : expandHome(String(a.configDirEnv));
         const identityFile = a.identityFile
           ? expandHome(String(a.identityFile))
-          : isDefault
+          : isAnchor
             ? path.join(os.homedir(), '.claude.json')
             : path.join(dir, '.claude.json');
         return {
@@ -121,7 +127,7 @@ export const getAccounts = (): CodevAccount[] => {
           dir,
           configDirEnv,
           identityFile,
-          isDefault,
+          isAnchor,
           email: a.email,
           org: a.org,
           subscription: a.subscription,
@@ -129,12 +135,12 @@ export const getAccounts = (): CodevAccount[] => {
         };
       });
       if (accounts.length === 0) {
-        accounts = [makeDefaultAccount()];
+        accounts = [makeAnchorAccount()];
       }
     }
   } catch (error) {
     console.error('Error reading codev accounts registry:', error);
-    accounts = [makeDefaultAccount()];
+    accounts = [makeAnchorAccount()];
   }
 
   cached = accounts;
@@ -155,12 +161,12 @@ export const getScannableAccounts = (): CodevAccount[] =>
     }
   });
 
-/** Look up an account by label (falls back to the default account). */
+/** Look up an account by label (falls back to the anchor account). */
 export const getAccountByLabel = (label: string | undefined): CodevAccount => {
   const accounts = getAccounts();
   return (
     accounts.find((a) => a.label === label) ||
-    accounts.find((a) => a.isDefault) ||
+    accounts.find((a) => a.isAnchor) ||
     accounts[0]
   );
 };

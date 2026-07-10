@@ -189,7 +189,7 @@ Single source of truth (registry), read by both the shell layer and CodeV:
      "projectMap": { "/Users/me/git/work-repo": "work" }   // §6.H, optional
    }
    // Simplified sketch — each entry also records `configDirEnv`, `identityFile`,
-   // and `isDefault`; see §11 for the full copy-paste schema.
+   // and `isAnchor` (legacy name `isDefault` still read); see §11 for the schema.
 ```
 
 Launching account X = `CLAUDE_CONFIG_DIR=<X.dir> claude …` **for extra accounts**; the
@@ -546,8 +546,11 @@ No CLI/PATH helper exists today; the hook installer is the reference pattern.
 Batch 1 ships the *engine*; account setup is manual until the Batch 2 UI/CLI.
 
 - **Registry** — `~/.config/codev/accounts.json`: one entry per account with
-  `label`, `dir`, `configDirEnv` (null for the default), `identityFile`, `isDefault`.
-  The default account is `~/.claude` (its `.claude.json` sits at `~/.claude.json`,
+  `label`, `dir`, `configDirEnv` (null for the anchor), `identityFile`, `isAnchor`
+  (the ~/.claude anchor flag — NOT the dispatcher default, which is the top-level
+  `defaultAccount`; the legacy field name `isDefault` is still accepted on read and
+  migrated on the next write). The anchor account is `~/.claude` (its `.claude.json`
+  sits at `~/.claude.json`,
   HOME level — never set `CLAUDE_CONFIG_DIR=~/.claude`, see §3.4). Extra accounts
   live in `~/.claude-<label>`.
 - **Shell** — `~/.config/codev/accounts.sh` (sourced from `~/.zshrc`) defines
@@ -570,8 +573,8 @@ Batch 1 ships the *engine*; account setup is manual until the Batch 2 UI/CLI.
   "version": 1,
   "defaultAccount": "personal",
   "accounts": [
-    { "label": "personal", "dir": "/Users/you/.claude",       "identityFile": "/Users/you/.claude.json",            "configDirEnv": null,                        "isDefault": true },
-    { "label": "work",     "dir": "/Users/you/.claude-work",  "identityFile": "/Users/you/.claude-work/.claude.json", "configDirEnv": "/Users/you/.claude-work", "isDefault": false }
+    { "label": "personal", "dir": "/Users/you/.claude",       "identityFile": "/Users/you/.claude.json",            "configDirEnv": null,                        "isAnchor": true },
+    { "label": "work",     "dir": "/Users/you/.claude-work",  "identityFile": "/Users/you/.claude-work/.claude.json", "configDirEnv": "/Users/you/.claude-work", "isAnchor": false }
   ]
 }
 ```

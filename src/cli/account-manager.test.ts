@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   generateAccountsSh,
+  normalizeRegistry,
   resolveDefaultLabel,
   type Registry,
 } from './account-manager';
@@ -23,14 +24,14 @@ function reg(overrides: Partial<Registry> = {}): Registry {
         dir: path.join(HOME, '.claude'),
         identityFile: path.join(HOME, '.claude.json'),
         configDirEnv: null,
-        isDefault: true,
+        isAnchor: true,
       },
       {
         label: 'work',
         dir: path.join(HOME, '.claude-work'),
         identityFile: path.join(HOME, '.claude-work', '.claude.json'),
         configDirEnv: path.join(HOME, '.claude-work'),
-        isDefault: false,
+        isAnchor: false,
       },
     ],
     ...overrides,
@@ -82,7 +83,7 @@ describe('generateAccountsSh', () => {
           dir: '/tmp/$(touch pwned)',
           identityFile: '/tmp/x/.claude.json',
           configDirEnv: '/tmp/$(touch pwned)',
-          isDefault: false,
+          isAnchor: false,
         },
       ],
     });
@@ -118,7 +119,7 @@ describe('generateAccountsSh', () => {
           dir: '/tmp/clean',
           identityFile: '/tmp/clean/.claude.json',
           configDirEnv: '/tmp/$(touch pwned)',
-          isDefault: false,
+          isAnchor: false,
         },
       ],
     });
@@ -181,7 +182,7 @@ describe('generateAccountsSh', () => {
           dir: '/tmp/clean',
           identityFile: '/tmp/clean/.claude.json',
           configDirEnv: '/tmp/clean',
-          isDefault: false,
+          isAnchor: false,
         },
       ],
     });
@@ -197,11 +198,46 @@ describe('generateAccountsSh', () => {
           dir: '/tmp/x',
           identityFile: '/tmp/x/.claude.json',
           configDirEnv: '',
-          isDefault: false,
+          isAnchor: false,
         },
       ],
     });
     expect(() => generateAccountsSh(bad)).toThrow(/Invalid account path/);
+  });
+});
+
+describe('normalizeRegistry', () => {
+  it('migrates the legacy isDefault field to isAnchor', () => {
+    const norm = normalizeRegistry({
+      version: 1,
+      defaultAccount: 'work',
+      accounts: [
+        {
+          label: 'personal',
+          dir: '/u/.claude',
+          identityFile: '/u/.claude.json',
+          configDirEnv: null,
+          isDefault: true, // legacy name
+        },
+        {
+          label: 'work',
+          dir: '/u/.claude-work',
+          identityFile: '/u/.claude-work/.claude.json',
+          configDirEnv: '/u/.claude-work',
+          isDefault: false, // legacy name
+        },
+      ],
+    });
+    expect(norm.accounts[0].isAnchor).toBe(true);
+    expect(norm.accounts[1].isAnchor).toBe(false);
+    // legacy key dropped so the migration completes on the next write
+    expect('isDefault' in norm.accounts[0]).toBe(false);
+    // and a legacy registry still generates a correct accounts.sh
+    const sh = generateAccountsSh(norm);
+    expect(sh).toContain(
+      'claude-personal() { env -u CLAUDE_CONFIG_DIR claude "$@"; }',
+    );
+    expect(resolveDefaultLabel(norm)).toBe('work');
   });
 });
 
@@ -210,13 +246,13 @@ describe('resolveDefaultLabel', () => {
     expect(resolveDefaultLabel(reg({ defaultAccount: 'work' }))).toBe('work');
   });
 
-  it('falls back to the isDefault anchor when defaultAccount is missing', () => {
+  it('falls back to the anchor when defaultAccount is missing', () => {
     expect(resolveDefaultLabel(reg({ defaultAccount: undefined }))).toBe(
       'personal',
     );
   });
 
-  it('falls back to the isDefault anchor when defaultAccount is unknown', () => {
+  it('falls back to the anchor when defaultAccount is unknown', () => {
     expect(resolveDefaultLabel(reg({ defaultAccount: 'ghost' }))).toBe(
       'personal',
     );
