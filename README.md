@@ -104,7 +104,7 @@ The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_
 
 **Cross-account sharing** (also in the UI: each account row's **Sharing** button):
 
-Share the anchor's global files with other accounts — per item, three choices: **Link** (symlink; one file, stays in sync, edits from either side land in the same place), **Copy** (independent fork), or skip. Never silently overwrites: existing content is backed up to a timestamped `.codev-bak-*` sibling first, which also makes **Unlink & restore** a true undo. Plain Unlink loses nothing (the anchor's copy is untouched; re-link anytime).
+Share the anchor's global files with other accounts — per item, three choices: **Link** (symlink; one file, stays in sync, edits from either side land in the same place), **Copy** (independent fork), or skip. Never silently overwrites: existing content is backed up to a timestamped `.codev-bak-*` sibling first, which also makes **Unlink & restore** a true undo. Plain Unlink loses nothing (the anchor's copy is untouched; re-link anytime). The panel also has one-click **settings-key sync** buttons (`statusLine` / `model` / `effortLevel` / `theme`) and refreshes automatically when the window regains focus (so terminal-side file changes show up live).
 
 | Item | Shareable? | How |
 |------|------------|-----|
@@ -117,7 +117,7 @@ Share the anchor's global files with other accounts — per item, three choices:
 
 | Where | What |
 |-------|------|
-| Settings → Accounts | List/add/remove/rename accounts, set the global default, install shell integration, per-account **Sharing** panel |
+| Settings → Accounts | List/add/remove/rename accounts, set the global default, install shell integration, per-account **Sharing** panel (link/copy/unlink + settings-key sync) |
 | Sessions tab | Sessions from all accounts with account badges; resume uses each session's own account |
 | Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
 
