@@ -88,7 +88,7 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 
 | You are… | What happens / what to do |
 |----------|---------------------------|
-| An existing Claude Code user opening CodeV for the first time | Accounts tab is **empty** (zero footprint — no registry is created until you act); your `~/.claude` login keeps working as before. When you add a second account, **you name your existing login at the same time** (a field appears, prefilled `main`) and both get registered together. |
+| An existing Claude Code user opening CodeV for the first time | Accounts tab is **empty** (zero footprint — no registry is created until you act); your `~/.claude` login keeps working as before. When you add a second account, **you name your existing login at the same time** (a field appears; empty = `main`) and both get registered together. |
 | Renaming any account later | The **Rename** button on each row, or `codev account rename <old> <new>`. To pre-name your existing default before adding anything: `codev account add <name> --dir ~/.claude` (registers the default itself; no extra account created). `default` is a reserved name. |
 | Starting fresh: add first, log in later | Add a name (UI or CLI) → it shows "not logged in" → in a new shell, `claude <name>` runs Claude Code's login and creates the folder. |
 | Already running a second account by hand (own shell function + custom folder) | Register it with `codev account add <name> --dir <your-folder>` — **any folder works**; `~/.claude-<name>` is only the default. Identity and sessions attach immediately, no re-login. If your hand-rolled wrapper was named `claude`, retire it (it would fight the generated dispatcher). |

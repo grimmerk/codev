@@ -110,9 +110,10 @@ const PopupDefaultExample = ({
   const [accountsNotice, setAccountsNotice] = useState('');
   const [newAccountLabel, setNewAccountLabel] = useState('');
   // First-ever add also registers the existing ~/.claude login — the USER
-  // picks its name ('main' is only a neutral prefill; never assume
-  // 'personal': the machine's first login may be a company account).
-  const [anchorNameInput, setAnchorNameInput] = useState('main');
+  // picks its name. Empty means "let the manager decide" ('main', or
+  // 'primary' when the new account itself is named main) so the backend
+  // fallback stays the single source of truth.
+  const [anchorNameInput, setAnchorNameInput] = useState('');
   const [renamingLabel, setRenamingLabel] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState('');
   const [accountsBusy, setAccountsBusy] = useState(false);
@@ -172,16 +173,21 @@ const PopupDefaultExample = ({
     const label = newAccountLabel.trim();
     if (!label) return;
     const isFirstAdd = accountsLoaded && accounts.length === 0;
+    // Pass undefined when untouched so the manager's fallback applies
+    // ('main', or 'primary' when the new account itself is named main).
     const anchorName = isFirstAdd
-      ? anchorNameInput.trim() || 'main'
+      ? anchorNameInput.trim() || undefined
+      : undefined;
+    const effectiveAnchor = isFirstAdd
+      ? anchorName || (label === 'main' ? 'primary' : 'main')
       : undefined;
     runAccountOp(async () => {
       const r = await window.electronAPI.addAccount(label, anchorName);
       if (r.ok) {
         setNewAccountLabel('');
         const dir = r.account?.dir || `~/.claude-${label}`;
-        const anchorNote = anchorName
-          ? ` Your existing login is registered as "${anchorName}".`
+        const anchorNote = effectiveAnchor
+          ? ` Your existing login is registered as "${effectiveAnchor}".`
           : '';
         setAccountsNotice(
           accountsShellInstalled
@@ -947,6 +953,7 @@ const PopupDefaultExample = ({
                 <input
                   value={anchorNameInput}
                   onChange={(e) => setAnchorNameInput(e.target.value)}
+                  placeholder="main"
                   disabled={accountsBusy}
                   style={{ ...selectStyle, cursor: 'text', width: '110px' }}
                 />

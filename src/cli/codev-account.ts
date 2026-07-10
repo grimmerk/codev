@@ -23,7 +23,8 @@ Usage:
   codev account add <label> [--dir D] [--anchor-name N]
                                      Register a new account (default dir ~/.claude-<label>);
                                      on the first-ever add, N names your existing
-                                     ~/.claude account (default: main)
+                                     ~/.claude account (default: main — or primary
+                                     when the new account itself is named main)
   codev account default <label>      Set which account bare \`claude\` resolves to
   codev account remove <label>       Unregister an account (leaves its dir on disk)
   codev account rename <old> <new>   Rename an account's label (folder is not moved)
