@@ -78,7 +78,7 @@ Tab completion included (zsh): `claude <TAB>` completes account names; `codev ac
 
 > **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`).
 >
-> **Remove is non-destructive.** It only unregisters that mapping: the account's folder, login, and session history all stay on disk. `codev account add <name>` (or the UI) later reattaches everything — identity and sessions reappear immediately, no re-login needed.
+> **Remove is non-destructive.** It only unregisters that mapping: the account's folder, login, and session history all stay on disk. `codev account add <name>` (or the UI) later reattaches everything — identity and sessions reappear immediately, no re-login needed. **Caveat after a rename:** the folder keeps its *original* suffix (rename never moves folders), so re-attach with the folder-matching name — e.g. an account created as `work`, renamed to `ff`, then removed, re-attaches via `add work` (or any name with `--dir ~/.claude-work`), **not** `add ff`.
 
 **Common scenarios:**
 

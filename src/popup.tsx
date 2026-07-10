@@ -185,11 +185,15 @@ const PopupDefaultExample = ({
 
   const handleRemoveAccount = (label: string) => {
     runAccountOp(async () => {
+      // Capture the folder before it leaves the list — after a rename the
+      // label no longer matches the folder suffix, so "add the same name
+      // back" would point at the WRONG (empty) folder.
+      const removedDir = accounts.find((a) => a.label === label)?.dir;
       const r = await window.electronAPI.removeAccount(label);
       if (r.ok) {
         setAccountsNotice(
-        `Removed "${label}" — its folder, login and sessions stay on disk; add "${label}" back anytime to reattach them.`,
-      );
+          `Removed "${label}" — folder kept${removedDir ? ` (${removedDir})` : ''}, login and sessions intact. Re-attach later by adding a name that matches the folder suffix, or: codev account add <name> --dir <folder>.`,
+        );
         await refreshAccounts();
       } else {
         setAccountsNotice('');
@@ -816,7 +820,9 @@ const PopupDefaultExample = ({
                   <span style={{ fontSize: '11px', color: THEME.text.secondary }}>
                     {a.loggedIn
                       ? `${a.email || 'logged in'} — launch: ${
-                          a.isCurrentDefault ? 'claude' : `claude ${a.label}`
+                          a.isCurrentDefault
+                            ? `claude (or claude ${a.label})`
+                            : `claude ${a.label}`
                         }`
                       : `not logged in — log in & launch: claude ${a.label}`}
                   </span>

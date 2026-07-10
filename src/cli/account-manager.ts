@@ -433,6 +433,16 @@ export function addAccount(
     opts.dir || path.join(os.homedir(), `.claude-${label}`),
   );
   assertSafeDir(dir);
+  // One folder = one account: a second mapping to the same dir would make
+  // CodeV double-scan its sessions and blur attribution.
+  const dupDir = reg.accounts.find(
+    (a) => path.resolve(expandHome(a.dir)) === path.resolve(dir),
+  );
+  if (dupDir) {
+    throw new Error(
+      `That folder is already registered as "${dupDir.label}" (${dir})`,
+    );
+  }
   const isDefault = isDefaultDir(dir);
   // Fresh registry + adding an EXTRA account: seed the anchor (~/.claude)
   // account first, so the machine's existing default install stays registered
