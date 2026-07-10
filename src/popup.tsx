@@ -1029,7 +1029,7 @@ const PopupDefaultExample = ({
                           disabled={accountsBusy}
                           title="Share the anchor's CLAUDE.md / skills / commands with this account"
                         >
-                          Sharing {sharingLabel === a.label ? '▾' : '▸'}
+                              Sharing {sharingLabel === a.label ? '▾' : '▸'}
                         </button>
                       )}
                       <button
