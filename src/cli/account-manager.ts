@@ -176,6 +176,11 @@ export function readIdentity(identityFile: string): Identity {
   }
 }
 
+/** An account's settings.json lives inside its config dir (anchor included). */
+export const getSettingsPath = (
+  account: Pick<RegistryAccount, 'dir'>,
+): string => path.join(expandHome(account.dir), 'settings.json');
+
 /** Label bare `claude` maps to (defaultAccount if valid, else the anchor). */
 export function resolveDefaultLabel(reg: Registry): string | undefined {
   const accounts = reg.accounts || [];
@@ -354,12 +359,23 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('    compadd account');
     L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
     L.push(
-      '    compadd list add default remove rm rename regenerate show install uninstall help',
+      '    compadd list add default remove rm rename share unshare sync-settings regenerate show install uninstall help',
     );
     L.push('  elif (( CURRENT == 4 )) && [ "${words[2]}" = "account" ]; then');
     L.push('    case "${words[3]}" in');
     if (allLabels) L.push(`      default|rename) compadd ${allLabels} ;;`);
-    if (removable) L.push(`      remove|rm) compadd ${removable} ;;`);
+    if (removable) {
+      L.push(
+        `      remove|rm|share|unshare|sync-settings) compadd ${removable} ;;`,
+      );
+    }
+    L.push('    esac');
+    L.push('  elif (( CURRENT == 5 )) && [ "${words[2]}" = "account" ]; then');
+    L.push('    case "${words[3]}" in');
+    L.push('      share|unshare) compadd claude-md skills commands ;;');
+    L.push(
+      '      sync-settings) compadd statusLine model effortLevel theme ;;',
+    );
     L.push('    esac');
     L.push('  fi');
     L.push('}');

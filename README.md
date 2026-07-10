@@ -77,6 +77,10 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 | `codev account regenerate` (`regen`) | Rewrite `accounts.sh` from the registry |
 | `codev account show` (`preview`) | Dry-run print of the generated `accounts.sh` |
 | `codev account install` / `uninstall` | Add / remove the `~/.zshrc` source block |
+| `codev account share <name>` | Sharing status for that account (claude-md / skills / commands) |
+| `codev account share <name> <item> --link\|--copy [--entry E]` | Share the anchor's item — link stays in sync, copy forks |
+| `codev account unshare <name> <item> [--entry E] [--restore-backup\|--keep-copy]` | Remove the link; `--restore-backup` = true undo, `--keep-copy` = keep a fork |
+| `codev account sync-settings <name> <key...>` | Copy settings keys from the anchor (`statusLine`, `model`, `effortLevel`, `theme`) |
 
 > **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`). One folder = one account: registering an already-registered folder under a second name is rejected.
 >
@@ -98,11 +102,22 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 
 The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. CodeV refreshes `accounts.sh` on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
 
+**Cross-account sharing** (also in the UI: each account row's **Sharing** button):
+
+Share the anchor's global files with other accounts — per item, three choices: **Link** (symlink; one file, stays in sync, edits from either side land in the same place), **Copy** (independent fork), or skip. Never silently overwrites: existing content is backed up to a timestamped `.codev-bak-*` sibling first, which also makes **Unlink & restore** a true undo. Plain Unlink loses nothing (the anchor's copy is untouched; re-link anytime). The panel also has one-click **settings-key sync** buttons (`statusLine` / `model` / `effortLevel` / `theme`) and refreshes automatically when the window regains focus (so terminal-side file changes show up live).
+
+| Item | Shareable? | How |
+|------|------------|-----|
+| Global `CLAUDE.md`, `skills/`, `commands/` | ✅ | Link or Copy (verified: Claude Code follows symlinks) |
+| `statusLine` / `model` / `effortLevel` / `theme` | ✅ | `sync-settings` (per-key copy — they live in `settings.json`) |
+| `plugins/` | ❌ | Per-account install state with absolute paths. Install and enable plugins in each account separately — `enabledPlugins` is per-account and **not** a syncable key |
+| `.claude.json`, session data, hooks | ❌ | Identity / live-written / installed per-dir by CodeV |
+
 **In the CodeV UI:**
 
 | Where | What |
 |-------|------|
-| Settings → Accounts | List/add/remove accounts, set the global default, install shell integration |
+| Settings → Accounts | List/add/remove/rename accounts, set the global default, install shell integration, per-account **Sharing** panel (link/copy/unlink + settings-key sync) |
 | Sessions tab | Sessions from all accounts with account badges; resume uses each session's own account |
 | Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
 

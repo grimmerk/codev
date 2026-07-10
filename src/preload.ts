@@ -16,6 +16,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('accounts-set-default', label),
   setAccountsShellHook: (action: 'install' | 'uninstall') =>
     ipcRenderer.invoke('accounts-shell-hook', action),
+  getAccountShareStatus: (label: string) =>
+    ipcRenderer.invoke('accounts-share-status', label),
+  shareAccountItem: (label: string, item: string, mode: 'link' | 'copy') =>
+    ipcRenderer.invoke('accounts-share', label, item, mode),
+  unshareAccountItem: (
+    label: string,
+    item: string,
+    opts: { restoreBackup?: boolean; keepCopy?: boolean },
+  ) => ipcRenderer.invoke('accounts-unshare', label, item, opts),
+  syncAccountSettings: (label: string, keys: string[]) =>
+    ipcRenderer.invoke('accounts-sync-settings', label, keys),
   getBannerSeen: () => ipcRenderer.invoke('get-banner-seen'),
   setBannerSeen: () => ipcRenderer.send('set-banner-seen'),
   invokeVSCode: (path: string, option: string) =>

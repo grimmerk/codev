@@ -143,11 +143,18 @@ describe('generateAccountsSh', () => {
     expect(sh).toContain('_codev() {');
     expect(sh).toContain('compdef _codev codev');
     expect(sh).toContain(
-      'compadd list add default remove rm rename regenerate show install uninstall help',
+      'compadd list add default remove rm rename share unshare sync-settings regenerate show install uninstall help',
     );
     expect(sh).toContain('default|rename) compadd personal work ;;');
-    // anchor (personal) is not removable
-    expect(sh).toContain('remove|rm) compadd work ;;');
+    // anchor (personal) is not removable/shareable-to
+    expect(sh).toContain(
+      'remove|rm|share|unshare|sync-settings) compadd work ;;',
+    );
+    // item + key completion at position 5
+    expect(sh).toContain('share|unshare) compadd claude-md skills commands ;;');
+    expect(sh).toContain(
+      'sync-settings) compadd statusLine model effortLevel theme ;;',
+    );
   });
 
   it('completes account labels for `claude <TAB>` without clobbering', () => {

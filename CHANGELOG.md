@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.82
+
+- Feat: multi-account Batch 3 — cross-account sharing (share engine + CLI + UI)
+  - Share the anchor's `CLAUDE.md` / `skills/` / `commands/` with other accounts: **Link** (symlink, stays in sync) or **Copy** (independent fork), per item
+  - Never silently overwrites: existing content is backed up to `.codev-bak-<ts>` first; **Unlink & restore** is a true undo, plain Unlink loses nothing (source untouched)
+  - UI: per-account **Sharing ▸/▾** panel (per-item status + Link/Copy/Unlink/**Unlink & restore**; recognizes pre-existing hand-made symlinks; refreshes on window focus so terminal-side file changes show up live) plus one-click **settings-key sync buttons** (`statusLine`/`model`/`effortLevel`/`theme`)
+  - CLI: `codev account share|unshare` (`--entry` for single skills/commands entries, `--restore-backup`/`--keep-copy` on unshare) and `codev account sync-settings <name> <keys>` (same allowlist; hooks/`enabledPlugins`/permissions deliberately excluded)
+  - `plugins/` is NOT symlink-shared (per-account install registry with absolute paths — verified by experiment)
+  - Hardening from review: unshare validates the restore/keep-copy source *before* unlinking; keep-copy stages to a unique temp first (no TOCTOU); backup names uniquified beyond 1s precision; malformed settings.json fails with the path; real-fs integration tests cover the engine (14 cases, 35 total)
+
 ## 1.0.81
 
 - Refactor: registry field `isDefault` → `isAnchor` (naming collision fix)
