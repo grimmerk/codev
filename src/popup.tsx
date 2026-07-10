@@ -132,6 +132,14 @@ const PopupDefaultExample = ({
   type ShareStatusMap = Record<'claude-md' | 'skills' | 'commands', ShareEntry>;
   const [sharingLabel, setSharingLabel] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<ShareStatusMap | null>(null);
+  // Delivered by the share-status IPC (single source of truth in the
+  // engine's allowlist) — the fallback only covers the pre-response render.
+  const [syncableKeys, setSyncableKeys] = useState<string[]>([
+    'statusLine',
+    'model',
+    'effortLevel',
+    'theme',
+  ]);
   const [accountsBusy, setAccountsBusy] = useState(false);
   // Footer example uses a REAL account name (prefer a non-default one) so
   // nobody reads it as a fixed keyword; the example clause is hidden entirely
@@ -268,6 +276,7 @@ const PopupDefaultExample = ({
       if (shareReqRef.current !== label) return; // stale response
       if (r.ok) {
         setShareStatus(r.status || null);
+        if (r.syncableKeys?.length) setSyncableKeys(r.syncableKeys);
       } else {
         setShareStatus(null);
         setAccountsError(r.error || 'Failed to load sharing status');
@@ -1233,9 +1242,7 @@ const PopupDefaultExample = ({
                         </span>
                       </span>
                       <span style={{ display: 'flex', gap: '6px' }}>
-                        {(
-                          ['statusLine', 'model', 'effortLevel', 'theme'] as const
-                        ).map((k) => (
+                        {syncableKeys.map((k) => (
                           <button
                             key={k}
                             style={smallButtonStyle}

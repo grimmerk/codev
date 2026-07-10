@@ -57,6 +57,7 @@ interface IElectronAPI {
         target: string;
       }
     >;
+    syncableKeys?: string[];
   }>;
   shareAccountItem: (
     label: string,

@@ -742,7 +742,13 @@ ipcMain.handle('accounts-set-default', (_event, label: string) => {
 // --- cross-account sharing (Batch 3) — thin wrappers over share-manager ---
 ipcMain.handle('accounts-share-status', (_event, label: string) => {
   try {
-    return { ok: true, status: shareManager.shareStatusFor(label) };
+    return {
+      ok: true,
+      status: shareManager.shareStatusFor(label),
+      // Single source of truth for the UI's sync buttons — keeps the
+      // renderer from drifting when the allowlist changes.
+      syncableKeys: [...shareManager.SYNCABLE_SETTINGS_KEYS],
+    };
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
@@ -793,6 +799,9 @@ ipcMain.handle(
   'accounts-sync-settings',
   (_event, label: string, keys: string[]) => {
     try {
+      if (!Array.isArray(keys)) {
+        return { ok: false, error: 'keys must be an array' };
+      }
       const r = shareManager.syncSettingsFor(label, keys);
       return { ok: true, copied: r.copied, missingInSource: r.missingInSource };
     } catch (error) {
