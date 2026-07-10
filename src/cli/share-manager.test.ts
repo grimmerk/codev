@@ -69,9 +69,9 @@ describe('shareItem / getShareState', () => {
     shareItem(source, target, 'copy');
     expect(getShareState(target).kind).toBe('own');
     fs.writeFileSync(path.join(target, 'my-skill', 'SKILL.md'), 'forked');
-    expect(fs.readFileSync(path.join(source, 'my-skill', 'SKILL.md'), 'utf-8')).toBe(
-      'v1',
-    );
+    expect(
+      fs.readFileSync(path.join(source, 'my-skill', 'SKILL.md'), 'utf-8'),
+    ).toBe('v1');
   });
 
   it('links a whole dir and recognizes a pre-existing hand-made link', () => {
@@ -177,7 +177,10 @@ describe('syncSettingsKeys', () => {
     const dst = path.join(accountDir, 'settings.json');
     write(
       src,
-      JSON.stringify({ statusLine: { type: 'command', command: 'x' }, hooks: {} }),
+      JSON.stringify({
+        statusLine: { type: 'command', command: 'x' },
+        hooks: {},
+      }),
     );
     write(dst, JSON.stringify({ theme: 'dark', hooks: { keep: true } }));
 
@@ -188,6 +191,16 @@ describe('syncSettingsKeys', () => {
     expect(out.statusLine.command).toBe('x');
     expect(out.theme).toBe('dark'); // untouched
     expect(out.hooks).toEqual({ keep: true }); // untouched
+  });
+
+  it('fails with an actionable message on malformed settings JSON', () => {
+    const src = path.join(anchorDir, 'settings.json');
+    const dst = path.join(accountDir, 'settings.json');
+    write(src, '{}');
+    write(dst, '{not json');
+    expect(() => syncSettingsKeys(src, dst, ['statusLine'])).toThrow(
+      /Malformed JSON in .*settings\.json/,
+    );
   });
 
   it('rejects non-allowlisted keys (hooks stay per-account)', () => {

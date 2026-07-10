@@ -233,12 +233,16 @@ export function syncSettingsKeys(
       );
     }
   }
-  const source = fs.existsSync(sourceSettingsPath)
-    ? JSON.parse(fs.readFileSync(sourceSettingsPath, 'utf-8'))
-    : {};
-  const target = fs.existsSync(targetSettingsPath)
-    ? JSON.parse(fs.readFileSync(targetSettingsPath, 'utf-8'))
-    : {};
+  const readJson = (p: string): Record<string, unknown> => {
+    if (!fs.existsSync(p)) return {};
+    try {
+      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    } catch (e) {
+      throw new Error(`Malformed JSON in ${p}: ${(e as Error).message}`);
+    }
+  };
+  const source = readJson(sourceSettingsPath);
+  const target = readJson(targetSettingsPath);
   const copied: string[] = [];
   const missingInSource: string[] = [];
   for (const k of keys) {

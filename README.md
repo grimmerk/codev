@@ -79,7 +79,7 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 | `codev account install` / `uninstall` | Add / remove the `~/.zshrc` source block |
 | `codev account share <name>` | Sharing status for that account (claude-md / skills / commands) |
 | `codev account share <name> <item> --link\|--copy [--entry E]` | Share the anchor's item — link stays in sync, copy forks |
-| `codev account unshare <name> <item> [--restore-backup\|--keep-copy]` | Remove the link; `--restore-backup` = true undo, `--keep-copy` = keep a fork |
+| `codev account unshare <name> <item> [--entry E] [--restore-backup\|--keep-copy]` | Remove the link; `--restore-backup` = true undo, `--keep-copy` = keep a fork |
 | `codev account sync-settings <name> <key...>` | Copy settings keys from the anchor (`statusLine`, `model`, `effortLevel`, `theme`) |
 
 > **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`). One folder = one account: registering an already-registered folder under a second name is rejected.
@@ -110,7 +110,7 @@ Share the anchor's global files with other accounts — per item, three choices:
 |------|------------|-----|
 | Global `CLAUDE.md`, `skills/`, `commands/` | ✅ | Link or Copy (verified: Claude Code follows symlinks) |
 | `statusLine` / `model` / `effortLevel` / `theme` | ✅ | `sync-settings` (per-key copy — they live in `settings.json`) |
-| `plugins/` | ❌ | Per-account install state with absolute paths — sync the `enabledPlugins` need via `sync-settings`-style per-account installs instead |
+| `plugins/` | ❌ | Per-account install state with absolute paths. Install and enable plugins in each account separately — `enabledPlugins` is per-account and **not** a syncable key |
 | `.claude.json`, session data, hooks | ❌ | Identity / live-written / installed per-dir by CodeV |
 
 **In the CodeV UI:**
