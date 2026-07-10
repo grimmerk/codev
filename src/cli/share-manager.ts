@@ -211,7 +211,12 @@ export function unshareItem(
     // Copy to a temp sibling BEFORE unlinking — if the copy fails (e.g. the
     // source vanishes mid-operation), the link stays intact; no TOCTOU hole
     // between the existence check and the copy.
-    const tmp = `${targetPath}.codev-tmp-${process.pid}`;
+    // Unique, non-existing temp per operation — a stale leftover (crashed
+    // run) must not be merged into by cpSync and materialized as the copy.
+    let tmp = `${targetPath}.codev-tmp-${process.pid}`;
+    for (let i = 1; fs.existsSync(tmp); i++) {
+      tmp = `${targetPath}.codev-tmp-${process.pid}-${i}`;
+    }
     try {
       fs.cpSync(resolved, tmp, { recursive: true });
     } catch (e) {
