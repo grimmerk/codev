@@ -803,13 +803,22 @@ const PopupDefaultExample = ({
                 }}
               >
                 No accounts registered yet — your existing ~/.claude login stays
-                the default. Add a second account below to go multi-account.
+                the default. Add a second account below to go multi-account:
+                your existing login will show up here auto-named "personal"
+                (just a label — renameable via codev account rename).
               </div>
             )}
             {accounts.map((a) => (
               <div key={a.label} style={rowStyle}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={labelStyle} title={`Config dir: ${a.dir}`}>
+                  <span
+                    style={labelStyle}
+                    title={
+                      a.isDefault
+                        ? `Config dir: ${a.dir} — the name is just a label (auto-assigned at first add); change it: codev account rename <old> <new>`
+                        : `Config dir: ${a.dir}`
+                    }
+                  >
                     {a.label}
                     {a.isCurrentDefault && (
                       <span style={{ color: THEME.primary, fontSize: '11px', marginLeft: '6px' }}>
