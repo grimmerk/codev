@@ -1384,7 +1384,7 @@ function SwitcherApp() {
                             </span>
                           );
                         })()}
-                        {session.accountLabel && !session.accountIsDefault && (
+                        {session.accountLabel && !session.accountIsAnchor && (
                           <span
                             style={{
                               fontSize: '9px',

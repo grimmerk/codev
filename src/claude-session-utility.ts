@@ -30,7 +30,7 @@ export interface ClaudeSession {
   accountLabel?: string; // codev multi-account: which account this session belongs to
   accountDir?: string; // that account's config dir (session data + enrichment root)
   accountConfigDirEnv?: string | null; // CLAUDE_CONFIG_DIR to set at resume (null = default)
-  accountIsDefault?: boolean; // default account => no CLAUDE_CONFIG_DIR at launch
+  accountIsAnchor?: boolean; // anchor (~/.claude) account => no CLAUDE_CONFIG_DIR at launch
 }
 
 export interface ActiveSessionResult {
@@ -57,7 +57,7 @@ interface SessionAccum {
   accountLabel: string;
   accountDir: string;
   accountConfigDirEnv: string | null;
-  accountIsDefault: boolean;
+  accountIsAnchor: boolean;
 }
 
 const getHistoryPath = (dir: string): string => {
@@ -141,7 +141,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
               accountLabel: account.label,
               accountDir: account.dir,
               accountConfigDirEnv: account.configDirEnv,
-              accountIsDefault: account.isDefault,
+              accountIsAnchor: account.isAnchor,
             });
           }
         } catch {
@@ -172,7 +172,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
       accountLabel: s.accountLabel,
       accountDir: s.accountDir,
       accountConfigDirEnv: s.accountConfigDirEnv,
-      accountIsDefault: s.accountIsDefault,
+      accountIsAnchor: s.accountIsAnchor,
     }));
 
   cachedSessions = allSessions;

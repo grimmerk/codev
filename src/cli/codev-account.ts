@@ -61,7 +61,7 @@ function printList(): void {
       ? a.email || '(logged in)'
       : '(not logged in — run: claude ' + a.label + ')';
     const tags = [
-      a.isDefault ? 'anchor ~/.claude' : `CLAUDE_CONFIG_DIR=${a.dir}`,
+      a.isAnchor ? 'anchor ~/.claude' : `CLAUDE_CONFIG_DIR=${a.dir}`,
     ];
     console.log(`  ${star} ${a.label.padEnd(pad)}  ${who}`);
     console.log(`      ${tags.join('  ')}`);
@@ -95,8 +95,8 @@ function main(): number {
       const wasFresh = manager.readRegistry().accounts.length === 0;
       const acct = manager.addAccount(label as string, { dir, anchorName });
       console.log(`✓ Added "${acct.label}"  (${acct.dir})`);
-      if (wasFresh && !acct.isDefault) {
-        const anchor = manager.listAccounts().find((x) => x.isDefault);
+      if (wasFresh && !acct.isAnchor) {
+        const anchor = manager.listAccounts().find((x) => x.isAnchor);
         if (anchor) {
           console.log(
             `  Your existing ~/.claude login is registered as "${anchor.label}" (change: codev account rename ${anchor.label} <new>)`,
