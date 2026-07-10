@@ -207,11 +207,23 @@ export function unshareItem(
     }
   }
 
-  fs.unlinkSync(targetPath);
   if (opts.keepCopy) {
-    fs.cpSync(resolved, targetPath, { recursive: true });
+    // Copy to a temp sibling BEFORE unlinking — if the copy fails (e.g. the
+    // source vanishes mid-operation), the link stays intact; no TOCTOU hole
+    // between the existence check and the copy.
+    const tmp = `${targetPath}.codev-tmp-${process.pid}`;
+    try {
+      fs.cpSync(resolved, tmp, { recursive: true });
+    } catch (e) {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      throw e;
+    }
+    fs.unlinkSync(targetPath);
+    fs.renameSync(tmp, targetPath);
     return {};
   }
+
+  fs.unlinkSync(targetPath);
   if (opts.restoreBackup && newestBackup) {
     fs.renameSync(newestBackup, targetPath);
     return { restoredFrom: newestBackup };
