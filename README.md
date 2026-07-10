@@ -63,6 +63,8 @@ Run multiple Claude Code accounts (e.g. personal + work) on one machine. Each ac
 
 Tab completion included (zsh): `claude <TAB>` completes account names; `codev account <TAB>` completes subcommands and labels.
 
+The **default account** can be launched three equivalent ways: bare `claude`, `claude <its-name>`, or `claude-<its-name>` (the UI's row shows this).
+
 **`codev account` CLI** (the account manager — same generator the Settings UI uses):
 
 | Command | What it does |
@@ -76,7 +78,9 @@ Tab completion included (zsh): `claude <TAB>` completes account names; `codev ac
 | `codev account show` (`preview`) | Dry-run print of the generated `accounts.sh` |
 | `codev account install` / `uninstall` | Add / remove the `~/.zshrc` source block |
 
-> **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`).
+> **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`). One folder = one account: registering an already-registered folder under a second name is rejected.
+>
+> **Name vs folder.** The name is a mutable label; the folder is fixed at creation. They can diverge (after a rename) and the UI shows `· folder: …` on the row when they do. Folders deliberately never move on rename: Claude Code keys the account's credentials by the config-dir **path**, so moving the folder would orphan the login.
 >
 > **Remove is non-destructive.** It only unregisters that mapping: the account's folder, login, and session history all stay on disk. `codev account add <name>` (or the UI) later reattaches everything — identity and sessions reappear immediately, no re-login needed. **Caveat after a rename:** the folder keeps its *original* suffix (rename never moves folders), so re-attach with the folder-matching name — e.g. an account created as `work`, renamed to `ff`, then removed, re-attaches via `add work` (or any name with `--dir ~/.claude-work`), **not** `add ff`.
 
@@ -90,7 +94,7 @@ Tab completion included (zsh): `claude <TAB>` completes account names; `codev ac
 | Already running a second account by hand (own shell function + custom folder) | Register it with `codev account add <name> --dir <your-folder>` — **any folder works**; `~/.claude-<name>` is only the default. Identity and sessions attach immediately, no re-login. If your hand-rolled wrapper was named `claude`, retire it (it would fight the generated dispatcher). |
 | Renaming any account (default or not) | `codev account rename <old> <new>` — changes only the name side of the *name → folder* mapping; folders never move, so name ≠ folder suffix is fine. |
 
-> Not yet supported (tracked in [#127](https://github.com/grimmerk/codev/issues/127)): auto-detecting existing config folders for one-click registration, a UI flow for naming your existing default account, and a warning when `accounts.sh` overrides a hand-rolled `claude()` shell function.
+> Not yet supported: auto-detecting existing config folders for one-click registration, a UI flow for naming/renaming accounts, and a warning when `accounts.sh` overrides a hand-rolled `claude()` shell function ([#127](https://github.com/grimmerk/codev/issues/127)); continuing an existing conversation under a *different* account — "copy-fork" — needs transcript-level workarounds first ([#128](https://github.com/grimmerk/codev/issues/128)).
 
 The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. CodeV refreshes `accounts.sh` on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
 
