@@ -23,12 +23,16 @@ interface IElectronAPI {
     accounts?: CodevAccountInfo[];
     shellInstalled?: boolean;
   }>;
-  addAccount: (label: string) => Promise<{
+  addAccount: (label: string, anchorName?: string) => Promise<{
     ok: boolean;
     error?: string;
     account?: CodevAccountInfo;
   }>;
   removeAccount: (label: string) => Promise<{ ok: boolean; error?: string }>;
+  renameAccount: (
+    oldLabel: string,
+    newLabel: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   setDefaultAccount: (label: string) => Promise<{ ok: boolean; error?: string }>;
   setAccountsShellHook: (action: 'install' | 'uninstall') => Promise<{
     ok: boolean;

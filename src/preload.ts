@@ -7,8 +7,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getHomeDir: () => ipcRenderer.invoke('get-home-dir'),
   // codev multi-account (Settings → Accounts)
   getAccounts: () => ipcRenderer.invoke('accounts-get'),
-  addAccount: (label: string) => ipcRenderer.invoke('accounts-add', label),
+  addAccount: (label: string, anchorName?: string) =>
+    ipcRenderer.invoke('accounts-add', label, anchorName),
   removeAccount: (label: string) => ipcRenderer.invoke('accounts-remove', label),
+  renameAccount: (oldLabel: string, newLabel: string) =>
+    ipcRenderer.invoke('accounts-rename', oldLabel, newLabel),
   setDefaultAccount: (label: string) =>
     ipcRenderer.invoke('accounts-set-default', label),
   setAccountsShellHook: (action: 'install' | 'uninstall') =>

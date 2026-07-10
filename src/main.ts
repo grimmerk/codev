@@ -678,9 +678,9 @@ ipcMain.handle('accounts-get', () => {
   }
 });
 
-ipcMain.handle('accounts-add', (_event, label: string) => {
+ipcMain.handle('accounts-add', (_event, label: string, anchorName?: string) => {
   try {
-    const added = accountManager.addAccount(label);
+    const added = accountManager.addAccount(label, { anchorName });
     invalidateAccountsCache();
     // Return the enriched (listed) shape so it matches CodevAccountInfo
     // (isCurrentDefault etc.), not the raw registry entry. The fallback
@@ -712,6 +712,20 @@ ipcMain.handle('accounts-remove', (_event, label: string) => {
     return { ok: false, error: (error as Error).message };
   }
 });
+
+ipcMain.handle(
+  'accounts-rename',
+  (_event, oldLabel: string, newLabel: string) => {
+    try {
+      accountManager.renameAccount(oldLabel, newLabel);
+      invalidateAccountsCache();
+      syncAccountsAppPath();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  },
+);
 
 ipcMain.handle('accounts-set-default', (_event, label: string) => {
   try {

@@ -464,8 +464,12 @@ and **(d)** for CodeV, backed by the same `projectMap` in the registry so both a
   - *2c-lite (✅, branch `feat/new-session-account-picker`):* NEW-session account
     picker — ⌥⌘+Enter on a project opens a picker (⌘+Enter unchanged → global
     default; single-account setups never see it); launches with explicit
-    `CLAUDE_CONFIG_DIR` + `command claude`. Cross-account *resume* (the other half
-    of §6.G) stays deferred to Batch 3 as explicit copy-fork — a transcript lives in
+    `CLAUDE_CONFIG_DIR` + `command claude`. Post-review naming UX: per-row UI Rename +
+    `codev account rename` (label-only — folders never move; credentials are keyed by
+    the config-dir path); the first-ever add asks what to name the existing ~/.claude
+    login (prefilled `main`, replacing the presumptuous auto-`personal`); `default` is
+    a reserved label (it names the dispatcher-target concept). Cross-account *resume*
+    (the other half of §6.G) stays deferred to Batch 3 as explicit copy-fork — a transcript lives in
     its own account's projects dir, so "resume under another account" must copy, never
     link. "This repo always opens under X" belongs to 2d's projectMap.
   - *2d — ❌ dropped (2026-07-10):* pyenv-style folder auto-switch (§6.H). Rationale:

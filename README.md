@@ -88,13 +88,13 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 
 | You are… | What happens / what to do |
 |----------|---------------------------|
-| An existing Claude Code user opening CodeV for the first time | Accounts tab is **empty** (zero footprint — no registry is created until you act); your `~/.claude` login keeps working as before. Add a second account and your existing login is auto-registered as `personal` alongside it. |
-| Unhappy with the auto-name `personal` | `codev account rename personal <name>` — or name it up front, before adding anything: `codev account add <name> --dir ~/.claude` registers your existing default itself (no extra account created). |
+| An existing Claude Code user opening CodeV for the first time | Accounts tab is **empty** (zero footprint — no registry is created until you act); your `~/.claude` login keeps working as before. When you add a second account, **you name your existing login at the same time** (a field appears, prefilled `main`) and both get registered together. |
+| Renaming any account later | The **Rename** button on each row, or `codev account rename <old> <new>`. To pre-name your existing default before adding anything: `codev account add <name> --dir ~/.claude` (registers the default itself; no extra account created). `default` is a reserved name. |
 | Starting fresh: add first, log in later | Add a name (UI or CLI) → it shows "not logged in" → in a new shell, `claude <name>` runs Claude Code's login and creates the folder. |
 | Already running a second account by hand (own shell function + custom folder) | Register it with `codev account add <name> --dir <your-folder>` — **any folder works**; `~/.claude-<name>` is only the default. Identity and sessions attach immediately, no re-login. If your hand-rolled wrapper was named `claude`, retire it (it would fight the generated dispatcher). |
-| Renaming any account (default or not) | `codev account rename <old> <new>` — changes only the name side of the *name → folder* mapping; folders never move, so name ≠ folder suffix is fine. |
+| Wondering why a name maps to a different folder | Renames change only the name side of the *name → folder* mapping; folders never move (credentials are keyed by the folder path) — the UI shows `· folder: …` on the row when they diverge. |
 
-> Not yet supported: auto-detecting existing config folders for one-click registration, a UI flow for naming/renaming accounts, and a warning when `accounts.sh` overrides a hand-rolled `claude()` shell function ([#127](https://github.com/grimmerk/codev/issues/127)); continuing an existing conversation under a *different* account — "copy-fork" — needs transcript-level workarounds first ([#128](https://github.com/grimmerk/codev/issues/128)).
+> Not yet supported: auto-detecting existing config folders for one-click registration, and a warning when `accounts.sh` overrides a hand-rolled `claude()` shell function ([#127](https://github.com/grimmerk/codev/issues/127)); continuing an existing conversation under a *different* account — "copy-fork" — needs transcript-level workarounds first ([#128](https://github.com/grimmerk/codev/issues/128)).
 
 The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. CodeV refreshes `accounts.sh` on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
 

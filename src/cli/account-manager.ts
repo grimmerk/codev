@@ -54,6 +54,11 @@ const ZSHRC_END = '# <<< codev accounts <<<';
 // Labels become shell function names + case branches, so keep them safe.
 const LABEL_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
+// 'default' is reserved: it already names the dispatcher's global-default
+// concept (the `default` badge, `codev account default`) — an account with
+// that name would be permanently confusing.
+const RESERVED_LABELS = new Set(['default']);
+
 export const expandHome = (p: string): string =>
   typeof p === 'string' && p.startsWith('~')
     ? path.join(os.homedir(), p.slice(1))
@@ -418,12 +423,17 @@ export function regenerate(reg?: Registry): string {
 
 export function addAccount(
   label: string,
-  opts: { dir?: string } = {},
+  opts: { dir?: string; anchorName?: string } = {},
 ): RegistryAccount {
   if (!label) throw new Error('add: <label> is required');
   if (!LABEL_RE.test(label)) {
     throw new Error(
       `Invalid label "${label}" — use a letter followed by letters/digits/-/_`,
+    );
+  }
+  if (RESERVED_LABELS.has(label)) {
+    throw new Error(
+      `"${label}" is reserved (it names the bare-claude target) — pick another name`,
     );
   }
   const reg = readRegistry();
@@ -450,7 +460,21 @@ export function addAccount(
   // and keeps the global default (instead of it silently moving to a
   // brand-new, not-yet-logged-in account).
   if (reg.accounts.length === 0 && !isDefault) {
-    const anchorLabel = label === 'personal' ? 'default' : 'personal';
+    // The anchor's name is the USER'S choice (UI first-add field / CLI
+    // --anchor-name); 'main' is only the neutral prefill — never assume
+    // 'personal' (the machine's first login may well be a company account).
+    const anchorLabel =
+      opts.anchorName || (label === 'main' ? 'primary' : 'main');
+    if (!LABEL_RE.test(anchorLabel) || RESERVED_LABELS.has(anchorLabel)) {
+      throw new Error(
+        `Invalid name "${anchorLabel}" for the existing ~/.claude account`,
+      );
+    }
+    if (anchorLabel === label) {
+      throw new Error(
+        'The new account and your existing (~/.claude) account need different names',
+      );
+    }
     const anchorIdentity = path.join(os.homedir(), '.claude.json');
     reg.accounts.push({
       label: anchorLabel,
@@ -522,6 +546,11 @@ export function renameAccount(oldLabel: string, newLabel: string): void {
   if (!newLabel || !LABEL_RE.test(newLabel)) {
     throw new Error(
       `Invalid label "${newLabel}" — use a letter followed by letters/digits/-/_`,
+    );
+  }
+  if (RESERVED_LABELS.has(newLabel)) {
+    throw new Error(
+      `"${newLabel}" is reserved (it names the bare-claude target) — pick another name`,
     );
   }
   const reg = readRegistry();

@@ -20,7 +20,10 @@ const USAGE = `codev account — manage CodeV multi-account registry
 
 Usage:
   codev account list                 List configured accounts
-  codev account add <label> [--dir D] Register a new account (default dir ~/.claude-<label>)
+  codev account add <label> [--dir D] [--anchor-name N]
+                                     Register a new account (default dir ~/.claude-<label>);
+                                     on the first-ever add, N names your existing
+                                     ~/.claude account (default: main)
   codev account default <label>      Set which account bare \`claude\` resolves to
   codev account remove <label>       Unregister an account (leaves its dir on disk)
   codev account rename <old> <new>   Rename an account's label (folder is not moved)
@@ -79,13 +82,26 @@ function main(): number {
 
     case 'add': {
       const dir = getFlag(rest, '--dir');
-      // Skip the token consumed by `--dir` so `add --dir /foo work` still picks
+      const anchorName = getFlag(rest, '--anchor-name');
+      // Skip tokens consumed by flags so `add --dir /foo work` still picks
       // `work` as the label (not `/foo`).
-      const dirIdx = rest.indexOf('--dir');
-      const skipIdx = dirIdx >= 0 ? dirIdx + 1 : -1;
-      const label = rest.find((a, i) => !a.startsWith('-') && i !== skipIdx);
-      const acct = manager.addAccount(label as string, { dir });
+      const skip = new Set<number>();
+      for (const flag of ['--dir', '--anchor-name']) {
+        const i = rest.indexOf(flag);
+        if (i >= 0) skip.add(i + 1);
+      }
+      const label = rest.find((a, i) => !a.startsWith('-') && !skip.has(i));
+      const wasFresh = manager.readRegistry().accounts.length === 0;
+      const acct = manager.addAccount(label as string, { dir, anchorName });
       console.log(`✓ Added "${acct.label}"  (${acct.dir})`);
+      if (wasFresh && !acct.isDefault) {
+        const anchor = manager.listAccounts().find((x) => x.isDefault);
+        if (anchor) {
+          console.log(
+            `  Your existing ~/.claude login is registered as "${anchor.label}" (change: codev account rename ${anchor.label} <new>)`,
+          );
+        }
+      }
       if (!acct.loggedIn) {
         console.log(
           `  Log in with:  claude ${acct.label}   (or claude-${acct.label})`,
