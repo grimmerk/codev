@@ -303,12 +303,16 @@ const PopupDefaultExample = ({
 
   useEffect(() => {
     const onFocus = () => {
-      if (sharingLabel) loadShareStatus(sharingLabel);
+      // Only while the panel is actually visible — hidden focus events must
+      // not fire IPC or surface errors outside the Accounts tab.
+      if (isOpen && settingsTab === 'accounts' && sharingLabel) {
+        loadShareStatus(sharingLabel);
+      }
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sharingLabel]);
+  }, [isOpen, settingsTab, sharingLabel]);
 
   const handleShare = (label: string, item: string, mode: 'link' | 'copy') => {
     runAccountOp(async () => {
