@@ -131,22 +131,18 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize a parsed registry: legacy entries used `isDefault` for what is
- * really the ANCHOR flag — accept it, expose `isAnchor`, and drop the old key
- * (so the migration completes on the next write). Pure, for testability.
+ * Normalize a parsed registry (shape defaults + anchor inference for partial
+ * hand-written entries). Pure — returns a normalized copy.
  */
 export function normalizeRegistry(raw: unknown): Registry {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Registry;
   const accounts = (Array.isArray(src.accounts) ? src.accounts : []).map(
-    (a: RegistryAccount & { isDefault?: boolean }) => {
-      const { isDefault, ...rest } = a;
-      return {
-        ...rest,
-        // When both flags are absent (partial hand-written entry), the dir is
-        // the ground truth: ~/.claude IS the anchor by definition.
-        isAnchor: a.isAnchor ?? isDefault ?? isAnchorDir(String(a.dir || '')),
-      };
-    },
+    (a: RegistryAccount) => ({
+      ...a,
+      // When the flag is absent (partial hand-written entry), the dir is the
+      // ground truth: ~/.claude IS the anchor by definition.
+      isAnchor: a.isAnchor ?? isAnchorDir(String(a.dir || '')),
+    }),
   );
   return { ...src, version: src.version || 1, accounts };
 }

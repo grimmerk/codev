@@ -189,7 +189,7 @@ Single source of truth (registry), read by both the shell layer and CodeV:
      "projectMap": { "/Users/me/git/work-repo": "work" }   // §6.H, optional
    }
    // Simplified sketch — each entry also records `configDirEnv`, `identityFile`,
-   // and `isAnchor` (legacy name `isDefault` still read); see §11 for the schema.
+   // and `isAnchor`; see §11 for the full copy-paste schema.
 ```
 
 Launching account X = `CLAUDE_CONFIG_DIR=<X.dir> claude …` **for extra accounts**; the
@@ -548,9 +548,8 @@ Batch 1 ships the *engine*; account setup is manual until the Batch 2 UI/CLI.
 - **Registry** — `~/.config/codev/accounts.json`: one entry per account with
   `label`, `dir`, `configDirEnv` (null for the anchor), `identityFile`, `isAnchor`
   (the ~/.claude anchor flag — NOT the dispatcher default, which is the top-level
-  `defaultAccount`; the legacy field name `isDefault` is still accepted on read and
-  migrated on the next write). The anchor account is `~/.claude` (its `.claude.json`
-  sits at `~/.claude.json`,
+  `defaultAccount`; if omitted it is inferred from the dir). The anchor account is
+  `~/.claude` (its `.claude.json` sits at `~/.claude.json`,
   HOME level — never set `CLAUDE_CONFIG_DIR=~/.claude`, see §3.4). Extra accounts
   live in `~/.claude-<label>`.
 - **Shell** — `~/.config/codev/accounts.sh` (sourced from `~/.zshrc`) defines

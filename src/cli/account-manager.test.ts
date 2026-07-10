@@ -207,9 +207,8 @@ describe('generateAccountsSh', () => {
 });
 
 describe('normalizeRegistry', () => {
-  it('migrates the legacy isDefault field to isAnchor (purely)', () => {
+  it('normalizes shape purely (input untouched)', () => {
     const input = {
-      version: 1,
       defaultAccount: 'work',
       accounts: [
         {
@@ -217,26 +216,24 @@ describe('normalizeRegistry', () => {
           dir: '/u/.claude',
           identityFile: '/u/.claude.json',
           configDirEnv: null,
-          isDefault: true, // legacy name
+          isAnchor: true,
         },
         {
           label: 'work',
           dir: '/u/.claude-work',
           identityFile: '/u/.claude-work/.claude.json',
           configDirEnv: '/u/.claude-work',
-          isDefault: false, // legacy name
+          isAnchor: false,
         },
       ],
     };
     const snapshot = JSON.stringify(input);
     const norm = normalizeRegistry(input);
+    expect(norm.version).toBe(1); // shape default filled in
     expect(norm.accounts[0].isAnchor).toBe(true);
     expect(norm.accounts[1].isAnchor).toBe(false);
-    // legacy key dropped so the migration completes on the next write
-    expect('isDefault' in norm.accounts[0]).toBe(false);
-    // pure: the input object is untouched
+    // pure: the input object is untouched (no version added, no remapping)
     expect(JSON.stringify(input)).toBe(snapshot);
-    // and a legacy registry still generates a correct accounts.sh
     const sh = generateAccountsSh(norm);
     expect(sh).toContain(
       'claude-personal() { env -u CLAUDE_CONFIG_DIR claude "$@"; }',
