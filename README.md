@@ -22,6 +22,8 @@ Press `⌃+⌘+R` or click the menu bar icon to launch the Quick Switcher. Searc
 
 CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode. Live status dots show session state: working (orange pulse), idle (green), needs attention (orange blink).
 
+Search covers **every session and every user prompt you ever typed** (not just the ~100 most recent sessions shown in the list) plus titles, branches, PR links, and last AI replies. When a match sits in the middle of a conversation, the row shows a `⌕ #N …` snippet with the surrounding context. Closed one-shot sessions (≤2 messages, untitled, no PR) fold into an expandable "minor sessions" row to keep the list scannable.
+
 **Simple rule**: when running multiple sessions in the same project directory at the same time, give each running session a name. Closed sessions don't need names — they won't cause issues.
 
 - **Best**: start with a name — `claude -n "my task"` (or `claude --name "my task"`)

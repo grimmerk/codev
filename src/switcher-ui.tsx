@@ -1,15 +1,26 @@
 import { VSWindow as VSWindowModel } from '@prisma/client';
-import { FC, useCallback, useEffect, useRef, useState } from 'react';
+import { FC, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import * as ReactDOM from 'react-dom/client';
 import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
+import { isMinorSession } from './session-search';
 import TerminalTab from './terminal-tab';
 
 type SwitcherMode = 'projects' | 'sessions' | 'terminal';
 // import { fetchVSCodeBasedOpenedWindows, SERVER_URL, deleteRecentProjectRecord } from "./vscode-based-ide-utility"
 export const SERVER_URL = 'http://localhost:55688';
+
+// Unified search-match highlight — high contrast on every row color scheme
+// (the previous per-site translucent styles were near-invisible on colored text).
+const SEARCH_HIGHLIGHT_STYLE = {
+  backgroundColor: '#f5b942',
+  color: '#1a1a1a',
+  padding: '0 2px',
+  borderRadius: '2px',
+  fontWeight: 600,
+} as const;
 
 // Global styles for the switcher UI (moved from index.css)
 const globalStyles = `
@@ -355,11 +366,16 @@ function SwitcherApp() {
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
+  const [searchSnippets, setSearchSnippets] = useState<Record<string, { snippet: string; promptIndex: number; isLastPrompt: boolean }>>({});
+  const [minorsExpanded, setMinorsExpanded] = useState(false);
   const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
   const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
+  const deepSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deepSearchSeqRef = useRef(0);
+  const deepMatchesRef = useRef<any[]>([]); // latest main-side full-prompt matches
   // Set true when a session is opened; on the next window show, clear the search so
   // returning to Sessions shows the full list. Toggling away without selecting keeps it.
   const clearSessionSearchOnShowRef = useRef(false);
@@ -392,6 +408,82 @@ function SwitcherApp() {
     });
   };
 
+  // Union of the local field filter and the latest main-side full-prompt search
+  // results (issue #131). Deep matches outside the loaded list are appended,
+  // then everything re-sorts into the usual recency order.
+  const applySearchFilter = (allItems: any[], query: string) => {
+    const base = filterSessionsLocally(allItems, query);
+    if (!query.trim() || deepMatchesRef.current.length === 0) return base;
+    const seen = new Set(base.map((s: any) => s.sessionId));
+    const extra = deepMatchesRef.current
+      .filter((s: any) => !seen.has(s.sessionId))
+      .map((s: any) => ({
+        ...s,
+        isActive: s.sessionId in activeStateRef.current,
+        activePid: activeStateRef.current[s.sessionId],
+      }));
+    if (extra.length === 0) return base;
+    const merged = [...base, ...extra];
+    merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+    return merged;
+  };
+
+  // Debounced main-side search over ALL sessions × ALL user prompts.
+  const scheduleDeepSearch = (query: string) => {
+    if (deepSearchTimerRef.current) clearTimeout(deepSearchTimerRef.current);
+    deepMatchesRef.current = [];
+    const seq = ++deepSearchSeqRef.current;
+    if (!query.trim()) {
+      setSearchSnippets({});
+      return;
+    }
+    deepSearchTimerRef.current = setTimeout(async () => {
+      const res = await window.electronAPI.searchClaudeSessions(query);
+      // Drop stale responses (query changed while this one was in flight)
+      if (seq !== deepSearchSeqRef.current || sessionSearchRef2.current !== query) return;
+      deepMatchesRef.current = res?.sessions || [];
+      setSearchSnippets(res?.snippets || {});
+      setSessions(applySearchFilter(allSessionsRef.current, query));
+      // Lazy-enrich deep matches that aren't in the loaded list (bounded)
+      const loaded = new Set(allSessionsRef.current.map((s: any) => s.sessionId));
+      const appended = deepMatchesRef.current
+        .filter((s: any) => !loaded.has(s.sessionId))
+        .slice(0, 30);
+      if (appended.length > 0) {
+        window.electronAPI.loadSessionEnrichment(appended).then((enrichment) => {
+          if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
+            setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
+          }
+          if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
+            setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+          }
+          if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+            setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
+          }
+        });
+        window.electronAPI.loadLastAssistantResponses(appended).then((responses: Record<string, string>) => {
+          if (responses && Object.keys(responses).length > 0) {
+            setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+          }
+        });
+      }
+    }, 180);
+  };
+
+  // C1: fold minor (junk) sessions while browsing; searching shows everything.
+  // Minors keep their recency order but render below the fold row at the end.
+  const isSearchingSessions = sessionSearchValue.trim().length > 0;
+  const majorSessions: any[] = [];
+  const minorSessions: any[] = [];
+  for (const s of sessions) {
+    const minor = !isSearchingSessions &&
+      isMinorSession(s, !!customTitles[s.sessionId], !!prLinks[s.sessionId]);
+    (minor ? minorSessions : majorSessions).push(s);
+  }
+  const displayedSessions = minorsExpanded
+    ? [...majorSessions, ...minorSessions]
+    : majorSessions;
+
   const fetchClaudeSessions = async () => {
     // Step 1: Show sessions immediately, preserve old active states (SWR via ref)
     const result = await window.electronAPI.getClaudeSessions(100);
@@ -404,7 +496,7 @@ function SwitcherApp() {
     });
     setAllSessions(newSessions);
     allSessionsRef.current = newSessions;
-    setSessions(sessionSearchValue.trim() ? filterSessionsLocally(newSessions, sessionSearchValue) : newSessions);
+    setSessions(sessionSearchValue.trim() ? applySearchFilter(newSessions, sessionSearchValue) : newSessions);
 
     // Step 2: Load last assistant responses for all sessions (first 100)
     window.electronAPI.loadLastAssistantResponses((result || []).slice(0, 100)).then((responses: Record<string, string>) => {
@@ -444,7 +536,7 @@ function SwitcherApp() {
       setSessions((prev: any[]) => {
         const updated = updateActive(prev);
         const search = sessionSearchRef2.current;
-        return search.trim() ? filterSessionsLocally(updated, search) : updated;
+        return search.trim() ? applySearchFilter(updated, search) : updated;
       });
 
       if (Object.keys(activeMap).length > 0) {
@@ -486,7 +578,7 @@ function SwitcherApp() {
           setSessions((prev: any[]) => {
             const merged = mergeAndCap(prev);
             const search = sessionSearchRef2.current;
-            return search.trim() ? filterSessionsLocally(merged, search) : merged;
+            return search.trim() ? applySearchFilter(merged, search) : merged;
           });
           allVSCode.push(...closedVS);
           // Use pre-loaded assistant responses from closed sessions
@@ -770,6 +862,7 @@ function SwitcherApp() {
           clearSessionSearchOnShowRef.current = false;
           setSessionSearchValue('');
           sessionSearchRef2.current = '';
+          scheduleDeepSearch('');
           setSelectedSessionIndex(-1);
           // Drop the stale filtered list immediately so the empty input and the
           // visible list agree before fetchClaudeSessions() resolves.
@@ -1185,7 +1278,8 @@ function SwitcherApp() {
               const val = e.target.value;
               setSessionSearchValue(val);
               sessionSearchRef2.current = val;
-              setSessions(filterSessionsLocally(allSessions, val));
+              scheduleDeepSearch(val);
+              setSessions(applySearchFilter(allSessions, val));
               setSelectedSessionIndex(0);
             }}
             onKeyDown={(e) => {
@@ -1193,6 +1287,7 @@ function SwitcherApp() {
                 if (sessionSearchValue) {
                   setSessionSearchValue('');
                   sessionSearchRef2.current = '';
+                  scheduleDeepSearch('');
                   setSessions(allSessions);
                 } else {
                   hideApp();
@@ -1200,7 +1295,7 @@ function SwitcherApp() {
               } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 setSelectedSessionIndex((i) => {
-                  const next = Math.min(i + 1, sessions.length - 1);
+                  const next = Math.min(i + 1, displayedSessions.length - 1);
                   setTimeout(() => document.querySelector(`[data-session-index="${next}"]`)?.scrollIntoView({ block: 'nearest' }), 0);
                   return next;
                 });
@@ -1216,7 +1311,7 @@ function SwitcherApp() {
               } else if (e.key === 'PageDown') {
                 e.preventDefault();
                 setSelectedSessionIndex((i) => {
-                  const next = Math.min(i + 5, sessions.length - 1);
+                  const next = Math.min(i + 5, displayedSessions.length - 1);
                   setTimeout(() => document.querySelector(`[data-session-index="${next}"]`)?.scrollIntoView({ block: 'nearest' }), 0);
                   return next;
                 });
@@ -1229,7 +1324,7 @@ function SwitcherApp() {
                 });
               } else if (e.key === 'Enter') {
                 const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
-                const s = sessions[idx];
+                const s = displayedSessions[idx];
                 if (s) {
                   // Arm before opening, in case the bridge triggers the focus cycle synchronously.
                   clearSessionSearchOnShowRef.current = true;
@@ -1259,10 +1354,18 @@ function SwitcherApp() {
               <div style={{ color: THEME.text.secondary, textAlign: 'center', padding: '20px 0' }}>
                 {sessionSearchValue ? '⚠️ No matching sessions found' : '🤖 No Claude Code sessions found'}
               </div>
-            ) : (
-              sessions.map((session, index) => (
+            ) : (<>
+              {displayedSessions.map((session, index) => (
+                <Fragment key={session.sessionId}>
+                {minorsExpanded && minorSessions.length > 0 && index === majorSessions.length && (
+                  <div
+                    onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
+                    style={{ padding: '6px 10px 4px 24px', color: '#777', fontSize: '12px', cursor: 'pointer' }}
+                  >
+                    ▾ {minorSessions.length} minor sessions (≤2 msgs, untitled)
+                  </div>
+                )}
                 <div
-                  key={session.sessionId}
                   data-session-index={index}
                   onClick={() => {
                     clearSessionSearchOnShowRef.current = true;
@@ -1308,12 +1411,7 @@ function SwitcherApp() {
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                             autoEscape
                             textToHighlight={session.projectName}
-                            highlightStyle={{
-                              backgroundColor: 'rgba(0, 188, 212, 0.2)',
-                              color: '#fff',
-                              padding: '0 2px',
-                              borderRadius: '2px',
-                            }}
+                            highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                           />
                         </span>
                         {customTitles[session.sessionId] && (
@@ -1322,12 +1420,7 @@ function SwitcherApp() {
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
                               textToHighlight={customTitles[session.sessionId].slice(0, 35)}
-                              highlightStyle={{
-                                backgroundColor: 'rgba(126, 200, 126, 0.2)',
-                                color: '#a0e8a0',
-                                padding: '0 2px',
-                                borderRadius: '2px',
-                              }}
+                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
                         )}
@@ -1337,12 +1430,7 @@ function SwitcherApp() {
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
                               textToHighlight={branches[session.sessionId]}
-                              highlightStyle={{
-                                backgroundColor: 'rgba(200, 200, 200, 0.15)',
-                                color: '#bbb',
-                                padding: '0 2px',
-                                borderRadius: '2px',
-                              }}
+                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />]
                           </span>
                         )}
@@ -1374,12 +1462,7 @@ function SwitcherApp() {
                               <Highlighter
                                 searchWords={searchWords}
                                 textToHighlight={`PR #${prInfo.prNumber}`}
-                                highlightStyle={{
-                                  backgroundColor: 'rgba(126, 200, 227, 0.25)',
-                                  color: '#b0e0f0',
-                                  padding: '0 1px',
-                                  borderRadius: '2px',
-                                }}
+                                highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                               />
                             </span>
                           );
@@ -1416,12 +1499,7 @@ function SwitcherApp() {
                               <Highlighter
                                 searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                                 textToHighlight={badge}
-                                highlightStyle={{
-                                  backgroundColor: 'rgba(200, 200, 200, 0.25)',
-                                  color: '#fff',
-                                  padding: '0 1px',
-                                  borderRadius: '2px',
-                                }}
+                                highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                               />
                             </span>
                           ) : null;
@@ -1443,12 +1521,7 @@ function SwitcherApp() {
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
                               textToHighlight={(session.firstUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 50 : 80)}
-                              highlightStyle={{
-                                backgroundColor: 'rgba(0, 188, 212, 0.1)',
-                                color: '#bbb',
-                                padding: '0 2px',
-                                borderRadius: '2px',
-                              }}
+                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
                         )}
@@ -1458,12 +1531,7 @@ function SwitcherApp() {
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
                               textToHighlight={(session.lastUserMessage || '').slice(0, 80)}
-                              highlightStyle={{
-                                backgroundColor: 'rgba(232, 169, 70, 0.15)',
-                                color: '#e8a946',
-                                padding: '0 2px',
-                                borderRadius: '2px',
-                              }}
+                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
                         )}
@@ -1474,17 +1542,37 @@ function SwitcherApp() {
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
                               textToHighlight={(session.lastUserMessage || '').slice(0, 40)}
-                              highlightStyle={{
-                                backgroundColor: 'rgba(232, 169, 70, 0.15)',
-                                color: '#e8a946',
-                                padding: '0 2px',
-                                borderRadius: '2px',
-                              }}
+                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
                         )}
                       </div>
                     )}
+                    {/* Matched-prompt snippet (main-side deep search) — shown when the
+                        match isn't already visible in the first/last lines above */}
+                    {(() => {
+                      const m = searchSnippets[session.sessionId];
+                      if (!m || !isSearchingSessions) return null;
+                      const words = sessionSearchValue.split(/\s+/).filter(Boolean);
+                      // Stale guard: snippet must still match the current query
+                      if (!words.some((w) => m.snippet.toLowerCase().includes(w.toLowerCase()))) return null;
+                      const dupFirst = m.promptIndex === 0 && (sessionDisplayMode === 'first' || sessionDisplayMode === 'both');
+                      const dupLast = m.isLastPrompt && (sessionDisplayMode === 'last' || sessionDisplayMode === 'both');
+                      if (dupFirst || dupLast) return null;
+                      return (
+                        <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
+                          <span style={{ color: '#999', fontSize: '11px' }}>
+                            ⌕ #{m.promptIndex + 1}{' '}
+                            <Highlighter
+                              searchWords={words}
+                              autoEscape
+                              textToHighlight={m.snippet.slice(0, 120)}
+                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
+                            />
+                          </span>
+                        </div>
+                      );
+                    })()}
                     {/* Line 3: Last assistant response */}
                     {assistantResponses[session.sessionId] && (
                       <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
@@ -1493,20 +1581,24 @@ function SwitcherApp() {
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                             autoEscape
                             textToHighlight={assistantResponses[session.sessionId].slice(0, 80)}
-                            highlightStyle={{
-                              backgroundColor: 'rgba(139, 184, 208, 0.15)',
-                              color: '#A8CDE0',
-                              padding: '0 2px',
-                              borderRadius: '2px',
-                            }}
+                            highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                           />
                         </span>
                       </div>
                     )}
                   </div>
                 </div>
-              ))
-            )}
+                </Fragment>
+              ))}
+              {!isSearchingSessions && !minorsExpanded && minorSessions.length > 0 && (
+                <div
+                  onClick={() => setMinorsExpanded(true)}
+                  style={{ padding: '6px 10px 8px 24px', color: '#777', fontSize: '12px', cursor: 'pointer' }}
+                >
+                  ▸ {minorSessions.length} minor sessions (≤2 msgs, untitled)
+                </div>
+              )}
+            </>)}
           </div>
         </div>
       ) : (

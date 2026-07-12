@@ -13,6 +13,11 @@ import {
   getProjectsDir,
   getAccountByLabel,
 } from './accounts';
+import {
+  findPromptMatch,
+  matchesAllWords,
+  PromptMatch,
+} from './session-search';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -69,6 +74,10 @@ let cachedSessions: ClaudeSession[] | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 5000; // refresh cache after 5 seconds
 
+// All user prompts per session, same rebuild lifecycle as cachedSessions.
+// Main-process-only: searched here, never shipped over IPC (~MBs of text).
+let promptsBySession: Map<string, string[]> = new Map();
+
 // Cache for active session detection to avoid spawning processes on every keystroke
 let cachedActiveMap: Map<string, number> | null = null;
 let cachedVSCodeSessions: ClaudeSession[] | null = null;
@@ -103,6 +112,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
   // Multi-account: scan every configured account's history.jsonl and merge.
   // sessionIds are UUIDs (unique across accounts), so no cross-account dedupe.
   const bySession = new Map<string, SessionAccum>();
+  const prompts = new Map<string, string[]>();
 
   // Per-account try/catch: one unreadable/corrupt history must not hide the
   // sessions of every other account.
@@ -117,6 +127,12 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
         try {
           const raw: HistoryLine = JSON.parse(line);
           if (!raw.sessionId) continue;
+
+          if (raw.display) {
+            const list = prompts.get(raw.sessionId);
+            if (list) list.push(raw.display);
+            else prompts.set(raw.sessionId, [raw.display]);
+          }
 
           const existing = bySession.get(raw.sessionId);
           if (existing) {
@@ -176,24 +192,51 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
     }));
 
   cachedSessions = allSessions;
+  promptsBySession = prompts;
   cacheTimestamp = now;
   return allSessions.slice(0, limit);
 };
 
-/**
- * Search Claude Code sessions by project name or first message
- */
-export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[] => {
-  const allSessions = readClaudeSessions(500);
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return allSessions.slice(0, limit);
+export interface SessionSearchMatch extends PromptMatch {
+  isLastPrompt: boolean;
+}
 
-  return allSessions
-    .filter((s) => {
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage}`.toLowerCase();
-      return words.every((word) => searchTarget.includes(word));
-    })
-    .slice(0, limit);
+export interface SessionSearchResult {
+  sessions: ClaudeSession[];
+  /** sessionId -> where the match sits inside the prompt list (when in a prompt). */
+  snippets: Record<string, SessionSearchMatch>;
+}
+
+/**
+ * Full search across ALL sessions (not just the ~100 the UI loads) and ALL
+ * user prompts (not just first/last) — fixes issue #131. Sessions come back
+ * newest-first; prompt text stays in this process (only snippets cross IPC).
+ */
+export const searchClaudeSessions = (query: string, limit = 100): SessionSearchResult => {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return { sessions: [], snippets: {} };
+
+  // Recency-sorted full set; also (re)builds promptsBySession when stale.
+  const allSessions = readClaudeSessions(Number.MAX_SAFE_INTEGER);
+  const sessions: ClaudeSession[] = [];
+  const snippets: Record<string, SessionSearchMatch> = {};
+
+  for (const s of allSessions) {
+    const sessionPrompts = promptsBySession.get(s.sessionId) || [];
+    const target = `${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
+    if (!matchesAllWords(target, words)) continue;
+
+    sessions.push(s);
+    const match = findPromptMatch(sessionPrompts, words);
+    if (match) {
+      snippets[s.sessionId] = {
+        ...match,
+        isLastPrompt: match.promptIndex === sessionPrompts.length - 1,
+      };
+    }
+    if (sessions.length >= limit) break;
+  }
+  return { sessions, snippets };
 };
 
 /**
