@@ -11,6 +11,7 @@
 - Fix (pre-existing): custom titles / branch names no longer vanish at random
   - Per-session enrichment greps now run in bounded batches of 10 (was ~400 concurrent process spawns, which pushed the biggest transcripts past the silent 3s exec timeout; timeout also raised to 5s)
   - Branch is read from the last 50 transcript lines instead of 5 — an active session's tail is often tool output with no `gitBranch` field (measured: tail -5 hit 0, tail -20 hit 12)
+  - Enrichment cache is now mtime-keyed per transcript (#134): unchanged files are never re-grepped (a ~ms `stat` pass replaces the 5s wall-clock TTL, whose entry-time stamp made any >5s scan stale on arrival — perpetual rescans); concurrent callers are serialized onto one accumulated cache; scan batches went 10 → 25 for a faster cold start
 
 ## 1.0.82
 

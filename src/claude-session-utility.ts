@@ -87,7 +87,6 @@ const ACTIVE_CACHE_TTL_MS = 5000;
 
 // Cache for custom titles
 let cachedCustomTitles: Map<string, string> | null = null;
-let titlesCacheTimestamp = 0;
 
 export const invalidateSessionCache = () => {
   cachedSessions = null;
@@ -96,6 +95,8 @@ export const invalidateSessionCache = () => {
   cachedEntrypoints = null;
   cachedCustomTitles = null;
   cachedBranches = null;
+  cachedPRLinks = null;
+  enrichedFileState.clear();
 };
 
 /**
@@ -1709,6 +1710,16 @@ export interface SessionEnrichment {
 let cachedBranches: Map<string, string> | null = null;
 let cachedPRLinks: Map<string, PRLinkInfo> | null = null;
 
+// Per-file enrichment scan state: a transcript unchanged since its last scan
+// (same mtime+size) is never re-grepped — the stat check IS the freshness
+// test. Replaces the 5s wall-clock TTL, which broke once a full scan took
+// longer than the TTL itself: the just-written cache was already stale, so
+// every popup interaction kicked off another multi-second full rescan.
+const enrichedFileState = new Map<string, { mtimeMs: number; size: number }>();
+// Serialize scans: concurrent callers queue up and then mostly hit the
+// accumulated cache (correct even when they pass different session sets).
+let enrichmentQueue: Promise<void> = Promise.resolve();
+
 // Run per-session async work in bounded batches. ~100 sessions × several
 // exec() greps each used to spawn hundreds of concurrent processes at once,
 // starving the biggest (busiest) transcripts into the exec timeout — whose
@@ -1724,10 +1735,10 @@ const runInBatches = async <T>(
 };
 
 export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<SessionEnrichment> => {
-  const now = Date.now();
-  if (cachedCustomTitles && cachedBranches && cachedPRLinks && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
-    return { titles: cachedCustomTitles, branches: cachedBranches, prLinks: cachedPRLinks };
-  }
+  // Accumulator maps persist across calls; scans only fill/refresh entries.
+  const titles = (cachedCustomTitles ??= new Map());
+  const branches = (cachedBranches ??= new Map());
+  const prLinks = (cachedPRLinks ??= new Map());
 
   const { exec } = require('child_process');
   const execPromise = (cmd: string): Promise<string> =>
@@ -1737,19 +1748,28 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
       });
     });
 
-  const titles = new Map<string, string>();
-  const branches = new Map<string, string>();
-  const prLinks = new Map<string, PRLinkInfo>();
-  await runInBatches(sessions, 10, async (session) => {
-    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(
-      getProjectsDir(session.accountDir),
-      encodedProject,
-      `${session.sessionId}.jsonl`,
-    );
+  const scan = async () => {
+    // Re-grep only transcripts that are new or changed since their last scan.
+    const toScan: { session: ClaudeSession; jsonlPath: string; mtimeMs: number; size: number }[] = [];
+    for (const session of sessions) {
+      const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
+      const jsonlPath = path.join(
+        getProjectsDir(session.accountDir),
+        encodedProject,
+        `${session.sessionId}.jsonl`,
+      );
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(jsonlPath);
+      } catch {
+        continue;
+      }
+      const prev = enrichedFileState.get(session.sessionId);
+      if (prev && prev.mtimeMs === stat.mtimeMs && prev.size === stat.size) continue;
+      toScan.push({ session, jsonlPath, mtimeMs: stat.mtimeMs, size: stat.size });
+    }
 
-    if (!fs.existsSync(jsonlPath)) return;
-
+    await runInBatches(toScan, 25, async ({ session, jsonlPath, mtimeMs, size }) => {
     // Run title, ai-title, branch, and PR link greps in parallel for each file
     const [titleOutput, aiTitleOutput, branchOutput, prLinkOutput] = await Promise.all([
       execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
@@ -1795,12 +1815,14 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
         }
       } catch {}
     }
-  });
 
-  cachedCustomTitles = titles;
-  cachedBranches = branches;
-  cachedPRLinks = prLinks;
-  titlesCacheTimestamp = now;
+    // Record AFTER the scan so a failed pass retries on the next call.
+    enrichedFileState.set(session.sessionId, { mtimeMs, size });
+    });
+  };
+
+  enrichmentQueue = enrichmentQueue.then(scan, scan);
+  await enrichmentQueue;
   return { titles, branches, prLinks };
 };
 
@@ -1822,7 +1844,7 @@ export const loadLastAssistantResponses = async (
     });
 
   const responses = new Map<string, string>();
-  await runInBatches(sessions, 10, async (session) => {
+  await runInBatches(sessions, 25, async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(
       getProjectsDir(session.accountDir),
