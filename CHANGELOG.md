@@ -2,7 +2,7 @@
 
 ## 1.0.83
 
-- Feat: session finding Batch 1 — "search & noise" (plan: `docs/session-finding-plan-zh-tw.md`)
+- Feat: session finding Batch 1 — "search & noise" (plan: `docs/session-finding-plan.md`)
   - **Search now covers ALL sessions × ALL user prompts** (fixes #131 — previously only the ~100 loaded sessions' visible fields were searchable, leaving ~3/4 of history unfindable): a debounced main-process search scans every prompt of every session (multi-account) and appends matches beyond the loaded list, with lazy enrichment
   - **Matched-prompt snippet line** (`⌕ #N …context…`) shows *why* a row matched when the hit is in a middle prompt that isn't visible in the row
   - **High-contrast search highlight**: unified amber background + dark text (the old per-field translucent styles were near-invisible on colored text)
