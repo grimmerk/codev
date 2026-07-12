@@ -1,6 +1,8 @@
 # Session 尋找體驗改善計畫(search / browse / pins / preview)
 
-> **狀態:已定案、待實作**(2026-07-12 brainstorm 定稿;Batch 1 尚未開工)。
+> **狀態:已定案;Batch 1 進行中**(2026-07-12 brainstorm 定稿)。
+> PR-1「search & noise」(§4.1–§4.3:B2 highlight + A1/B1 全量搜尋 + C1 摺疊)= **PR #132**;
+> PR-2「pins」(§4.4 D1,含 C1 的手動 hide)尚未開工;Batch 2/3 未開工。
 > 本文件是跨 session / 跨 model 的實作依據:所有「決策」都已跟使用者逐點確認,
 > 不要重新開放已定案的選項;實作細節(§4–§6)則可依實況調整。
 > 相關文件/issue:`docs/pin-feature-handoff.md`(pin 前期研究,其 §4 [FACT] 全部仍有效)、
@@ -122,7 +124,7 @@
 
 | 項 | 內容 | 備註 |
 |---|---|---|
-| D3 `/pin` | Custom slash command:利用 Claude Code 的 slash **autocomplete**(解使用者對 `!` 無補全的不滿);command 內跑 `codev pin`,sessionId 取自 **`CLAUDE_CODE_SESSION_ID` env var**([FACT],見 §7);接受一次 LLM turn(使用者已表態可接受)。可帶參數 `/pin as "…"`。UI pin 仍是 primary。 |
+| D3 `/pin` | Custom slash command:利用 Claude Code 的 slash **autocomplete**(解使用者對 `!` 無補全的不滿);command 內跑 `codev pin`,sessionId 取自 **`CLAUDE_CODE_SESSION_ID` env var**([FACT],見 §7);接受一次 LLM turn(使用者已表態可接受)。可帶參數 `/pin as "…"` | UI pin 仍是 primary |
 | B4 filters | `project:` `branch:` `account:` `has:pr` `msgs:>10` `after:` chips | |
 | A4-lite | Preview 內「Generate title」按鈕(haiku、寫 custom title) | 不做批次 auto-summary |
 | C3 chain collapse | **基本作廢**(2026-07-12):一般 resume 沿用同 sessionId(§4.4),不產生世代鏈;僅在 `--fork-session` / copy-fork 常用化時才有意義 | 留檔備查 |

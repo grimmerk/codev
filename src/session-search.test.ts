@@ -9,14 +9,19 @@ import {
 
 describe('matchesAllWords', () => {
   it('requires every word (AND semantics), matching across the combined text', () => {
-    const target = 'codev multi account /effort 我問一下 sessions 上限'.toLowerCase();
+    const target =
+      'codev multi account /effort 我問一下 sessions 上限'.toLowerCase();
     expect(matchesAllWords(target, ['multi', 'sessions'])).toBe(true);
     expect(matchesAllWords(target, ['multi', 'missing'])).toBe(false);
   });
 
   it('matches 2-char CJK substrings', () => {
-    expect(matchesAllWords('原本的 sessions 數我有設上限', ['上限'])).toBe(true);
-    expect(matchesAllWords('原本的 sessions 數我有設上限', ['下限'])).toBe(false);
+    expect(matchesAllWords('原本的 sessions 數我有設上限', ['上限'])).toBe(
+      true,
+    );
+    expect(matchesAllWords('原本的 sessions 數我有設上限', ['下限'])).toBe(
+      false,
+    );
   });
 });
 
@@ -28,7 +33,8 @@ describe('extractSnippet', () => {
   });
 
   it('omits leading ellipsis at start of text and collapses whitespace', () => {
-    const text = 'NEEDLE line one\n\n  line two after newline and more trailing text';
+    const text =
+      'NEEDLE line one\n\n  line two after newline and more trailing text';
     const snippet = extractSnippet(text, 0, 6, 30);
     expect(snippet.startsWith('NEEDLE line one line two')).toBe(true);
     expect(snippet.endsWith('…')).toBe(true);
@@ -63,15 +69,27 @@ describe('findPromptMatch', () => {
 
 describe('isMinorSession', () => {
   it('folds closed, untitled, PR-less sessions with ≤2 messages', () => {
-    expect(isMinorSession({ messageCount: 1, isActive: false }, false, false)).toBe(true);
-    expect(isMinorSession({ messageCount: 2, isActive: false }, false, false)).toBe(true);
+    expect(
+      isMinorSession({ messageCount: 1, isActive: false }, false, false),
+    ).toBe(true);
+    expect(
+      isMinorSession({ messageCount: 2, isActive: false }, false, false),
+    ).toBe(true);
   });
 
   it('never folds active sessions, titled sessions, PR sessions, or 3+ msgs', () => {
-    expect(isMinorSession({ messageCount: 1, isActive: true }, false, false)).toBe(false);
-    expect(isMinorSession({ messageCount: 1, isActive: false }, true, false)).toBe(false);
-    expect(isMinorSession({ messageCount: 1, isActive: false }, false, true)).toBe(false);
-    expect(isMinorSession({ messageCount: 3, isActive: false }, false, false)).toBe(false);
+    expect(
+      isMinorSession({ messageCount: 1, isActive: true }, false, false),
+    ).toBe(false);
+    expect(
+      isMinorSession({ messageCount: 1, isActive: false }, true, false),
+    ).toBe(false);
+    expect(
+      isMinorSession({ messageCount: 1, isActive: false }, false, true),
+    ).toBe(false);
+    expect(
+      isMinorSession({ messageCount: 3, isActive: false }, false, false),
+    ).toBe(false);
   });
 
   it('treats unknown messageCount as not minor (conservative)', () => {

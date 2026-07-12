@@ -212,7 +212,10 @@ export interface SessionSearchResult {
  * user prompts (not just first/last) — fixes issue #131. Sessions come back
  * newest-first; prompt text stays in this process (only snippets cross IPC).
  */
-export const searchClaudeSessions = (query: string, limit = 100): SessionSearchResult => {
+export const searchClaudeSessions = (
+  query: string,
+  limit = 100,
+): SessionSearchResult => {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return { sessions: [], snippets: {} };
 
@@ -223,7 +226,8 @@ export const searchClaudeSessions = (query: string, limit = 100): SessionSearchR
 
   for (const s of allSessions) {
     const sessionPrompts = promptsBySession.get(s.sessionId) || [];
-    const target = `${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
+    const target =
+      `${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
     if (!matchesAllWords(target, words)) continue;
 
     sessions.push(s);

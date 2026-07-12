@@ -49,7 +49,10 @@ export const findPromptMatch = (
     for (const w of wordsLower) {
       const idx = lower.indexOf(w);
       if (idx !== -1) {
-        return { promptIndex: i, snippet: extractSnippet(prompts[i], idx, w.length) };
+        return {
+          promptIndex: i,
+          snippet: extractSnippet(prompts[i], idx, w.length),
+        };
       }
     }
   }

@@ -368,6 +368,9 @@ function SwitcherApp() {
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
   const [searchSnippets, setSearchSnippets] = useState<Record<string, { snippet: string; promptIndex: number; isLastPrompt: boolean }>>({});
   const [minorsExpanded, setMinorsExpanded] = useState(false);
+  // Folding waits for the first active-session detection so a just-started
+  // (≤2 msgs, not-yet-detected) session is never folded away at app start.
+  const [activeDetectionReady, setActiveDetectionReady] = useState(false);
   const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
@@ -424,7 +427,9 @@ function SwitcherApp() {
       }));
     if (extra.length === 0) return base;
     const merged = [...base, ...extra];
-    merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+    merged.sort(
+      (a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0),
+    );
     return merged;
   };
 
@@ -444,11 +449,11 @@ function SwitcherApp() {
       deepMatchesRef.current = res?.sessions || [];
       setSearchSnippets(res?.snippets || {});
       setSessions(applySearchFilter(allSessionsRef.current, query));
-      // Lazy-enrich deep matches that aren't in the loaded list (bounded)
+      // Lazy-enrich deep matches that aren't in the loaded list. Bounded by
+      // the deep-search result cap (100), same magnitude as the initial load.
       const loaded = new Set(allSessionsRef.current.map((s: any) => s.sessionId));
       const appended = deepMatchesRef.current
-        .filter((s: any) => !loaded.has(s.sessionId))
-        .slice(0, 30);
+        .filter((s: any) => !loaded.has(s.sessionId));
       if (appended.length > 0) {
         window.electronAPI.loadSessionEnrichment(appended).then((enrichment) => {
           if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
@@ -476,7 +481,9 @@ function SwitcherApp() {
   const majorSessions: any[] = [];
   const minorSessions: any[] = [];
   for (const s of sessions) {
-    const minor = !isSearchingSessions &&
+    const minor =
+      !isSearchingSessions &&
+      activeDetectionReady &&
       isMinorSession(s, !!customTitles[s.sessionId], !!prLinks[s.sessionId]);
     (minor ? minorSessions : majorSessions).push(s);
   }
@@ -496,7 +503,10 @@ function SwitcherApp() {
     });
     setAllSessions(newSessions);
     allSessionsRef.current = newSessions;
-    setSessions(sessionSearchValue.trim() ? applySearchFilter(newSessions, sessionSearchValue) : newSessions);
+    // Read via ref, not state: this runs from persistent callbacks (window
+    // focus, mode toggle) whose closure would hold a stale sessionSearchValue.
+    const search = sessionSearchRef2.current;
+    setSessions(search.trim() ? applySearchFilter(newSessions, search) : newSessions);
 
     // Step 2: Load last assistant responses for all sessions (first 100)
     window.electronAPI.loadLastAssistantResponses((result || []).slice(0, 100)).then((responses: Record<string, string>) => {
@@ -513,6 +523,7 @@ function SwitcherApp() {
 
       // Save to ref for SWR on next refresh
       activeStateRef.current = activeMap;
+      setActiveDetectionReady(true);
 
       const updateActive = (list: any[]) => {
         // Mark existing sessions as active/inactive
