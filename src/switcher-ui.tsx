@@ -451,9 +451,12 @@ function SwitcherApp() {
       setSessions(applySearchFilter(allSessionsRef.current, query));
       // Lazy-enrich deep matches that aren't in the loaded list. Bounded by
       // the deep-search result cap (100), same magnitude as the initial load.
-      const loaded = new Set(allSessionsRef.current.map((s: any) => s.sessionId));
-      const appended = deepMatchesRef.current
-        .filter((s: any) => !loaded.has(s.sessionId));
+      const loaded = new Set(
+        allSessionsRef.current.map((s: any) => s.sessionId),
+      );
+      const appended = deepMatchesRef.current.filter(
+        (s: any) => !loaded.has(s.sessionId),
+      );
       if (appended.length > 0) {
         window.electronAPI.loadSessionEnrichment(appended).then((enrichment) => {
           if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
@@ -506,7 +509,9 @@ function SwitcherApp() {
     // Read via ref, not state: this runs from persistent callbacks (window
     // focus, mode toggle) whose closure would hold a stale sessionSearchValue.
     const search = sessionSearchRef2.current;
-    setSessions(search.trim() ? applySearchFilter(newSessions, search) : newSessions);
+    setSessions(
+      search.trim() ? applySearchFilter(newSessions, search) : newSessions,
+    );
 
     // Step 2: Load last assistant responses for all sessions (first 100)
     window.electronAPI.loadLastAssistantResponses((result || []).slice(0, 100)).then((responses: Record<string, string>) => {
