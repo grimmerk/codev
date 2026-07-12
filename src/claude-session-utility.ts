@@ -1709,6 +1709,20 @@ export interface SessionEnrichment {
 let cachedBranches: Map<string, string> | null = null;
 let cachedPRLinks: Map<string, PRLinkInfo> | null = null;
 
+// Run per-session async work in bounded batches. ~100 sessions × several
+// exec() greps each used to spawn hundreds of concurrent processes at once,
+// starving the biggest (busiest) transcripts into the exec timeout — whose
+// errors resolve to '' — which is why titles/branches vanished at random.
+const runInBatches = async <T>(
+  items: T[],
+  batchSize: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> => {
+  for (let i = 0; i < items.length; i += batchSize) {
+    await Promise.all(items.slice(i, i + batchSize).map(worker));
+  }
+};
+
 export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<SessionEnrichment> => {
   const now = Date.now();
   if (cachedCustomTitles && cachedBranches && cachedPRLinks && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
@@ -1718,7 +1732,7 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
   const { exec } = require('child_process');
   const execPromise = (cmd: string): Promise<string> =>
     new Promise((resolve) => {
-      exec(cmd, { encoding: 'utf-8', timeout: 3000 }, (err: any, stdout: string) => {
+      exec(cmd, { encoding: 'utf-8', timeout: 5000 }, (err: any, stdout: string) => {
         resolve(err ? '' : stdout);
       });
     });
@@ -1726,7 +1740,7 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
   const titles = new Map<string, string>();
   const branches = new Map<string, string>();
   const prLinks = new Map<string, PRLinkInfo>();
-  const promises = sessions.map(async (session) => {
+  await runInBatches(sessions, 10, async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(
       getProjectsDir(session.accountDir),
@@ -1740,7 +1754,9 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
     const [titleOutput, aiTitleOutput, branchOutput, prLinkOutput] = await Promise.all([
       execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
       execPromise(`grep '"type":"ai-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
-      execPromise(`tail -n 5 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
+      // 50 lines, not 5: an active session's tail is often tool output with
+      // no gitBranch field (measured: tail -5 hit 0, tail -20 hit 12).
+      execPromise(`tail -n 50 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
       execPromise(`grep '"type":"pr-link"' "${jsonlPath}" 2>/dev/null | tail -1`),
     ]);
 
@@ -1781,8 +1797,6 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
     }
   });
 
-  await Promise.all(promises);
-
   cachedCustomTitles = titles;
   cachedBranches = branches;
   cachedPRLinks = prLinks;
@@ -1808,7 +1822,7 @@ export const loadLastAssistantResponses = async (
     });
 
   const responses = new Map<string, string>();
-  const promises = sessions.map(async (session) => {
+  await runInBatches(sessions, 10, async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(
       getProjectsDir(session.accountDir),
@@ -1841,7 +1855,6 @@ export const loadLastAssistantResponses = async (
     }
   });
 
-  await Promise.all(promises);
   return responses;
 };
 

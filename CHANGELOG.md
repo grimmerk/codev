@@ -8,6 +8,9 @@
   - **High-contrast search highlight**: unified amber background + dark text (the old per-field translucent styles were near-invisible on colored text)
   - **Minor-session folding**: closed, untitled, PR-less sessions with ≤2 messages collapse into an expandable "N minor sessions" row (search always shows everything; manual hide comes with the pins PR)
   - Prompt text stays in the main process — only small snippets cross IPC; search is in-memory (ms-scale) and does not touch the list-refresh path
+- Fix (pre-existing): custom titles / branch names no longer vanish at random
+  - Per-session enrichment greps now run in bounded batches of 10 (was ~400 concurrent process spawns, which pushed the biggest transcripts past the silent 3s exec timeout; timeout also raised to 5s)
+  - Branch is read from the last 50 transcript lines instead of 5 — an active session's tail is often tool output with no `gitBranch` field (measured: tail -5 hit 0, tail -20 hit 12)
 
 ## 1.0.82
 
