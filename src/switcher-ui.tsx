@@ -581,36 +581,38 @@ function SwitcherApp() {
     ...(minorsExpanded ? [...majorSessions, ...minorSessions] : majorSessions),
   ];
 
-  const applyMarksResult = (r: any) => {
+  // Arm the re-anchor together with the marks update (same commit): arming at
+  // toggle-call time let any unrelated render consume the ref before the list
+  // actually reshuffled, leaving the selection on the wrong row again.
+  const applyMarksResult = (r: any, reanchorSessionId?: string) => {
     if (r?.ok && r.marks) {
+      if (reanchorSessionId) reanchorSelectionRef.current = reanchorSessionId;
       setSessionMarks({ pins: r.marks.pins || {}, hidden: r.marks.hidden || [] });
     }
   };
   const togglePin = (session: any) => {
-    reanchorSelectionRef.current = session.sessionId;
     if (sessionMarks.pins[session.sessionId]) {
       window.electronAPI
         .unpinSession(session.sessionId)
-        .then(applyMarksResult)
+        .then((r) => applyMarksResult(r, session.sessionId))
         .catch(() => {});
     } else {
       window.electronAPI
         .pinSession(session.sessionId, { cwd: session.project, accountLabel: session.accountLabel })
-        .then(applyMarksResult)
+        .then((r) => applyMarksResult(r, session.sessionId))
         .catch(() => {});
     }
   };
   const toggleHide = (session: any) => {
-    reanchorSelectionRef.current = session.sessionId;
     if (hiddenSet.has(session.sessionId)) {
       window.electronAPI
         .unhideSession(session.sessionId)
-        .then(applyMarksResult)
+        .then((r) => applyMarksResult(r, session.sessionId))
         .catch(() => {});
     } else {
       window.electronAPI
         .hideSession(session.sessionId)
-        .then(applyMarksResult)
+        .then((r) => applyMarksResult(r, session.sessionId))
         .catch(() => {});
     }
   };
@@ -1564,8 +1566,12 @@ function SwitcherApp() {
                 const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
                 const s = displayedSessions[idx];
                 if (s) {
-                  if (e.shiftKey) toggleHide(s);
-                  else togglePin(s);
+                  // Match the mouse UI: pinned-zone rows expose no hide control
+                  if (e.shiftKey) {
+                    if (!s.__pinnedRow) toggleHide(s);
+                  } else {
+                    togglePin(s);
+                  }
                 }
               }
             }}

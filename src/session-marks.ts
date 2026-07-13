@@ -48,7 +48,9 @@ export const normalizeMarks = (raw: unknown): SessionMarks => {
       const p = info as Record<string, unknown>;
       marks.pins[id] = {
         pinnedAt:
-          typeof p.pinnedAt === 'string' ? p.pinnedAt : new Date(0).toISOString(),
+          typeof p.pinnedAt === 'string'
+            ? p.pinnedAt
+            : new Date(0).toISOString(),
         cwd: typeof p.cwd === 'string' ? p.cwd : '',
         accountLabel:
           typeof p.accountLabel === 'string' ? p.accountLabel : undefined,
@@ -134,10 +136,7 @@ export const readMarksFile = (filePath: string): SessionMarks => {
   }
 };
 
-export const writeMarksFile = (
-  filePath: string,
-  marks: SessionMarks,
-): void => {
+export const writeMarksFile = (filePath: string, marks: SessionMarks): void => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   // temp + rename so a crash mid-write can't corrupt the store
   const tmp = `${filePath}.tmp-${process.pid}`;
@@ -175,6 +174,12 @@ export const watchSessionMarks = (
     debounceTimer = setTimeout(() => {
       onChange(readMarksFile(filePath));
     }, 50);
+  });
+
+  watcher.on('error', () => {
+    // Swallow watcher errors (dir deleted, permissions changed, OS watcher
+    // limits) — an unhandled 'error' event would crash the main process.
+    // The next app restart recovers the watch.
   });
 
   return () => {
