@@ -872,6 +872,8 @@ function SwitcherApp() {
         });
       }
       if (modeRef.current === 'sessions') {
+        // Each fresh popup show starts with minor sessions folded again.
+        setMinorsExpanded(false);
         // If a session was just opened, reset the search before refetching so the
         // full list shows on return (keyword is kept when merely toggling away).
         if (clearSessionSearchOnShowRef.current) {
@@ -1376,7 +1378,18 @@ function SwitcherApp() {
                 {minorsExpanded && minorSessions.length > 0 && index === majorSessions.length && (
                   <div
                     onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
-                    style={{ padding: '6px 10px 4px 24px', color: '#777', fontSize: '12px', cursor: 'pointer' }}
+                    style={{
+                      padding: '6px 10px 4px 24px',
+                      color: '#777',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      // Stick to the top while scrolled inside the minors zone,
+                      // so collapsing never requires scrolling back to find it.
+                      position: 'sticky',
+                      top: 0,
+                      zIndex: 1,
+                      backgroundColor: '#1a1a1a',
+                    }}
                   >
                     ▾ {minorSessions.length} minor sessions (≤2 msgs, untitled)
                   </div>
