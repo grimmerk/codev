@@ -1629,6 +1629,23 @@ function SwitcherApp() {
               )}
             </>)}
           </div>
+          {/* Always-visible fold bar (outside the scroll area) while minors
+              are expanded — collapsing never depends on scroll position. */}
+          {!isSearchingSessions && minorsExpanded && minorSessions.length > 0 && (
+            <div
+              onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
+              style={{
+                padding: '6px 15px 8px',
+                color: '#888',
+                fontSize: '12px',
+                cursor: 'pointer',
+                borderTop: '1px solid #2e2e2e',
+                flexShrink: 0,
+              }}
+            >
+              ▾ {minorSessions.length} minor sessions shown — click to fold
+            </div>
+          )}
         </div>
       ) : (
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
