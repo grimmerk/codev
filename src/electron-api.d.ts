@@ -130,7 +130,13 @@ interface IElectronAPI {
 
   // Claude Code sessions
   getClaudeSessions: (limit?: number) => Promise<any>;
-  searchClaudeSessions: (query: string) => Promise<any>;
+  searchClaudeSessions: (query: string) => Promise<{
+    sessions: any[];
+    snippets: Record<
+      string,
+      { snippet: string; promptIndex: number; isLastPrompt: boolean }
+    >;
+  }>;
   detectActiveSessions: () => Promise<{
     activeMap: Record<string, number>;
     vscodeSessions: any[];

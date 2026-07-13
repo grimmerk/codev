@@ -13,6 +13,11 @@ import {
   getProjectsDir,
   getAccountByLabel,
 } from './accounts';
+import {
+  findPromptMatch,
+  matchesAllWords,
+  PromptMatch,
+} from './session-search';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -69,6 +74,10 @@ let cachedSessions: ClaudeSession[] | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 5000; // refresh cache after 5 seconds
 
+// All user prompts per session, same rebuild lifecycle as cachedSessions.
+// Main-process-only: searched here, never shipped over IPC (~MBs of text).
+let promptsBySession: Map<string, string[]> = new Map();
+
 // Cache for active session detection to avoid spawning processes on every keystroke
 let cachedActiveMap: Map<string, number> | null = null;
 let cachedVSCodeSessions: ClaudeSession[] | null = null;
@@ -78,7 +87,6 @@ const ACTIVE_CACHE_TTL_MS = 5000;
 
 // Cache for custom titles
 let cachedCustomTitles: Map<string, string> | null = null;
-let titlesCacheTimestamp = 0;
 
 export const invalidateSessionCache = () => {
   cachedSessions = null;
@@ -87,6 +95,8 @@ export const invalidateSessionCache = () => {
   cachedEntrypoints = null;
   cachedCustomTitles = null;
   cachedBranches = null;
+  cachedPRLinks = null;
+  enrichedFileState.clear();
 };
 
 /**
@@ -103,6 +113,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
   // Multi-account: scan every configured account's history.jsonl and merge.
   // sessionIds are UUIDs (unique across accounts), so no cross-account dedupe.
   const bySession = new Map<string, SessionAccum>();
+  const prompts = new Map<string, string[]>();
 
   // Per-account try/catch: one unreadable/corrupt history must not hide the
   // sessions of every other account.
@@ -117,6 +128,12 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
         try {
           const raw: HistoryLine = JSON.parse(line);
           if (!raw.sessionId) continue;
+
+          if (raw.display) {
+            const list = prompts.get(raw.sessionId);
+            if (list) list.push(raw.display);
+            else prompts.set(raw.sessionId, [raw.display]);
+          }
 
           const existing = bySession.get(raw.sessionId);
           if (existing) {
@@ -176,24 +193,55 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
     }));
 
   cachedSessions = allSessions;
+  promptsBySession = prompts;
   cacheTimestamp = now;
   return allSessions.slice(0, limit);
 };
 
-/**
- * Search Claude Code sessions by project name or first message
- */
-export const searchClaudeSessions = (query: string, limit = 50): ClaudeSession[] => {
-  const allSessions = readClaudeSessions(500);
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return allSessions.slice(0, limit);
+export interface SessionSearchMatch extends PromptMatch {
+  isLastPrompt: boolean;
+}
 
-  return allSessions
-    .filter((s) => {
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage}`.toLowerCase();
-      return words.every((word) => searchTarget.includes(word));
-    })
-    .slice(0, limit);
+export interface SessionSearchResult {
+  sessions: ClaudeSession[];
+  /** sessionId -> where the match sits inside the prompt list (when in a prompt). */
+  snippets: Record<string, SessionSearchMatch>;
+}
+
+/**
+ * Full search across ALL sessions (not just the ~100 the UI loads) and ALL
+ * user prompts (not just first/last) — fixes issue #131. Sessions come back
+ * newest-first; prompt text stays in this process (only snippets cross IPC).
+ */
+export const searchClaudeSessions = (
+  query: string,
+  limit = 100,
+): SessionSearchResult => {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return { sessions: [], snippets: {} };
+
+  // Recency-sorted full set; also (re)builds promptsBySession when stale.
+  const allSessions = readClaudeSessions(Number.MAX_SAFE_INTEGER);
+  const sessions: ClaudeSession[] = [];
+  const snippets: Record<string, SessionSearchMatch> = {};
+
+  for (const s of allSessions) {
+    const sessionPrompts = promptsBySession.get(s.sessionId) || [];
+    const target =
+      `${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
+    if (!matchesAllWords(target, words)) continue;
+
+    sessions.push(s);
+    const match = findPromptMatch(sessionPrompts, words);
+    if (match) {
+      snippets[s.sessionId] = {
+        ...match,
+        isLastPrompt: match.promptIndex === sessionPrompts.length - 1,
+      };
+    }
+    if (sessions.length >= limit) break;
+  }
+  return { sessions, snippets };
 };
 
 /**
@@ -1662,84 +1710,196 @@ export interface SessionEnrichment {
 let cachedBranches: Map<string, string> | null = null;
 let cachedPRLinks: Map<string, PRLinkInfo> | null = null;
 
-export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<SessionEnrichment> => {
-  const now = Date.now();
-  if (cachedCustomTitles && cachedBranches && cachedPRLinks && (now - titlesCacheTimestamp) < CACHE_TTL_MS) {
-    return { titles: cachedCustomTitles, branches: cachedBranches, prLinks: cachedPRLinks };
+// Per-file enrichment scan state: a transcript unchanged since its last scan
+// (same mtime+size) is never re-grepped — the stat check IS the freshness
+// test. Replaces the 5s wall-clock TTL, which broke once a full scan took
+// longer than the TTL itself: the just-written cache was already stale, so
+// every popup interaction kicked off another multi-second full rescan.
+const enrichedFileState = new Map<string, { mtimeMs: number; size: number }>();
+// Serialize scans: concurrent callers queue up and then mostly hit the
+// accumulated cache (correct even when they pass different session sets).
+let enrichmentQueue: Promise<void> = Promise.resolve();
+
+// Run per-session async work in bounded batches. ~100 sessions × several
+// exec() greps each used to spawn hundreds of concurrent processes at once,
+// starving the biggest (busiest) transcripts into the exec timeout — whose
+// errors resolve to '' — which is why titles/branches vanished at random.
+const runInBatches = async <T>(
+  items: T[],
+  batchSize: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> => {
+  for (let i = 0; i < items.length; i += batchSize) {
+    await Promise.all(items.slice(i, i + batchSize).map(worker));
   }
+};
 
-  const { exec } = require('child_process');
-  const execPromise = (cmd: string): Promise<string> =>
+// Read the last `bytes` of a file without spawning a process. Async so the
+// main process event loop is never blocked by transcript reads.
+const readTailUtf8 = async (
+  filePath: string,
+  bytes: number,
+): Promise<string | null> => {
+  let fh: fs.promises.FileHandle | null = null;
+  try {
+    fh = await fs.promises.open(filePath, 'r');
+    const size = (await fh.stat()).size;
+    const len = Math.min(bytes, size);
+    const buf = Buffer.alloc(len);
+    // Cast: this @types/node version mistypes Buffer vs ArrayBufferView.
+    await fh.read(buf as unknown as Uint8Array, 0, len, size - len);
+    return buf.toString('utf-8');
+  } catch {
+    return null;
+  } finally {
+    await fh?.close().catch(() => {});
+  }
+};
+
+export const loadSessionEnrichment = async (
+  sessions: ClaudeSession[],
+): Promise<SessionEnrichment> => {
+  // Accumulator maps persist across calls; scans only fill/refresh entries.
+  const titles = (cachedCustomTitles ??= new Map());
+  const branches = (cachedBranches ??= new Map());
+  const prLinks = (cachedPRLinks ??= new Map());
+
+  const { execFile } = require('child_process');
+  // Shell-free (no interpolated paths anywhere near a shell). Resolves null
+  // on real failures (timeout/spawn) so they are distinguishable from
+  // no-match: grep exits 1 for "no match", a successful empty read.
+  const grepFileP = (
+    pattern: string,
+    filePath: string,
+  ): Promise<string | null> =>
     new Promise((resolve) => {
-      exec(cmd, { encoding: 'utf-8', timeout: 3000 }, (err: any, stdout: string) => {
-        resolve(err ? '' : stdout);
-      });
+      execFile(
+        'grep',
+        [pattern, filePath],
+        { encoding: 'utf-8', timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
+        (err: any, stdout: string) => {
+          if (err && err.code !== 1) resolve(null);
+          else resolve(stdout || '');
+        },
+      );
     });
+  const lastLine = (out: string): string => {
+    const lines = out.trim().split('\n');
+    return lines[lines.length - 1] || '';
+  };
 
-  const titles = new Map<string, string>();
-  const branches = new Map<string, string>();
-  const prLinks = new Map<string, PRLinkInfo>();
-  const promises = sessions.map(async (session) => {
-    const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
-    const jsonlPath = path.join(
-      getProjectsDir(session.accountDir),
-      encodedProject,
-      `${session.sessionId}.jsonl`,
-    );
-
-    if (!fs.existsSync(jsonlPath)) return;
-
-    // Run title, ai-title, branch, and PR link greps in parallel for each file
-    const [titleOutput, aiTitleOutput, branchOutput, prLinkOutput] = await Promise.all([
-      execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
-      execPromise(`grep '"type":"ai-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
-      execPromise(`tail -n 5 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
-      execPromise(`grep '"type":"pr-link"' "${jsonlPath}" 2>/dev/null | tail -1`),
-    ]);
-
-    // Priority: custom-title > ai-title
-    if (titleOutput.trim()) {
+  const scan = async () => {
+    // Re-scan only transcripts that are new or changed since their last scan.
+    const toScan: {
+      session: ClaudeSession;
+      jsonlPath: string;
+      mtimeMs: number;
+      size: number;
+    }[] = [];
+    for (const session of sessions) {
+      const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
+      const jsonlPath = path.join(
+        getProjectsDir(session.accountDir),
+        encodedProject,
+        `${session.sessionId}.jsonl`,
+      );
+      let stat: fs.Stats;
       try {
-        const parsed = JSON.parse(titleOutput.trim());
-        const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
-        if (title) {
-          titles.set(session.sessionId, title);
-        }
-      } catch {}
-    }
-    if (!titles.has(session.sessionId) && aiTitleOutput.trim()) {
-      try {
-        const parsed = JSON.parse(aiTitleOutput.trim());
-        const title = (parsed.aiTitle || '').trim();
-        if (title) {
-          titles.set(session.sessionId, title);
-        }
-      } catch {}
-    }
-
-    if (branchOutput.trim()) {
-      const match = branchOutput.match(/"gitBranch":"([^"]*)"/);
-      if (match && match[1] && match[1] !== 'HEAD') {
-        branches.set(session.sessionId, match[1]);
+        stat = fs.statSync(jsonlPath);
+      } catch {
+        continue;
       }
+      const prev = enrichedFileState.get(session.sessionId);
+      if (prev && prev.mtimeMs === stat.mtimeMs && prev.size === stat.size) {
+        continue;
+      }
+      toScan.push({
+        session,
+        jsonlPath,
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+      });
     }
 
-    if (prLinkOutput.trim()) {
-      try {
-        const parsed = JSON.parse(prLinkOutput.trim());
-        if (parsed.prNumber && parsed.prUrl) {
-          prLinks.set(session.sessionId, { prNumber: parsed.prNumber, prUrl: parsed.prUrl });
+    await runInBatches(
+      toScan,
+      25,
+      async ({ session, jsonlPath, mtimeMs, size }) => {
+        // Title, ai-title, and PR-link greps run in parallel; the branch comes
+        // from an in-process tail read (~256KB reaches far beyond the old
+        // 50-line window — an active session's tail is often tool output with
+        // no gitBranch field: measured tail -5 hit 0, tail -20 hit 12).
+        const [titleOutput, aiTitleOutput, prLinkOutput, tailOutput] =
+          await Promise.all([
+            grepFileP('"type":"custom-title"', jsonlPath),
+            grepFileP('"type":"ai-title"', jsonlPath),
+            grepFileP('"type":"pr-link"', jsonlPath),
+            readTailUtf8(jsonlPath, 256 * 1024),
+          ]);
+
+        // Priority: custom-title > ai-title
+        if (titleOutput) {
+          try {
+            const parsed = JSON.parse(lastLine(titleOutput));
+            const title = (parsed.customTitle || '')
+              .replace(/^"|"$/g, '')
+              .trim();
+            if (title) {
+              titles.set(session.sessionId, title);
+            }
+          } catch {}
         }
-      } catch {}
-    }
-  });
+        if (!titles.has(session.sessionId) && aiTitleOutput) {
+          try {
+            const parsed = JSON.parse(lastLine(aiTitleOutput));
+            const title = (parsed.aiTitle || '').trim();
+            if (title) {
+              titles.set(session.sessionId, title);
+            }
+          } catch {}
+        }
 
-  await Promise.all(promises);
+        if (tailOutput) {
+          const all = [...tailOutput.matchAll(/"gitBranch":"([^"]*)"/g)];
+          const branch = all.length > 0 ? all[all.length - 1][1] : '';
+          if (branch && branch !== 'HEAD') {
+            branches.set(session.sessionId, branch);
+          } else if (branch === 'HEAD') {
+            // Explicit detached HEAD: drop the stale branch. A tail with NO
+            // gitBranch line at all keeps the old value on purpose — it is
+            // usually transient tool output (measured), not a branch change.
+            branches.delete(session.sessionId);
+          }
+        }
 
-  cachedCustomTitles = titles;
-  cachedBranches = branches;
-  cachedPRLinks = prLinks;
-  titlesCacheTimestamp = now;
+        if (prLinkOutput) {
+          try {
+            const parsed = JSON.parse(lastLine(prLinkOutput));
+            if (parsed.prNumber && parsed.prUrl) {
+              prLinks.set(session.sessionId, {
+                prNumber: parsed.prNumber,
+                prUrl: parsed.prUrl,
+              });
+            }
+          } catch {}
+        }
+
+        // Mark fresh ONLY when every read succeeded — a timed-out or failed
+        // pass stays unrecorded so the next call retries it.
+        if (
+          titleOutput !== null &&
+          aiTitleOutput !== null &&
+          prLinkOutput !== null &&
+          tailOutput !== null
+        ) {
+          enrichedFileState.set(session.sessionId, { mtimeMs, size });
+        }
+      },
+    );
+  };
+
+  enrichmentQueue = enrichmentQueue.then(scan, scan);
+  await enrichmentQueue;
   return { titles, branches, prLinks };
 };
 
@@ -1761,7 +1921,7 @@ export const loadLastAssistantResponses = async (
     });
 
   const responses = new Map<string, string>();
-  const promises = sessions.map(async (session) => {
+  await runInBatches(sessions, 25, async (session) => {
     const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(
       getProjectsDir(session.accountDir),
@@ -1794,7 +1954,6 @@ export const loadLastAssistantResponses = async (
     }
   });
 
-  await Promise.all(promises);
   return responses;
 };
 
