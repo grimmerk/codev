@@ -540,6 +540,14 @@ function SwitcherApp() {
           isMinorSession(s, !!customTitles[s.sessionId], !!prLinks[s.sessionId])));
     (minor ? minorSessions : majorSessions).push(s);
   }
+  // Manually hidden sessions may be titled/long — keep the fold label honest.
+  const hiddenMinorCount = minorSessions.filter((s: any) =>
+    hiddenSet.has(s.sessionId),
+  ).length;
+  const minorFoldSuffix =
+    hiddenMinorCount > 0
+      ? `(≤2 msgs, untitled · ${hiddenMinorCount} hidden)`
+      : '(≤2 msgs, untitled)';
 
   // Pinned zone (PR-2): rows come from the loaded list when available, else
   // from the by-id fetch; ordered by pinnedAt (newest first). A pinned session
@@ -578,18 +586,28 @@ function SwitcherApp() {
   };
   const togglePin = (session: any) => {
     if (sessionMarks.pins[session.sessionId]) {
-      window.electronAPI.unpinSession(session.sessionId).then(applyMarksResult);
+      window.electronAPI
+        .unpinSession(session.sessionId)
+        .then(applyMarksResult)
+        .catch(() => {});
     } else {
       window.electronAPI
         .pinSession(session.sessionId, { cwd: session.project, accountLabel: session.accountLabel })
-        .then(applyMarksResult);
+        .then(applyMarksResult)
+        .catch(() => {});
     }
   };
   const toggleHide = (session: any) => {
     if (hiddenSet.has(session.sessionId)) {
-      window.electronAPI.unhideSession(session.sessionId).then(applyMarksResult);
+      window.electronAPI
+        .unhideSession(session.sessionId)
+        .then(applyMarksResult)
+        .catch(() => {});
     } else {
-      window.electronAPI.hideSession(session.sessionId).then(applyMarksResult);
+      window.electronAPI
+        .hideSession(session.sessionId)
+        .then(applyMarksResult)
+        .catch(() => {});
     }
   };
   const togglePinnedCollapsed = () => {
@@ -600,16 +618,25 @@ function SwitcherApp() {
       } catch {}
       return next;
     });
+    // The list just changed length — snap the selection back to the top,
+    // same as the minors fold collapse does.
+    setSelectedSessionIndex(0);
   };
 
   // Load marks once + subscribe to main-side pushes (fs.watch on the store)
   useEffect(() => {
-    window.electronAPI.getSessionMarks().then((m: any) => {
-      if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
-    });
-    window.electronAPI.onSessionMarksUpdated((_event: any, m: any) => {
-      if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
-    });
+    window.electronAPI
+      .getSessionMarks()
+      .then((m: any) => {
+        if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+      })
+      .catch(() => {});
+    const unsubscribe = window.electronAPI.onSessionMarksUpdated(
+      (_event: any, m: any) => {
+        if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+      },
+    );
+    return unsubscribe;
   }, []);
 
   // Fetch pinned sessions that aren't in the loaded list (by id), then enrich
@@ -624,6 +651,8 @@ function SwitcherApp() {
       return;
     }
     window.electronAPI.getSessionsByIds(missing).then((result: any[]) => {
+      // Drop stale responses (a newer pin set superseded this request)
+      if (extraPinnedKeyRef.current !== key) return;
       const found = result || [];
       setExtraPinnedSessions(found);
       if (found.length === 0) return;
@@ -643,7 +672,7 @@ function SwitcherApp() {
           setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
         }
       });
-    });
+    }).catch(() => {});
   }, [sessionMarks.pins, allSessions]);
 
   const fetchClaudeSessions = async () => {
@@ -1569,7 +1598,7 @@ function SwitcherApp() {
                     }}
                     style={MINOR_FOLD_HEADER_STYLE}
                   >
-                    ▾ {minorSessions.length} minor sessions (≤2 msgs, untitled)
+                    ▾ {minorSessions.length} minor sessions {minorFoldSuffix}
                   </div>
                 )}
                 <div
@@ -1833,7 +1862,7 @@ function SwitcherApp() {
                   }}
                   style={{ padding: '6px 10px 8px 24px', color: '#777', fontSize: '12px', cursor: 'pointer' }}
                 >
-                  ▸ {minorSessions.length} minor sessions (≤2 msgs, untitled)
+                  ▸ {minorSessions.length} minor sessions {minorFoldSuffix}
                 </div>
               )}
             </>)}

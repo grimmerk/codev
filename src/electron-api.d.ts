@@ -144,7 +144,7 @@ interface IElectronAPI {
   unpinSession: (sessionId: string) => Promise<{ ok: boolean; error?: string; marks?: any }>;
   hideSession: (sessionId: string) => Promise<{ ok: boolean; error?: string; marks?: any }>;
   unhideSession: (sessionId: string) => Promise<{ ok: boolean; error?: string; marks?: any }>;
-  onSessionMarksUpdated: (callback: IpcCallback) => void;
+  onSessionMarksUpdated: (callback: IpcCallback) => () => void;
   getSessionsByIds: (ids: string[]) => Promise<any[]>;
 
   // Claude Code sessions

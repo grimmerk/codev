@@ -83,7 +83,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   unpinSession: (sessionId: string) => ipcRenderer.invoke('unpin-session', sessionId),
   hideSession: (sessionId: string) => ipcRenderer.invoke('hide-session', sessionId),
   unhideSession: (sessionId: string) => ipcRenderer.invoke('unhide-session', sessionId),
-  onSessionMarksUpdated: (callback: any) => ipcRenderer.on('session-marks-updated', callback),
+  onSessionMarksUpdated: (callback: any) => {
+    ipcRenderer.on('session-marks-updated', callback);
+    return () => ipcRenderer.removeListener('session-marks-updated', callback);
+  },
   getSessionsByIds: (ids: string[]) => ipcRenderer.invoke('get-sessions-by-ids', ids),
 
   // Claude Code session APIs

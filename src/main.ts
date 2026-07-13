@@ -2351,7 +2351,9 @@ let marksWatcherCleanup: (() => void) | null = null;
 const ensureMarksWatcher = () => {
   if (marksWatcherCleanup) return;
   marksWatcherCleanup = watchSessionMarks((marks) => {
-    switcherWindow?.webContents.send('session-marks-updated', marks);
+    if (switcherWindow && !switcherWindow.isDestroyed()) {
+      switcherWindow.webContents.send('session-marks-updated', marks);
+    }
   });
 };
 
