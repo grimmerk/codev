@@ -418,6 +418,8 @@ function SwitcherApp() {
   // Pinned sessions living outside the loaded list (fetched by id)
   const [extraPinnedSessions, setExtraPinnedSessions] = useState<any[]>([]);
   const extraPinnedKeyRef = useRef('');
+  // Keep the selection on the same session after pin/hide reshuffles the list
+  const reanchorSelectionRef = useRef<string | null>(null);
   const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
@@ -585,6 +587,7 @@ function SwitcherApp() {
     }
   };
   const togglePin = (session: any) => {
+    reanchorSelectionRef.current = session.sessionId;
     if (sessionMarks.pins[session.sessionId]) {
       window.electronAPI
         .unpinSession(session.sessionId)
@@ -598,6 +601,7 @@ function SwitcherApp() {
     }
   };
   const toggleHide = (session: any) => {
+    reanchorSelectionRef.current = session.sessionId;
     if (hiddenSet.has(session.sessionId)) {
       window.electronAPI
         .unhideSession(session.sessionId)
@@ -622,6 +626,31 @@ function SwitcherApp() {
     // same as the minors fold collapse does.
     setSelectedSessionIndex(0);
   };
+
+  // Pinning/hiding inserts or removes rows above the selection, shifting every
+  // index — without re-anchoring, the next ⌘D would act on an unintended row.
+  // Re-anchor to the same session's LAST occurrence (the timeline copy).
+  useEffect(() => {
+    const target = reanchorSelectionRef.current;
+    if (!target) return;
+    reanchorSelectionRef.current = null;
+    let next = -1;
+    for (let i = displayedSessions.length - 1; i >= 0; i--) {
+      if (displayedSessions[i].sessionId === target) {
+        next = i;
+        break;
+      }
+    }
+    if (next >= 0) {
+      setSelectedSessionIndex(next);
+    } else {
+      // The session left the visible list (hidden into a collapsed fold) —
+      // just clamp the selection into range.
+      setSelectedSessionIndex((cur) =>
+        Math.min(cur, Math.max(displayedSessions.length - 1, 0)),
+      );
+    }
+  });
 
   // Load marks once + subscribe to main-side pushes (fs.watch on the store)
   useEffect(() => {
@@ -1644,6 +1673,9 @@ function SwitcherApp() {
                       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {sessionMarks.pins[session.sessionId] && (
                           <span style={{ color: '#f5b942', fontSize: '12px', marginRight: '3px' }}>★</span>
+                        )}
+                        {hiddenSet.has(session.sessionId) && (
+                          <span title="Hidden session" style={{ color: '#e07a5f', fontSize: '11px', marginRight: '3px' }}>⊘</span>
                         )}
                         <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
                           <Highlighter
