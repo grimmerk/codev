@@ -1734,22 +1734,25 @@ const runInBatches = async <T>(
   }
 };
 
-// Read the last `bytes` of a file without spawning a process.
-const readTailUtf8 = (filePath: string, bytes: number): string | null => {
+// Read the last `bytes` of a file without spawning a process. Async so the
+// main process event loop is never blocked by transcript reads.
+const readTailUtf8 = async (
+  filePath: string,
+  bytes: number,
+): Promise<string | null> => {
+  let fh: fs.promises.FileHandle | null = null;
   try {
-    const fd = fs.openSync(filePath, 'r');
-    try {
-      const size = fs.fstatSync(fd).size;
-      const len = Math.min(bytes, size);
-      const buf = Buffer.alloc(len);
-      // Cast: this @types/node version mistypes Buffer vs ArrayBufferView.
-      fs.readSync(fd, buf as unknown as Uint8Array, 0, len, size - len);
-      return buf.toString('utf-8');
-    } finally {
-      fs.closeSync(fd);
-    }
+    fh = await fs.promises.open(filePath, 'r');
+    const size = (await fh.stat()).size;
+    const len = Math.min(bytes, size);
+    const buf = Buffer.alloc(len);
+    // Cast: this @types/node version mistypes Buffer vs ArrayBufferView.
+    await fh.read(buf as unknown as Uint8Array, 0, len, size - len);
+    return buf.toString('utf-8');
   } catch {
     return null;
+  } finally {
+    await fh?.close().catch(() => {});
   }
 };
 
@@ -1826,12 +1829,13 @@ export const loadSessionEnrichment = async (
         // from an in-process tail read (~256KB reaches far beyond the old
         // 50-line window — an active session's tail is often tool output with
         // no gitBranch field: measured tail -5 hit 0, tail -20 hit 12).
-        const [titleOutput, aiTitleOutput, prLinkOutput] = await Promise.all([
-          grepFileP('"type":"custom-title"', jsonlPath),
-          grepFileP('"type":"ai-title"', jsonlPath),
-          grepFileP('"type":"pr-link"', jsonlPath),
-        ]);
-        const tailOutput = readTailUtf8(jsonlPath, 256 * 1024);
+        const [titleOutput, aiTitleOutput, prLinkOutput, tailOutput] =
+          await Promise.all([
+            grepFileP('"type":"custom-title"', jsonlPath),
+            grepFileP('"type":"ai-title"', jsonlPath),
+            grepFileP('"type":"pr-link"', jsonlPath),
+            readTailUtf8(jsonlPath, 256 * 1024),
+          ]);
 
         // Priority: custom-title > ai-title
         if (titleOutput) {
@@ -1860,6 +1864,11 @@ export const loadSessionEnrichment = async (
           const branch = all.length > 0 ? all[all.length - 1][1] : '';
           if (branch && branch !== 'HEAD') {
             branches.set(session.sessionId, branch);
+          } else if (branch === 'HEAD') {
+            // Explicit detached HEAD: drop the stale branch. A tail with NO
+            // gitBranch line at all keeps the old value on purpose — it is
+            // usually transient tool output (measured), not a branch change.
+            branches.delete(session.sessionId);
           }
         }
 
