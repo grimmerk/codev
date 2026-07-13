@@ -22,6 +22,30 @@ const SEARCH_HIGHLIGHT_STYLE = {
   fontWeight: 600,
 } as const;
 
+// Boundary header of the expanded minor-sessions group. Sticky: it pins to
+// the top while scrolled inside the minors zone, so collapsing never
+// requires scrolling back to the boundary row.
+const MINOR_FOLD_HEADER_STYLE = {
+  padding: '6px 10px 4px 24px',
+  color: '#777',
+  fontSize: '12px',
+  cursor: 'pointer',
+  position: 'sticky',
+  top: 0,
+  zIndex: 1,
+  backgroundColor: '#1a1a1a',
+} as const;
+
+// Always-visible fold bar below the scroll area while minors are expanded.
+const MINOR_FOLD_BAR_STYLE = {
+  padding: '6px 15px 8px',
+  color: '#888',
+  fontSize: '12px',
+  cursor: 'pointer',
+  borderTop: '1px solid #2e2e2e',
+  flexShrink: 0,
+} as const;
+
 // Global styles for the switcher UI (moved from index.css)
 const globalStyles = `
   body {
@@ -1377,19 +1401,17 @@ function SwitcherApp() {
                 <Fragment key={session.sessionId}>
                 {minorsExpanded && minorSessions.length > 0 && index === majorSessions.length && (
                   <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
-                    style={{
-                      padding: '6px 10px 4px 24px',
-                      color: '#777',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      // Stick to the top while scrolled inside the minors zone,
-                      // so collapsing never requires scrolling back to find it.
-                      position: 'sticky',
-                      top: 0,
-                      zIndex: 1,
-                      backgroundColor: '#1a1a1a',
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setMinorsExpanded(false);
+                        setSelectedSessionIndex(0);
+                      }
                     }}
+                    style={MINOR_FOLD_HEADER_STYLE}
                   >
                     ▾ {minorSessions.length} minor sessions (≤2 msgs, untitled)
                   </div>
@@ -1621,7 +1643,15 @@ function SwitcherApp() {
               ))}
               {!isSearchingSessions && !minorsExpanded && minorSessions.length > 0 && (
                 <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setMinorsExpanded(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setMinorsExpanded(true);
+                    }
+                  }}
                   style={{ padding: '6px 10px 8px 24px', color: '#777', fontSize: '12px', cursor: 'pointer' }}
                 >
                   ▸ {minorSessions.length} minor sessions (≤2 msgs, untitled)
@@ -1633,15 +1663,17 @@ function SwitcherApp() {
               are expanded — collapsing never depends on scroll position. */}
           {!isSearchingSessions && minorsExpanded && minorSessions.length > 0 && (
             <div
+              role="button"
+              tabIndex={0}
               onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
-              style={{
-                padding: '6px 15px 8px',
-                color: '#888',
-                fontSize: '12px',
-                cursor: 'pointer',
-                borderTop: '1px solid #2e2e2e',
-                flexShrink: 0,
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setMinorsExpanded(false);
+                  setSelectedSessionIndex(0);
+                }
               }}
+              style={MINOR_FOLD_BAR_STYLE}
             >
               ▾ {minorSessions.length} minor sessions shown — click to fold
             </div>

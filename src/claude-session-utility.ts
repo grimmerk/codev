@@ -1734,23 +1734,65 @@ const runInBatches = async <T>(
   }
 };
 
-export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<SessionEnrichment> => {
+// Read the last `bytes` of a file without spawning a process.
+const readTailUtf8 = (filePath: string, bytes: number): string | null => {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(bytes, size);
+      const buf = Buffer.alloc(len);
+      // Cast: this @types/node version mistypes Buffer vs ArrayBufferView.
+      fs.readSync(fd, buf as unknown as Uint8Array, 0, len, size - len);
+      return buf.toString('utf-8');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+};
+
+export const loadSessionEnrichment = async (
+  sessions: ClaudeSession[],
+): Promise<SessionEnrichment> => {
   // Accumulator maps persist across calls; scans only fill/refresh entries.
   const titles = (cachedCustomTitles ??= new Map());
   const branches = (cachedBranches ??= new Map());
   const prLinks = (cachedPRLinks ??= new Map());
 
-  const { exec } = require('child_process');
-  const execPromise = (cmd: string): Promise<string> =>
+  const { execFile } = require('child_process');
+  // Shell-free (no interpolated paths anywhere near a shell). Resolves null
+  // on real failures (timeout/spawn) so they are distinguishable from
+  // no-match: grep exits 1 for "no match", a successful empty read.
+  const grepFileP = (
+    pattern: string,
+    filePath: string,
+  ): Promise<string | null> =>
     new Promise((resolve) => {
-      exec(cmd, { encoding: 'utf-8', timeout: 5000 }, (err: any, stdout: string) => {
-        resolve(err ? '' : stdout);
-      });
+      execFile(
+        'grep',
+        [pattern, filePath],
+        { encoding: 'utf-8', timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
+        (err: any, stdout: string) => {
+          if (err && err.code !== 1) resolve(null);
+          else resolve(stdout || '');
+        },
+      );
     });
+  const lastLine = (out: string): string => {
+    const lines = out.trim().split('\n');
+    return lines[lines.length - 1] || '';
+  };
 
   const scan = async () => {
-    // Re-grep only transcripts that are new or changed since their last scan.
-    const toScan: { session: ClaudeSession; jsonlPath: string; mtimeMs: number; size: number }[] = [];
+    // Re-scan only transcripts that are new or changed since their last scan.
+    const toScan: {
+      session: ClaudeSession;
+      jsonlPath: string;
+      mtimeMs: number;
+      size: number;
+    }[] = [];
     for (const session of sessions) {
       const encodedProject = session.project.replace(/[^a-zA-Z0-9-]/g, '-');
       const jsonlPath = path.join(
@@ -1765,60 +1807,86 @@ export const loadSessionEnrichment = async (sessions: ClaudeSession[]): Promise<
         continue;
       }
       const prev = enrichedFileState.get(session.sessionId);
-      if (prev && prev.mtimeMs === stat.mtimeMs && prev.size === stat.size) continue;
-      toScan.push({ session, jsonlPath, mtimeMs: stat.mtimeMs, size: stat.size });
-    }
-
-    await runInBatches(toScan, 25, async ({ session, jsonlPath, mtimeMs, size }) => {
-    // Run title, ai-title, branch, and PR link greps in parallel for each file
-    const [titleOutput, aiTitleOutput, branchOutput, prLinkOutput] = await Promise.all([
-      execPromise(`grep '"type":"custom-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
-      execPromise(`grep '"type":"ai-title"' "${jsonlPath}" 2>/dev/null | tail -1`),
-      // 50 lines, not 5: an active session's tail is often tool output with
-      // no gitBranch field (measured: tail -5 hit 0, tail -20 hit 12).
-      execPromise(`tail -n 50 "${jsonlPath}" 2>/dev/null | grep -o '"gitBranch":"[^"]*"' | tail -1`),
-      execPromise(`grep '"type":"pr-link"' "${jsonlPath}" 2>/dev/null | tail -1`),
-    ]);
-
-    // Priority: custom-title > ai-title
-    if (titleOutput.trim()) {
-      try {
-        const parsed = JSON.parse(titleOutput.trim());
-        const title = (parsed.customTitle || '').replace(/^"|"$/g, '').trim();
-        if (title) {
-          titles.set(session.sessionId, title);
-        }
-      } catch {}
-    }
-    if (!titles.has(session.sessionId) && aiTitleOutput.trim()) {
-      try {
-        const parsed = JSON.parse(aiTitleOutput.trim());
-        const title = (parsed.aiTitle || '').trim();
-        if (title) {
-          titles.set(session.sessionId, title);
-        }
-      } catch {}
-    }
-
-    if (branchOutput.trim()) {
-      const match = branchOutput.match(/"gitBranch":"([^"]*)"/);
-      if (match && match[1] && match[1] !== 'HEAD') {
-        branches.set(session.sessionId, match[1]);
+      if (prev && prev.mtimeMs === stat.mtimeMs && prev.size === stat.size) {
+        continue;
       }
+      toScan.push({
+        session,
+        jsonlPath,
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+      });
     }
 
-    if (prLinkOutput.trim()) {
-      try {
-        const parsed = JSON.parse(prLinkOutput.trim());
-        if (parsed.prNumber && parsed.prUrl) {
-          prLinks.set(session.sessionId, { prNumber: parsed.prNumber, prUrl: parsed.prUrl });
+    await runInBatches(
+      toScan,
+      25,
+      async ({ session, jsonlPath, mtimeMs, size }) => {
+        // Title, ai-title, and PR-link greps run in parallel; the branch comes
+        // from an in-process tail read (~256KB reaches far beyond the old
+        // 50-line window — an active session's tail is often tool output with
+        // no gitBranch field: measured tail -5 hit 0, tail -20 hit 12).
+        const [titleOutput, aiTitleOutput, prLinkOutput] = await Promise.all([
+          grepFileP('"type":"custom-title"', jsonlPath),
+          grepFileP('"type":"ai-title"', jsonlPath),
+          grepFileP('"type":"pr-link"', jsonlPath),
+        ]);
+        const tailOutput = readTailUtf8(jsonlPath, 256 * 1024);
+
+        // Priority: custom-title > ai-title
+        if (titleOutput) {
+          try {
+            const parsed = JSON.parse(lastLine(titleOutput));
+            const title = (parsed.customTitle || '')
+              .replace(/^"|"$/g, '')
+              .trim();
+            if (title) {
+              titles.set(session.sessionId, title);
+            }
+          } catch {}
         }
-      } catch {}
-    }
+        if (!titles.has(session.sessionId) && aiTitleOutput) {
+          try {
+            const parsed = JSON.parse(lastLine(aiTitleOutput));
+            const title = (parsed.aiTitle || '').trim();
+            if (title) {
+              titles.set(session.sessionId, title);
+            }
+          } catch {}
+        }
 
-    // Record AFTER the scan so a failed pass retries on the next call.
-    enrichedFileState.set(session.sessionId, { mtimeMs, size });
-    });
+        if (tailOutput) {
+          const all = [...tailOutput.matchAll(/"gitBranch":"([^"]*)"/g)];
+          const branch = all.length > 0 ? all[all.length - 1][1] : '';
+          if (branch && branch !== 'HEAD') {
+            branches.set(session.sessionId, branch);
+          }
+        }
+
+        if (prLinkOutput) {
+          try {
+            const parsed = JSON.parse(lastLine(prLinkOutput));
+            if (parsed.prNumber && parsed.prUrl) {
+              prLinks.set(session.sessionId, {
+                prNumber: parsed.prNumber,
+                prUrl: parsed.prUrl,
+              });
+            }
+          } catch {}
+        }
+
+        // Mark fresh ONLY when every read succeeded — a timed-out or failed
+        // pass stays unrecorded so the next call retries it.
+        if (
+          titleOutput !== null &&
+          aiTitleOutput !== null &&
+          prLinkOutput !== null &&
+          tailOutput !== null
+        ) {
+          enrichedFileState.set(session.sessionId, { mtimeMs, size });
+        }
+      },
+    );
   };
 
   enrichmentQueue = enrichmentQueue.then(scan, scan);
