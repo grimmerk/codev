@@ -128,6 +128,25 @@ interface IElectronAPI {
   getSessionStatuses: () => Promise<Record<string, string | null>>;
   onSessionStatusesUpdated: (callback: IpcCallback) => void;
 
+  // Session pin/hide marks
+  getSessionMarks: () => Promise<{
+    version: number;
+    pins: Record<
+      string,
+      { pinnedAt: string; cwd: string; accountLabel?: string; group: string | null }
+    >;
+    hidden: string[];
+  }>;
+  pinSession: (
+    sessionId: string,
+    info: { cwd?: string; accountLabel?: string },
+  ) => Promise<{ ok: boolean; error?: string; marks?: any }>;
+  unpinSession: (sessionId: string) => Promise<{ ok: boolean; error?: string; marks?: any }>;
+  hideSession: (sessionId: string) => Promise<{ ok: boolean; error?: string; marks?: any }>;
+  unhideSession: (sessionId: string) => Promise<{ ok: boolean; error?: string; marks?: any }>;
+  onSessionMarksUpdated: (callback: IpcCallback) => void;
+  getSessionsByIds: (ids: string[]) => Promise<any[]>;
+
   // Claude Code sessions
   getClaudeSessions: (limit?: number) => Promise<any>;
   searchClaudeSessions: (query: string) => Promise<{

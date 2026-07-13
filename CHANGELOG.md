@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.84
+
+- Feat: session pins & manual hide — session-finding Batch 1 PR-2 (plan: `docs/session-finding-plan.md` §4.4)
+  - **📌 Pinned zone** at the top of the Sessions list (collapsible, state remembered): pin via the hover 📌 icon on any row or `⌘D` on the selected row; a pinned session ALSO keeps its chronological spot (marked ★) — the zone is a shortcut, not a move
+  - Pins work on any displayed row, including deep-search matches beyond the loaded ~100 (the zone fetches those by id and lazily enriches them)
+  - **Hide** (hover ⊘ or `⇧⌘D`): forces a session into the minor-sessions fold — reversible from inside the expanded fold, still searchable; pin and hide are mutually exclusive (pinning unhides, hiding unpins)
+  - While searching, the pinned zone steps aside and results are one unified list (★ still marks pinned matches)
+  - Store: `~/.config/codev/session-marks.json` (single cross-account file, fs.watch-pushed to the UI, temp+rename writes); sessionIds are resume-stable so no migration logic is needed
+  - 7 new unit tests (marks normalize / pin-hide transitions / file roundtrip) — 52 total
+
 ## 1.0.83
 
 - Feat: session finding Batch 1 — "search & noise" (plan: `docs/session-finding-plan.md`)

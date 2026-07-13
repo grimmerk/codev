@@ -30,7 +30,17 @@ import {
   setLaunchInCodevTerminalCallback,
   launchNewClaudeSession,
   scanClosedVSCodeSessions,
+  getSessionsByIds,
 } from './claude-session-utility';
+import {
+  readSessionMarks,
+  watchSessionMarks,
+  withHidden,
+  withoutHidden,
+  withoutPin,
+  withPin,
+  writeSessionMarks,
+} from './session-marks';
 import {
   installHooks,
   removeHooks,
@@ -2327,6 +2337,67 @@ ipcMain.handle('get-claude-sessions', (_event, limit?: number) => {
 
 ipcMain.handle('search-claude-sessions', (_event, query: string) => {
   return searchClaudeSessions(query);
+});
+
+ipcMain.handle('get-sessions-by-ids', (_event, ids: string[]) => {
+  if (!Array.isArray(ids)) return [];
+  return getSessionsByIds(
+    ids.filter((x: unknown): x is string => typeof x === 'string'),
+  );
+});
+
+// Session pin/hide marks (session-finding Batch 1 PR-2)
+let marksWatcherCleanup: (() => void) | null = null;
+const ensureMarksWatcher = () => {
+  if (marksWatcherCleanup) return;
+  marksWatcherCleanup = watchSessionMarks((marks) => {
+    switcherWindow?.webContents.send('session-marks-updated', marks);
+  });
+};
+
+ipcMain.handle('get-session-marks', () => {
+  ensureMarksWatcher();
+  return readSessionMarks();
+});
+
+ipcMain.handle('pin-session', (_event, sessionId: string, info: { cwd?: string; accountLabel?: string }) => {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ok: false, error: 'invalid sessionId' };
+  }
+  const marks = withPin(readSessionMarks(), sessionId, {
+    pinnedAt: new Date().toISOString(),
+    cwd: typeof info?.cwd === 'string' ? info.cwd : '',
+    accountLabel: typeof info?.accountLabel === 'string' ? info.accountLabel : undefined,
+  });
+  writeSessionMarks(marks);
+  return { ok: true, marks };
+});
+
+ipcMain.handle('unpin-session', (_event, sessionId: string) => {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ok: false, error: 'invalid sessionId' };
+  }
+  const marks = withoutPin(readSessionMarks(), sessionId);
+  writeSessionMarks(marks);
+  return { ok: true, marks };
+});
+
+ipcMain.handle('hide-session', (_event, sessionId: string) => {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ok: false, error: 'invalid sessionId' };
+  }
+  const marks = withHidden(readSessionMarks(), sessionId);
+  writeSessionMarks(marks);
+  return { ok: true, marks };
+});
+
+ipcMain.handle('unhide-session', (_event, sessionId: string) => {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ok: false, error: 'invalid sessionId' };
+  }
+  const marks = withoutHidden(readSessionMarks(), sessionId);
+  writeSessionMarks(marks);
+  return { ok: true, marks };
 });
 
 ipcMain.handle('detect-active-sessions', async () => {

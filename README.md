@@ -24,6 +24,8 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to op
 
 Search covers **every session and every user prompt you ever typed** (not just the ~100 most recent sessions shown in the list) plus titles, branches, PR links, and last AI replies. When a match sits in the middle of a conversation, the row shows a `⌕ #N …` snippet with the surrounding context. Closed one-shot sessions (≤2 messages, untitled, no PR) fold into an expandable "minor sessions" row to keep the list scannable.
 
+**Pin** the sessions you keep coming back to (hover 📌 on a row, or `⌘D` on the selected row): they gather in a collapsible **📌 Pinned** zone at the top while also keeping their chronological spot (marked ★) — works even for old sessions found via deep search. **Hide** one-offs you never want in the main flow (hover ⊘, or `⇧⌘D`): they move into the minor-sessions fold, stay searchable, and can be unhidden from inside the fold. Pins and hides live in `~/.config/codev/session-marks.json`, shared across accounts.
+
 **Simple rule**: when running multiple sessions in the same project directory at the same time, give each running session a name. Closed sessions don't need names — they won't cause issues.
 
 - **Best**: start with a name — `claude -n "my task"` (or `claude --name "my task"`)
