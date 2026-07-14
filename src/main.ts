@@ -2372,6 +2372,8 @@ ipcMain.handle('pin-session', (_event, sessionId: string, info: { cwd?: string; 
     accountLabel: typeof info?.accountLabel === 'string' ? info.accountLabel : undefined,
   });
   writeSessionMarks(marks);
+  // Audit trail for the lost-pin reports (visible in Console.app / stdout)
+  console.log('[session-marks] pin', sessionId, 'pins:', Object.keys(marks.pins).length);
   return { ok: true, marks };
 });
 
@@ -2381,6 +2383,7 @@ ipcMain.handle('unpin-session', (_event, sessionId: string) => {
   }
   const marks = withoutPin(readSessionMarks(), sessionId);
   writeSessionMarks(marks);
+  console.log('[session-marks] unpin', sessionId, 'pins:', Object.keys(marks.pins).length);
   return { ok: true, marks };
 });
 
@@ -2390,6 +2393,7 @@ ipcMain.handle('hide-session', (_event, sessionId: string) => {
   }
   const marks = withHidden(readSessionMarks(), sessionId);
   writeSessionMarks(marks);
+  console.log('[session-marks] hide', sessionId, 'pins:', Object.keys(marks.pins).length, 'hidden:', marks.hidden.length);
   return { ok: true, marks };
 });
 
@@ -2399,6 +2403,7 @@ ipcMain.handle('unhide-session', (_event, sessionId: string) => {
   }
   const marks = withoutHidden(readSessionMarks(), sessionId);
   writeSessionMarks(marks);
+  console.log('[session-marks] unhide', sessionId, 'hidden:', marks.hidden.length);
   return { ok: true, marks };
 });
 

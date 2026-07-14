@@ -536,6 +536,9 @@ function SwitcherApp() {
   const majorSessions: any[] = [];
   const minorSessions: any[] = [];
   for (const s of sessions) {
+    // Pinned sessions live in the zone ONLY (user verdict: the timeline
+    // duplicate was more noise than signal). Search still shows everything.
+    if (!isSearchingSessions && sessionMarks.pins[s.sessionId]) continue;
     const minor =
       !isSearchingSessions &&
       (hiddenSet.has(s.sessionId) ||
@@ -1608,9 +1611,9 @@ function SwitcherApp() {
                 if (selectedSessionIndex < 0) return;
                 const s = displayedSessions[selectedSessionIndex];
                 if (s) {
-                  // Match the mouse UI: pinned-zone rows expose no hide control
+                  // ⇧⌘D on a zone row = unpin + fold (pin/hide are exclusive)
                   if (e.shiftKey) {
-                    if (!s.__pinnedRow) toggleHide(s);
+                    toggleHide(s);
                   } else {
                     togglePin(s);
                   }
@@ -1767,16 +1770,14 @@ function SwitcherApp() {
                             >
                               📌
                             </span>
-                            {!session.__pinnedRow && (
-                              <span
-                                title={hiddenSet.has(session.sessionId) ? 'Unhide' : 'Hide into minor sessions (⇧⌘D)'}
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={(e) => { e.stopPropagation(); toggleHide(session); }}
-                                style={{ cursor: 'pointer', fontSize: '11px', color: hiddenSet.has(session.sessionId) ? '#e07a5f' : '#666' }}
-                              >
-                                ⊘
-                              </span>
-                            )}
+                            <span
+                              title={hiddenSet.has(session.sessionId) ? 'Unhide' : session.__pinnedRow ? 'Unpin & hide into minor sessions (⇧⌘D)' : 'Hide into minor sessions (⇧⌘D)'}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => { e.stopPropagation(); toggleHide(session); }}
+                              style={{ cursor: 'pointer', fontSize: '11px', color: hiddenSet.has(session.sessionId) ? '#e07a5f' : '#666' }}
+                            >
+                              ⊘
+                            </span>
                           </>
                         )}
                         {prLinks[session.sessionId] && (() => {
