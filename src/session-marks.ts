@@ -154,37 +154,38 @@ export const writeSessionMarks = (marks: SessionMarks): void =>
   writeMarksFile(defaultMarksPath(), marks);
 
 /**
- * Watch the marks file for changes. Watches the parent DIRECTORY: the
- * rename-based write replaces the file inode, which would detach a plain
- * file watcher. Events for other files in ~/.config/codev (accounts.json,
- * our own .tmp) are filtered out by name.
+ * Watch a marks file for changes (path-based, testable). Watches the parent
+ * DIRECTORY: the rename-based write replaces the file inode, which would
+ * detach a plain file watcher. Events for sibling files (accounts.json, our
+ * own .tmp) are filtered out by name.
  */
-export const watchSessionMarks = (
+export const watchMarksFile = (
+  filePath: string,
   onChange: (marks: SessionMarks) => void,
-  onError?: () => void,
+  onError?: (err: Error) => void,
 ): (() => void) => {
-  const filePath = defaultMarksPath();
   const dir = path.dirname(filePath);
+  const filename = path.basename(filePath);
   fs.mkdirSync(dir, { recursive: true });
 
   // Debounce: fs.watch on macOS fires several times per change
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  const watcher = fs.watch(dir, { persistent: false }, (_event, filename) => {
-    if (filename && filename !== MARKS_FILENAME) return;
+  const watcher = fs.watch(dir, { persistent: false }, (_event, changed) => {
+    if (changed && changed !== filename) return;
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       onChange(readMarksFile(filePath));
     }, 50);
   });
 
-  watcher.on('error', () => {
+  watcher.on('error', (err: Error) => {
     // A dead watcher must not crash the main process (unhandled 'error'
     // would) — close it and let the owner decide whether to recreate.
     try {
       watcher.close();
     } catch {}
     if (debounceTimer) clearTimeout(debounceTimer);
-    onError?.();
+    onError?.(err);
   });
 
   return () => {
@@ -192,3 +193,8 @@ export const watchSessionMarks = (
     watcher.close();
   };
 };
+
+export const watchSessionMarks = (
+  onChange: (marks: SessionMarks) => void,
+  onError?: (err: Error) => void,
+): (() => void) => watchMarksFile(defaultMarksPath(), onChange, onError);

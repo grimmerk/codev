@@ -116,3 +116,4 @@ describe('marks file roundtrip', () => {
     expect(readMarksFile(file)).toEqual(emptyMarks());
   });
 });
+

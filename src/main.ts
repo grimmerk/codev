@@ -2349,8 +2349,13 @@ ipcMain.handle('get-sessions-by-ids', (_event, ids: string[]) => {
 // Session pin/hide marks (session-finding Batch 1 PR-2)
 let marksWatcherCleanup: (() => void) | null = null;
 let marksWatcherRetries = 0;
+let marksWatcherRetryTimer: ReturnType<typeof setTimeout> | null = null;
 const ensureMarksWatcher = () => {
   if (marksWatcherCleanup) return;
+  if (marksWatcherRetryTimer) {
+    clearTimeout(marksWatcherRetryTimer);
+    marksWatcherRetryTimer = null;
+  }
   marksWatcherCleanup = watchSessionMarks(
     (marks) => {
       marksWatcherRetries = 0;
@@ -2358,13 +2363,20 @@ const ensureMarksWatcher = () => {
         switcherWindow.webContents.send('session-marks-updated', marks);
       }
     },
-    () => {
+    (err) => {
       // Watcher died (dir removed, OS watcher limits) — recreate with a
       // bounded backoff instead of silently staying deaf until restart.
       marksWatcherCleanup = null;
       if (marksWatcherRetries < 5) {
         marksWatcherRetries += 1;
-        setTimeout(ensureMarksWatcher, 2000);
+        console.error(
+          `[session-marks] watcher died (${err?.message || err}); retry ${marksWatcherRetries}/5 in 2s`,
+        );
+        marksWatcherRetryTimer = setTimeout(ensureMarksWatcher, 2000);
+      } else {
+        console.error(
+          '[session-marks] watcher died and retries exhausted — marks pushes disabled until restart',
+        );
       }
     },
   );
