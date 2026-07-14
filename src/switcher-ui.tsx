@@ -556,8 +556,8 @@ function SwitcherApp() {
       : '(≤2 msgs, untitled)';
 
   // Pinned zone (PR-2): rows come from the loaded list when available, else
-  // from the by-id fetch; ordered by pinnedAt (newest first). A pinned session
-  // ALSO keeps its chronological spot below — the zone is a shortcut, not a move.
+  // from the by-id fetch. Zone-only model: pinning MOVES the session here
+  // (the timeline keeps no duplicate; search mode still shows everything).
   const pinnedById = new Map<string, any>();
   for (const s of allSessions) {
     if (sessionMarks.pins[s.sessionId]) pinnedById.set(s.sessionId, s);
@@ -584,7 +584,9 @@ function SwitcherApp() {
         firstUserMessage: '',
         lastUserMessage: '',
         lastTimestamp: 0,
-        messageCount: 0,
+        // undefined, not 0: the row renders '… msgs' instead of a misleading
+        // '0 msgs' while the session is unresolved (or permanently gone)
+        messageCount: undefined,
         isActive: false,
         accountLabel: info.accountLabel,
       };
@@ -1850,7 +1852,7 @@ function SwitcherApp() {
                           ) : null;
                         })()}
                         <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
-                          {session.messageCount} msgs
+                          {session.messageCount ?? '…'} msgs
                         </span>
                         <span style={{ color: THEME.text.secondary, fontSize: '12px', minWidth: '50px', textAlign: 'right' }}>
                           {formatRelativeTime(session.lastTimestamp)}

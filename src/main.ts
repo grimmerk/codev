@@ -2348,13 +2348,26 @@ ipcMain.handle('get-sessions-by-ids', (_event, ids: string[]) => {
 
 // Session pin/hide marks (session-finding Batch 1 PR-2)
 let marksWatcherCleanup: (() => void) | null = null;
+let marksWatcherRetries = 0;
 const ensureMarksWatcher = () => {
   if (marksWatcherCleanup) return;
-  marksWatcherCleanup = watchSessionMarks((marks) => {
-    if (switcherWindow && !switcherWindow.isDestroyed()) {
-      switcherWindow.webContents.send('session-marks-updated', marks);
-    }
-  });
+  marksWatcherCleanup = watchSessionMarks(
+    (marks) => {
+      marksWatcherRetries = 0;
+      if (switcherWindow && !switcherWindow.isDestroyed()) {
+        switcherWindow.webContents.send('session-marks-updated', marks);
+      }
+    },
+    () => {
+      // Watcher died (dir removed, OS watcher limits) — recreate with a
+      // bounded backoff instead of silently staying deaf until restart.
+      marksWatcherCleanup = null;
+      if (marksWatcherRetries < 5) {
+        marksWatcherRetries += 1;
+        setTimeout(ensureMarksWatcher, 2000);
+      }
+    },
+  );
 };
 
 ipcMain.handle('get-session-marks', () => {

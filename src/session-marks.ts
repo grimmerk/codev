@@ -161,6 +161,7 @@ export const writeSessionMarks = (marks: SessionMarks): void =>
  */
 export const watchSessionMarks = (
   onChange: (marks: SessionMarks) => void,
+  onError?: () => void,
 ): (() => void) => {
   const filePath = defaultMarksPath();
   const dir = path.dirname(filePath);
@@ -177,9 +178,13 @@ export const watchSessionMarks = (
   });
 
   watcher.on('error', () => {
-    // Swallow watcher errors (dir deleted, permissions changed, OS watcher
-    // limits) — an unhandled 'error' event would crash the main process.
-    // The next app restart recovers the watch.
+    // A dead watcher must not crash the main process (unhandled 'error'
+    // would) — close it and let the owner decide whether to recreate.
+    try {
+      watcher.close();
+    } catch {}
+    if (debounceTimer) clearTimeout(debounceTimer);
+    onError?.();
   });
 
   return () => {
