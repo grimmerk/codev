@@ -1647,6 +1647,7 @@ function SwitcherApp() {
                 <div
                   role="button"
                   tabIndex={0}
+                  title="Click to collapse/expand · ⌘D pin/unpin · ⇧⌘D hide"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={togglePinnedCollapsed}
                   onKeyDown={(e) => {
