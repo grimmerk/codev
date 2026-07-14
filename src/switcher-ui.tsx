@@ -1577,10 +1577,14 @@ function SwitcherApp() {
                   window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
                 }
               } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
-                // ⌘D toggles pin, ⇧⌘D toggles hide on the selected row
+                // ⌘D toggles pin, ⇧⌘D toggles hide on the selected row.
+                // Requires an EXPLICIT selection (hover or arrow keys):
+                // defaulting to row 0 — unlike Enter, which opens the top
+                // result — made a bare ⌘D after a tab switch silently toggle
+                // the first pinned-zone row (user-reported footgun).
                 e.preventDefault();
-                const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
-                const s = displayedSessions[idx];
+                if (selectedSessionIndex < 0) return;
+                const s = displayedSessions[selectedSessionIndex];
                 if (s) {
                   // Match the mouse UI: pinned-zone rows expose no hide control
                   if (e.shiftKey) {
