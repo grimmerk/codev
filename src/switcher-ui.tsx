@@ -420,6 +420,7 @@ function SwitcherApp() {
   const extraPinnedKeyRef = useRef('');
   // Keep the selection on the same session after pin/hide reshuffles the list
   const reanchorSelectionRef = useRef<string | null>(null);
+  const hoverSuppressTokenRef = useRef(0);
   const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
@@ -563,8 +564,10 @@ function SwitcherApp() {
       pinnedById.set(s.sessionId, s);
     }
   }
+  // pinnedAt ASC: a new pin APPENDS at the zone bottom instead of reshuffling
+  // the existing zone rows — less layout movement under the cursor.
   const pinnedRows = Object.entries(sessionMarks.pins)
-    .sort(([, a], [, b]) => (b.pinnedAt || '').localeCompare(a.pinnedAt || ''))
+    .sort(([, a], [, b]) => (a.pinnedAt || '').localeCompare(b.pinnedAt || ''))
     .map(([id, info]) => {
       // Fall back to a placeholder built from the pin record itself: a pin
       // can be momentarily (VS Code sessions are absent from history.jsonl
@@ -597,12 +600,28 @@ function SwitcherApp() {
     ...(minorsExpanded ? [...majorSessions, ...minorSessions] : majorSessions),
   ];
 
+  // Pin/hide moves rows under a STATIONARY cursor; Chromium then re-hit-tests
+  // and fires mouseenter on whatever row slid under the mouse, teleporting the
+  // selection (and overriding the re-anchor below) — the same phenomenon the
+  // window-show code suppresses with ignoreMouseEnterRef. Suppress it around
+  // every marks-driven layout change too.
+  const suppressHoverSelection = (ms = 400) => {
+    ignoreMouseEnterRef.current = true;
+    const token = ++hoverSuppressTokenRef.current;
+    setTimeout(() => {
+      if (hoverSuppressTokenRef.current === token) {
+        ignoreMouseEnterRef.current = false;
+      }
+    }, ms);
+  };
+
   // Arm the re-anchor together with the marks update (same commit): arming at
   // toggle-call time let any unrelated render consume the ref before the list
   // actually reshuffled, leaving the selection on the wrong row again.
   const applyMarksResult = (r: any, reanchorSessionId?: string) => {
     if (r?.ok && r.marks) {
       if (reanchorSessionId) reanchorSelectionRef.current = reanchorSessionId;
+      suppressHoverSelection();
       setSessionMarks({ pins: r.marks.pins || {}, hidden: r.marks.hidden || [] });
     }
   };
@@ -680,7 +699,10 @@ function SwitcherApp() {
       .catch(() => {});
     const unsubscribe = window.electronAPI.onSessionMarksUpdated(
       (_event: any, m: any) => {
-        if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+        if (m) {
+          suppressHoverSelection();
+          setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+        }
       },
     );
     return unsubscribe;
