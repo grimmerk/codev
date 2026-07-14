@@ -565,14 +565,30 @@ function SwitcherApp() {
   }
   const pinnedRows = Object.entries(sessionMarks.pins)
     .sort(([, a], [, b]) => (b.pinnedAt || '').localeCompare(a.pinnedAt || ''))
-    .map(([id]) => pinnedById.get(id))
-    .filter(Boolean)
-    .map((s: any) => ({
-      ...s,
-      __pinnedRow: true,
-      isActive: s.sessionId in activeStateRef.current || s.isActive,
-      activePid: activeStateRef.current[s.sessionId] ?? s.activePid,
-    }));
+    .map(([id, info]) => {
+      // Fall back to a placeholder built from the pin record itself: a pin
+      // can be momentarily (VS Code sessions are absent from history.jsonl
+      // until the closed-scan merges them in) or permanently unresolvable —
+      // without this the zone count flaps on every tab switch.
+      const s = pinnedById.get(id) ?? {
+        sessionId: id,
+        project: info.cwd || '',
+        projectName:
+          (info.cwd || '').split('/').filter(Boolean).pop() || id.slice(0, 8),
+        firstUserMessage: '',
+        lastUserMessage: '',
+        lastTimestamp: 0,
+        messageCount: 0,
+        isActive: false,
+        accountLabel: info.accountLabel,
+      };
+      return {
+        ...s,
+        __pinnedRow: true,
+        isActive: s.sessionId in activeStateRef.current || s.isActive,
+        activePid: activeStateRef.current[s.sessionId] ?? s.activePid,
+      };
+    });
   const showPinnedZone = !isSearchingSessions && pinnedRows.length > 0;
   const visiblePinnedRows = showPinnedZone && !pinnedCollapsed ? pinnedRows : [];
 
@@ -1602,6 +1618,7 @@ function SwitcherApp() {
                 <div
                   role="button"
                   tabIndex={0}
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={togglePinnedCollapsed}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -1623,6 +1640,7 @@ function SwitcherApp() {
                   <div
                     role="button"
                     tabIndex={0}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -1717,6 +1735,7 @@ function SwitcherApp() {
                           <>
                             <span
                               title={sessionMarks.pins[session.sessionId] ? 'Unpin (⌘D)' : 'Pin (⌘D)'}
+                              onMouseDown={(e) => e.preventDefault()}
                               onClick={(e) => { e.stopPropagation(); togglePin(session); }}
                               style={{ cursor: 'pointer', fontSize: '11px', color: sessionMarks.pins[session.sessionId] ? '#f5b942' : '#777' }}
                             >
@@ -1725,6 +1744,7 @@ function SwitcherApp() {
                             {!session.__pinnedRow && (
                               <span
                                 title={hiddenSet.has(session.sessionId) ? 'Unhide' : 'Hide into minor sessions (⇧⌘D)'}
+                                onMouseDown={(e) => e.preventDefault()}
                                 onClick={(e) => { e.stopPropagation(); toggleHide(session); }}
                                 style={{ cursor: 'pointer', fontSize: '11px', color: hiddenSet.has(session.sessionId) ? '#e07a5f' : '#666' }}
                               >
@@ -1891,6 +1911,7 @@ function SwitcherApp() {
                 <div
                   role="button"
                   tabIndex={0}
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => setMinorsExpanded(true)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -1911,6 +1932,7 @@ function SwitcherApp() {
             <div
               role="button"
               tabIndex={0}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
