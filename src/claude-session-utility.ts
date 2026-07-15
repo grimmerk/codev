@@ -244,6 +244,15 @@ export const searchClaudeSessions = (
   return { sessions, snippets };
 };
 
+/** Look up full session records by id from the cached full set (any account). */
+export const getSessionsByIds = (ids: string[]): ClaudeSession[] => {
+  if (ids.length === 0) return [];
+  const want = new Set(ids);
+  return readClaudeSessions(Number.MAX_SAFE_INTEGER).filter((s) =>
+    want.has(s.sessionId),
+  );
+};
+
 /**
  * Detect active Claude Code sessions by checking running processes.
  * Returns a Map of session ID -> PID.

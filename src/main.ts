@@ -30,7 +30,17 @@ import {
   setLaunchInCodevTerminalCallback,
   launchNewClaudeSession,
   scanClosedVSCodeSessions,
+  getSessionsByIds,
 } from './claude-session-utility';
+import {
+  readSessionMarks,
+  watchSessionMarks,
+  withHidden,
+  withoutHidden,
+  withoutPin,
+  withPin,
+  writeSessionMarks,
+} from './session-marks';
 import {
   installHooks,
   removeHooks,
@@ -2327,6 +2337,99 @@ ipcMain.handle('get-claude-sessions', (_event, limit?: number) => {
 
 ipcMain.handle('search-claude-sessions', (_event, query: string) => {
   return searchClaudeSessions(query);
+});
+
+ipcMain.handle('get-sessions-by-ids', (_event, ids: string[]) => {
+  if (!Array.isArray(ids)) return [];
+  return getSessionsByIds(
+    ids.filter((x: unknown): x is string => typeof x === 'string'),
+  );
+});
+
+// Session pin/hide marks (session-finding Batch 1 PR-2)
+let marksWatcherCleanup: (() => void) | null = null;
+let marksWatcherRetries = 0;
+let marksWatcherRetryTimer: ReturnType<typeof setTimeout> | null = null;
+const ensureMarksWatcher = () => {
+  if (marksWatcherCleanup) return;
+  if (marksWatcherRetryTimer) {
+    clearTimeout(marksWatcherRetryTimer);
+    marksWatcherRetryTimer = null;
+  }
+  marksWatcherCleanup = watchSessionMarks(
+    (marks) => {
+      marksWatcherRetries = 0;
+      if (switcherWindow && !switcherWindow.isDestroyed()) {
+        switcherWindow.webContents.send('session-marks-updated', marks);
+      }
+    },
+    (err) => {
+      // Watcher died (dir removed, OS watcher limits) — recreate with a
+      // bounded backoff instead of silently staying deaf until restart.
+      marksWatcherCleanup = null;
+      if (marksWatcherRetries < 5) {
+        marksWatcherRetries += 1;
+        console.error(
+          `[session-marks] watcher died (${err?.message || err}); retry ${marksWatcherRetries}/5 in 2s`,
+        );
+        marksWatcherRetryTimer = setTimeout(ensureMarksWatcher, 2000);
+      } else {
+        console.error(
+          '[session-marks] watcher died and retries exhausted — marks pushes disabled until restart',
+        );
+      }
+    },
+  );
+};
+
+ipcMain.handle('get-session-marks', () => {
+  ensureMarksWatcher();
+  return readSessionMarks();
+});
+
+ipcMain.handle('pin-session', (_event, sessionId: string, info: { cwd?: string; accountLabel?: string }) => {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ok: false, error: 'invalid sessionId' };
+  }
+  const marks = withPin(readSessionMarks(), sessionId, {
+    pinnedAt: new Date().toISOString(),
+    cwd: typeof info?.cwd === 'string' ? info.cwd : '',
+    accountLabel: typeof info?.accountLabel === 'string' ? info.accountLabel : undefined,
+  });
+  writeSessionMarks(marks);
+  // Audit trail for the lost-pin reports (visible in Console.app / stdout)
+  console.log('[session-marks] pin', sessionId, 'pins:', Object.keys(marks.pins).length);
+  return { ok: true, marks };
+});
+
+ipcMain.handle('unpin-session', (_event, sessionId: string) => {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ok: false, error: 'invalid sessionId' };
+  }
+  const marks = withoutPin(readSessionMarks(), sessionId);
+  writeSessionMarks(marks);
+  console.log('[session-marks] unpin', sessionId, 'pins:', Object.keys(marks.pins).length);
+  return { ok: true, marks };
+});
+
+ipcMain.handle('hide-session', (_event, sessionId: string) => {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ok: false, error: 'invalid sessionId' };
+  }
+  const marks = withHidden(readSessionMarks(), sessionId);
+  writeSessionMarks(marks);
+  console.log('[session-marks] hide', sessionId, 'pins:', Object.keys(marks.pins).length, 'hidden:', marks.hidden.length);
+  return { ok: true, marks };
+});
+
+ipcMain.handle('unhide-session', (_event, sessionId: string) => {
+  if (!sessionId || typeof sessionId !== 'string') {
+    return { ok: false, error: 'invalid sessionId' };
+  }
+  const marks = withoutHidden(readSessionMarks(), sessionId);
+  writeSessionMarks(marks);
+  console.log('[session-marks] unhide', sessionId, 'hidden:', marks.hidden.length);
+  return { ok: true, marks };
 });
 
 ipcMain.handle('detect-active-sessions', async () => {

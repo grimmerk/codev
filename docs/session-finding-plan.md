@@ -1,8 +1,8 @@
 # Session-Finding Improvement Plan (search / browse / pins / preview)
 
 > **Status: decided; Batch 1 in flight** (finalized 2026-07-12 via a brainstorm session).
-> PR-1 "search & noise" (§4.1–§4.3: B2 highlight + A1/B1 full search + C1 folding) = **PR #132**;
-> PR-2 "pins" (§4.4 D1, incl. C1's manual hide) not started; Batch 2/3 not started.
+> PR-1 "search & noise" (§4.1–§4.3: B2 highlight + A1/B1 full search + C1 folding) = **PR #132 (merged)**;
+> PR-2 "pins" (§4.4 D1, incl. C1's manual hide) = **PR #136**; Batch 2/3 not started.
 > This document is the cross-session / cross-model implementation reference: every "decision"
 > below was confirmed point-by-point with the user — do not re-open decided options;
 > implementation details (§4–§6) may adapt to what you find.

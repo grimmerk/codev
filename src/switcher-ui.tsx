@@ -46,6 +46,14 @@ const MINOR_FOLD_BAR_STYLE = {
   flexShrink: 0,
 } as const;
 
+// Header row of the pinned zone at the top of the Sessions list.
+const PINNED_HEADER_STYLE = {
+  padding: '6px 10px 2px 24px',
+  color: '#c9a227',
+  fontSize: '12px',
+  cursor: 'pointer',
+} as const;
+
 // Global styles for the switcher UI (moved from index.css)
 const globalStyles = `
   body {
@@ -395,6 +403,24 @@ function SwitcherApp() {
   // Folding waits for the first active-session detection so a just-started
   // (≤2 msgs, not-yet-detected) session is never folded away at app start.
   const [activeDetectionReady, setActiveDetectionReady] = useState(false);
+  // Pin/hide marks (PR-2), pushed from main via fs.watch on session-marks.json
+  const [sessionMarks, setSessionMarks] = useState<{
+    pins: Record<string, { pinnedAt: string; cwd: string; accountLabel?: string }>;
+    hidden: string[];
+  }>({ pins: {}, hidden: [] });
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('codev-pinned-collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  // Pinned sessions living outside the loaded list (fetched by id)
+  const [extraPinnedSessions, setExtraPinnedSessions] = useState<any[]>([]);
+  const extraPinnedKeyRef = useRef('');
+  // Keep the selection on the same session after pin/hide reshuffles the list
+  const reanchorSelectionRef = useRef<string | null>(null);
+  const hoverSuppressTokenRef = useRef(0);
   const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
   const allSessionsRef = useRef<any[]>([]);
@@ -504,19 +530,224 @@ function SwitcherApp() {
 
   // C1: fold minor (junk) sessions while browsing; searching shows everything.
   // Minors keep their recency order but render below the fold row at the end.
+  // A user-hidden session is forced into the fold regardless of its stats.
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
+  const hiddenSet = new Set(sessionMarks.hidden);
   const majorSessions: any[] = [];
   const minorSessions: any[] = [];
   for (const s of sessions) {
+    // Pinned sessions live in the zone ONLY (user verdict: the timeline
+    // duplicate was more noise than signal). Search still shows everything.
+    if (!isSearchingSessions && sessionMarks.pins[s.sessionId]) continue;
     const minor =
       !isSearchingSessions &&
-      activeDetectionReady &&
-      isMinorSession(s, !!customTitles[s.sessionId], !!prLinks[s.sessionId]);
+      (hiddenSet.has(s.sessionId) ||
+        (activeDetectionReady &&
+          isMinorSession(s, !!customTitles[s.sessionId], !!prLinks[s.sessionId])));
     (minor ? minorSessions : majorSessions).push(s);
   }
-  const displayedSessions = minorsExpanded
-    ? [...majorSessions, ...minorSessions]
-    : majorSessions;
+  // Manually hidden sessions may be titled/long — keep the fold label honest.
+  const hiddenMinorCount = minorSessions.filter((s: any) =>
+    hiddenSet.has(s.sessionId),
+  ).length;
+  const minorFoldSuffix =
+    hiddenMinorCount > 0
+      ? `(≤2 msgs, untitled · ${hiddenMinorCount} hidden)`
+      : '(≤2 msgs, untitled)';
+
+  // Pinned zone (PR-2): rows come from the loaded list when available, else
+  // from the by-id fetch. Zone-only model: pinning MOVES the session here
+  // (the timeline keeps no duplicate; search mode still shows everything).
+  const pinnedById = new Map<string, any>();
+  for (const s of allSessions) {
+    if (sessionMarks.pins[s.sessionId]) pinnedById.set(s.sessionId, s);
+  }
+  for (const s of extraPinnedSessions) {
+    if (sessionMarks.pins[s.sessionId] && !pinnedById.has(s.sessionId)) {
+      pinnedById.set(s.sessionId, s);
+    }
+  }
+  // pinnedAt ASC: a new pin APPENDS at the zone bottom instead of reshuffling
+  // the existing zone rows — less layout movement under the cursor.
+  const pinnedRows = Object.entries(sessionMarks.pins)
+    .sort(([, a], [, b]) => (a.pinnedAt || '').localeCompare(b.pinnedAt || ''))
+    .map(([id, info]) => {
+      // Fall back to a placeholder built from the pin record itself: a pin
+      // can be momentarily (VS Code sessions are absent from history.jsonl
+      // until the closed-scan merges them in) or permanently unresolvable —
+      // without this the zone count flaps on every tab switch.
+      const s = pinnedById.get(id) ?? {
+        sessionId: id,
+        project: info.cwd || '',
+        projectName:
+          (info.cwd || '').split('/').filter(Boolean).pop() || id.slice(0, 8),
+        firstUserMessage: '',
+        lastUserMessage: '',
+        lastTimestamp: 0,
+        // undefined, not 0: the row renders '… msgs' instead of a misleading
+        // '0 msgs' while the session is unresolved (or permanently gone)
+        messageCount: undefined,
+        isActive: false,
+        accountLabel: info.accountLabel,
+      };
+      return {
+        ...s,
+        __pinnedRow: true,
+        isActive: s.sessionId in activeStateRef.current || s.isActive,
+        activePid: activeStateRef.current[s.sessionId] ?? s.activePid,
+      };
+    });
+  const showPinnedZone = !isSearchingSessions && pinnedRows.length > 0;
+  const visiblePinnedRows = showPinnedZone && !pinnedCollapsed ? pinnedRows : [];
+
+  const displayedSessions = [
+    ...visiblePinnedRows,
+    ...(minorsExpanded ? [...majorSessions, ...minorSessions] : majorSessions),
+  ];
+
+  // Pin/hide moves rows under a STATIONARY cursor; Chromium then re-hit-tests
+  // and fires mouseenter on whatever row slid under the mouse, teleporting the
+  // selection (and overriding the re-anchor below) — the same phenomenon the
+  // window-show code suppresses with ignoreMouseEnterRef. Suppress it around
+  // every marks-driven layout change too.
+  const suppressHoverSelection = (ms = 400) => {
+    ignoreMouseEnterRef.current = true;
+    const token = ++hoverSuppressTokenRef.current;
+    setTimeout(() => {
+      if (hoverSuppressTokenRef.current === token) {
+        ignoreMouseEnterRef.current = false;
+      }
+    }, ms);
+  };
+
+  // Arm the re-anchor together with the marks update (same commit): arming at
+  // toggle-call time let any unrelated render consume the ref before the list
+  // actually reshuffled, leaving the selection on the wrong row again.
+  const applyMarksResult = (r: any, reanchorSessionId?: string) => {
+    if (r?.ok && r.marks) {
+      if (reanchorSessionId) reanchorSelectionRef.current = reanchorSessionId;
+      suppressHoverSelection();
+      setSessionMarks({ pins: r.marks.pins || {}, hidden: r.marks.hidden || [] });
+    }
+  };
+  const togglePin = (session: any) => {
+    if (sessionMarks.pins[session.sessionId]) {
+      window.electronAPI
+        .unpinSession(session.sessionId)
+        .then((r) => applyMarksResult(r, session.sessionId))
+        .catch(() => {});
+    } else {
+      window.electronAPI
+        .pinSession(session.sessionId, { cwd: session.project, accountLabel: session.accountLabel })
+        .then((r) => applyMarksResult(r, session.sessionId))
+        .catch(() => {});
+    }
+  };
+  const toggleHide = (session: any) => {
+    if (hiddenSet.has(session.sessionId)) {
+      window.electronAPI
+        .unhideSession(session.sessionId)
+        .then((r) => applyMarksResult(r, session.sessionId))
+        .catch(() => {});
+    } else {
+      window.electronAPI
+        .hideSession(session.sessionId)
+        .then((r) => applyMarksResult(r, session.sessionId))
+        .catch(() => {});
+    }
+  };
+  const togglePinnedCollapsed = () => {
+    setPinnedCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('codev-pinned-collapsed', next ? '1' : '0');
+      } catch {}
+      return next;
+    });
+    // The list just changed length — snap the selection back to the top,
+    // same as the minors fold collapse does.
+    setSelectedSessionIndex(0);
+  };
+
+  // Pinning/hiding inserts or removes rows above the selection, shifting every
+  // index — without re-anchoring, the next ⌘D would act on an unintended row.
+  // Re-anchor to the same session's LAST occurrence (the timeline copy).
+  useEffect(() => {
+    const target = reanchorSelectionRef.current;
+    if (!target) return;
+    reanchorSelectionRef.current = null;
+    let next = -1;
+    for (let i = displayedSessions.length - 1; i >= 0; i--) {
+      if (displayedSessions[i].sessionId === target) {
+        next = i;
+        break;
+      }
+    }
+    if (next >= 0) {
+      setSelectedSessionIndex(next);
+    } else {
+      // The session left the visible list (hidden into a collapsed fold) —
+      // just clamp the selection into range.
+      setSelectedSessionIndex((cur) =>
+        Math.min(cur, Math.max(displayedSessions.length - 1, 0)),
+      );
+    }
+  });
+
+  // Load marks once + subscribe to main-side pushes (fs.watch on the store)
+  useEffect(() => {
+    window.electronAPI
+      .getSessionMarks()
+      .then((m: any) => {
+        if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+      })
+      .catch(() => {});
+    const unsubscribe = window.electronAPI.onSessionMarksUpdated(
+      (_event: any, m: any) => {
+        if (m) {
+          suppressHoverSelection();
+          setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+        }
+      },
+    );
+    return unsubscribe;
+  }, []);
+
+  // Fetch pinned sessions that aren't in the loaded list (by id), then enrich
+  useEffect(() => {
+    const loaded = new Set(allSessions.map((s: any) => s.sessionId));
+    const missing = Object.keys(sessionMarks.pins).filter((id) => !loaded.has(id));
+    const key = missing.sort().join(',');
+    if (key === extraPinnedKeyRef.current) return;
+    extraPinnedKeyRef.current = key;
+    if (missing.length === 0) {
+      setExtraPinnedSessions([]);
+      return;
+    }
+    window.electronAPI.getSessionsByIds(missing).then((result: any[]) => {
+      // Drop stale responses (a newer pin set superseded this request)
+      if (extraPinnedKeyRef.current !== key) return;
+      const found = result || [];
+      setExtraPinnedSessions(found);
+      if (found.length === 0) return;
+      window.electronAPI.loadSessionEnrichment(found).then((enrichment) => {
+        if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
+          setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
+        }
+        if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
+          setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+        }
+        if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+          setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
+        }
+      });
+      window.electronAPI.loadLastAssistantResponses(found).then((responses: Record<string, string>) => {
+        if (responses && Object.keys(responses).length > 0) {
+          setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+        }
+      });
+    }).catch(() => {});
+  }, [sessionMarks.pins, allSessions]);
 
   const fetchClaudeSessions = async () => {
     // Step 1: Show sessions immediately, preserve old active states (SWR via ref)
@@ -1372,6 +1603,23 @@ function SwitcherApp() {
                   clearSessionSearchOnShowRef.current = true;
                   window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
                 }
+              } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
+                // ⌘D toggles pin, ⇧⌘D toggles hide on the selected row.
+                // Requires an EXPLICIT selection (hover or arrow keys):
+                // defaulting to row 0 — unlike Enter, which opens the top
+                // result — made a bare ⌘D after a tab switch silently toggle
+                // the first pinned-zone row (user-reported footgun).
+                e.preventDefault();
+                if (selectedSessionIndex < 0) return;
+                const s = displayedSessions[selectedSessionIndex];
+                if (s) {
+                  // ⇧⌘D on a zone row = unpin + fold (pin/hide are exclusive)
+                  if (e.shiftKey) {
+                    toggleHide(s);
+                  } else {
+                    togglePin(s);
+                  }
+                }
               }
             }}
               placeholder="Search sessions..."
@@ -1397,12 +1645,34 @@ function SwitcherApp() {
                 {sessionSearchValue ? '⚠️ No matching sessions found' : '🤖 No Claude Code sessions found'}
               </div>
             ) : (<>
+              {showPinnedZone && (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  title="Click to collapse/expand · ⌘D pin/unpin · ⇧⌘D hide"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={togglePinnedCollapsed}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      togglePinnedCollapsed();
+                    }
+                  }}
+                  style={PINNED_HEADER_STYLE}
+                >
+                  {pinnedCollapsed ? '▸' : '▾'} 📌 Pinned ({pinnedRows.length})
+                </div>
+              )}
               {displayedSessions.map((session, index) => (
-                <Fragment key={session.sessionId}>
-                {minorsExpanded && minorSessions.length > 0 && index === majorSessions.length && (
+                <Fragment key={`${session.__pinnedRow ? 'pin:' : ''}${session.sessionId}`}>
+                {visiblePinnedRows.length > 0 && index === visiblePinnedRows.length && (
+                  <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 2px 3px' }} />
+                )}
+                {minorsExpanded && minorSessions.length > 0 && index === visiblePinnedRows.length + majorSessions.length && (
                   <div
                     role="button"
                     tabIndex={0}
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -1413,7 +1683,7 @@ function SwitcherApp() {
                     }}
                     style={MINOR_FOLD_HEADER_STYLE}
                   >
-                    ▾ {minorSessions.length} minor sessions (≤2 msgs, untitled)
+                    ▾ {minorSessions.length} minor sessions {minorFoldSuffix}
                   </div>
                 )}
                 <div
@@ -1457,6 +1727,12 @@ function SwitcherApp() {
                     {/* Line 1: project name + custom title + metadata */}
                     <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                       <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {sessionMarks.pins[session.sessionId] && (
+                          <span style={{ color: '#f5b942', fontSize: '12px', marginRight: '3px' }}>★</span>
+                        )}
+                        {hiddenSet.has(session.sessionId) && (
+                          <span title="Hidden session" style={{ color: '#e07a5f', fontSize: '11px', marginRight: '3px' }}>⊘</span>
+                        )}
                         <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
                           <Highlighter
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
@@ -1487,6 +1763,26 @@ function SwitcherApp() {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
+                        {index === selectedSessionIndex && (
+                          <>
+                            <span
+                              title={sessionMarks.pins[session.sessionId] ? 'Unpin (⌘D)' : 'Pin (⌘D)'}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => { e.stopPropagation(); togglePin(session); }}
+                              style={{ cursor: 'pointer', fontSize: '11px', color: sessionMarks.pins[session.sessionId] ? '#f5b942' : '#777' }}
+                            >
+                              📌
+                            </span>
+                            <span
+                              title={hiddenSet.has(session.sessionId) ? 'Unhide' : session.__pinnedRow ? 'Unpin & hide into minor sessions (⇧⌘D)' : 'Hide into minor sessions (⇧⌘D)'}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => { e.stopPropagation(); toggleHide(session); }}
+                              style={{ cursor: 'pointer', fontSize: '11px', color: hiddenSet.has(session.sessionId) ? '#e07a5f' : '#666' }}
+                            >
+                              ⊘
+                            </span>
+                          </>
+                        )}
                         {prLinks[session.sessionId] && (() => {
                           const prInfo = prLinks[session.sessionId];
                           const searchWords = sessionSearchValue.split(/\s+/).filter(Boolean);
@@ -1556,7 +1852,7 @@ function SwitcherApp() {
                           ) : null;
                         })()}
                         <span style={{ color: THEME.text.secondary, fontSize: '12px' }}>
-                          {session.messageCount} msgs
+                          {session.messageCount ?? '…'} msgs
                         </span>
                         <span style={{ color: THEME.text.secondary, fontSize: '12px', minWidth: '50px', textAlign: 'right' }}>
                           {formatRelativeTime(session.lastTimestamp)}
@@ -1645,6 +1941,7 @@ function SwitcherApp() {
                 <div
                   role="button"
                   tabIndex={0}
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => setMinorsExpanded(true)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -1654,7 +1951,7 @@ function SwitcherApp() {
                   }}
                   style={{ padding: '6px 10px 8px 24px', color: '#777', fontSize: '12px', cursor: 'pointer' }}
                 >
-                  ▸ {minorSessions.length} minor sessions (≤2 msgs, untitled)
+                  ▸ {minorSessions.length} minor sessions {minorFoldSuffix}
                 </div>
               )}
             </>)}
@@ -1665,6 +1962,7 @@ function SwitcherApp() {
             <div
               role="button"
               tabIndex={0}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => { setMinorsExpanded(false); setSelectedSessionIndex(0); }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
