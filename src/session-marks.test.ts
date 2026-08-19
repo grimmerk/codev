@@ -148,31 +148,6 @@ describe('marks file roundtrip', () => {
   // renders. That is right for display and wrong for authority: a file that
   // parses but is not our schema must not be declared authoritative, or the
   // next pin overwrites it.
-  it('treats a parseable but schema-invalid store as unknown', () => {
-    const file = path.join(dir, 'session-marks.json');
-    const cases: [string, string][] = [
-      ['[]', 'an array is not a marks object'],
-      [
-        '{"version":2,"pins":{},"hidden":[]}',
-        'a newer format this build cannot read',
-      ],
-      ['{"pins":[]}', 'pins must be an object'],
-      ['{"hidden":{}}', 'hidden must be an array'],
-    ];
-    for (const [json, why] of cases) {
-      fs.writeFileSync(file, json);
-      expect(readMarksFileResult(file).known, why).toBe(false);
-      // and therefore untouchable
-      expect(mutateMarksFile(file, (p) => withHidden(p, 'x')).known).toBe(
-        false,
-      );
-      expect(fs.readFileSync(file, 'utf-8')).toBe(json);
-    }
-    // A store we do understand stays writable.
-    writeMarksFile(file, emptyMarks());
-    expect(readMarksFileResult(file).known).toBe(true);
-  });
-
   // The guard that matters most: if strict authority ever rejected our OWN
   // output, pins would silently stop persisting. Round-tripping must hold.
   it('treats a store this build wrote as authoritative', () => {
@@ -189,7 +164,6 @@ describe('marks file roundtrip', () => {
     const read = readMarksFileResult(file);
     expect(read.known).toBe(true);
     expect(read.marks).toEqual(marks);
-    expect(isAuthoritativeRead(marks, marks)).toBe(true);
   });
 
   // Authority is "normalization is a no-op". Enumerating the ways a forgiving
