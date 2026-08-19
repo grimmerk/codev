@@ -13,6 +13,18 @@
   - After 3 back-to-back reviews, limited to 4 reviews per hour
   - Each push triggers an incremental review — rapid pushes (4+ within an hour) will queue or delay reviews
 - **Practical rule:** wait for all reviewers to finish, address all comments, then push fixes together (one or more commits is fine, but aim for a single push). This conserves review quota and avoids triggering redundant review cycles.
+- **A green `CodeRabbit pass` does not mean it reviewed anything.** `gh pr checks` prints the same green tick whether CodeRabbit reviewed and found nothing or never ran. The distinction is only in the status description:
+
+  ```bash
+  gh api repos/grimmerk/codev/commits/<head-sha>/statuses \
+    --jq '.[] | select(.context=="CodeRabbit") | "\(.state) — \(.description)"'
+  # "success — Review completed"     ← actually reviewed
+  # "success — Review rate limited"  ← never ran; the tick is meaningless
+  ```
+
+  cubic states it differently: its review body embeds the commit SHA it reviewed (`<!-- cubic:review-post:…:<sha>:… -->`), so that is the thing to check rather than the tick.
+- **Findings arrive in three places, and only one of them has an unresolved count.** Inline review comments become threads (`reviewThreads`, resolvable); plain comments are issue comments; and CodeRabbit puts `🧹 Nitpick` and `⚠️ Outside diff range` blocks in the **review body** (`gh api repos/.../pulls/<n>/reviews --jq '.[].body'`), which is neither. Measured on PR #137: `reviewThreads` reported zero unresolved twice while a real finding — once a Major — sat in a review body. A review-body finding has no thread, so answer it with `gh pr comment` quoting it.
+- **Whether a bot must review before merging is a judgment, not a rule.** Nothing here requires it, and CodeRabbit's free-plan rate limit can withhold a review indefinitely (it was limited on 4 of 6 heads in one evening on PR #137, largely self-inflicted by pushing four times). Default: wait for both. Escape hatch, when the wait stops being informative — if two attempts on the *current* head both come back rate-limited (the automatic run from the push, then one `@coderabbitai review` posted at least ~30 minutes after the rate-limit timestamp), treat CodeRabbit as unavailable and judge on cubic plus CI. Say so explicitly rather than reporting that both reviewers passed.
 
 ## Build Commands
 
