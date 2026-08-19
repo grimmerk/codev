@@ -417,8 +417,8 @@ function SwitcherApp() {
   );
   const [projectBranches, setProjectBranches] = useState<Record<string, string>>({});
   const [activeIDEFolders, setActiveIDEFolders] = useState<Set<string>>(new Set());
-  const [allSessions, setAllSessions] = useState<any[]>([]);
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [allSessions, setAllSessions] = useState<ListViewSession[]>([]);
+  const [sessions, setSessions] = useState<ListViewSession[]>([]);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(-1);
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
@@ -472,12 +472,15 @@ function SwitcherApp() {
   const hoverSuppressTokenRef = useRef(0);
   const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
-  const allSessionsRef = useRef<any[]>([]);
+  const allSessionsRef = useRef<ListViewSession[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
   const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
   const deepSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deepSearchSeqRef = useRef(0);
-  const deepMatchesRef = useRef<any[]>([]); // latest main-side full-prompt matches
+  // Bumped when a deep-search response lands, so the single filtering site
+  // (the refresh effect) reruns with current state instead of a stale closure.
+  const [deepSearchRev, setDeepSearchRev] = useState(0);
+  const deepMatchesRef = useRef<ListViewSession[]>([]); // latest main-side full-prompt matches
   // Set true when a session is opened; on the next window show, clear the search so
   // returning to Sessions shows the full list. Toggling away without selecting keeps it.
   const clearSessionSearchOnShowRef = useRef(false);
@@ -558,7 +561,12 @@ function SwitcherApp() {
       if (seq !== deepSearchSeqRef.current || sessionSearchRef2.current !== query) return;
       deepMatchesRef.current = res?.sessions || [];
       setSearchSnippets(res?.snippets || {});
-      setSessions(applySearchFilter(allSessionsRef.current, query));
+      // Bump a revision instead of filtering here. This callback was created
+      // ~180ms + one IPC round-trip ago and closes over the enrichment maps of
+      // THAT render, so filtering now would overwrite fresher results with a
+      // stale view. The refresh effect below owns the filtering; it runs from
+      // a current render, and this is one of its dependencies.
+      setDeepSearchRev((r) => r + 1);
       // Lazy-enrich deep matches that aren't in the loaded list. Bounded by
       // the deep-search result cap (100), same magnitude as the initial load.
       const loaded = new Set(
@@ -610,8 +618,8 @@ function SwitcherApp() {
       }
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    deepSearchRev,
     customTitles,
     branches,
     prLinks,
@@ -788,13 +796,15 @@ function SwitcherApp() {
       .then((m: any) => {
         if (!m) return;
         setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
-        // Only a real response makes the pin set authoritative. A rejection —
-        // or a nullish payload — leaves it UNKNOWN, not empty, and the
-        // pinned-only reset must never act on unknown: it would wipe a valid
-        // stored preference on a transient IPC or filesystem failure, which is
-        // the exact damage that reset exists to prevent. Not clearing is the
-        // safe direction; the watcher below promotes the flag if the store
-        // becomes readable later.
+        // Only an AUTHORITATIVE read makes the pin set trustworthy. A
+        // rejection, a nullish payload, or `known: false` (the store exists
+        // but could not be parsed — main returns empty marks either way) all
+        // leave it UNKNOWN rather than empty, and the pinned-only reset must
+        // never act on unknown: it would wipe a valid stored preference on a
+        // transient filesystem failure, which is the exact damage that reset
+        // exists to prevent. Not clearing is the safe direction; the watcher
+        // below promotes the flag if the store becomes readable later.
+        if (m.known === false) return;
         setMarksLoaded(true);
       })
       .catch(() => {});
@@ -803,7 +813,9 @@ function SwitcherApp() {
         if (m) {
           suppressHoverSelection();
           setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
-          // A push from the main-side fs.watch is a real read of the store.
+          // A push is a real read: the main-side watcher drops unknown reads
+          // rather than broadcasting them, so arriving here means the store
+          // was parsed successfully.
           setMarksLoaded(true);
         }
       },

@@ -7,6 +7,7 @@ import {
   emptyMarks,
   normalizeMarks,
   readMarksFile,
+  readMarksFileResult,
   withHidden,
   withoutHidden,
   withoutPin,
@@ -115,5 +116,29 @@ describe('marks file roundtrip', () => {
     fs.writeFileSync(file, '{not json');
     expect(readMarksFile(file)).toEqual(emptyMarks());
   });
-});
 
+  // Both cases above yield empty marks, but they do not mean the same thing:
+  // "no store yet" is a fact, "could not parse the store" is ignorance. A
+  // caller that clears user state when the pin set looks empty must be able
+  // to tell them apart.
+  it('reports a missing file as authoritative and an unreadable one as unknown', () => {
+    const file = path.join(dir, 'session-marks.json');
+    expect(readMarksFileResult(file)).toEqual({
+      marks: emptyMarks(),
+      known: true,
+    });
+
+    fs.writeFileSync(file, '{not json');
+    expect(readMarksFileResult(file)).toEqual({
+      marks: emptyMarks(),
+      known: false,
+    });
+
+    const marks = withPin(emptyMarks(), 'abc', {
+      pinnedAt: '2026-07-14T01:02:03Z',
+      cwd: '/repo',
+    });
+    writeMarksFile(file, marks);
+    expect(readMarksFileResult(file)).toEqual({ marks, known: true });
+  });
+});

@@ -34,6 +34,7 @@ import {
 } from './claude-session-utility';
 import {
   readSessionMarks,
+  readSessionMarksResult,
   watchSessionMarks,
   withHidden,
   withoutHidden,
@@ -2384,7 +2385,10 @@ const ensureMarksWatcher = () => {
 
 ipcMain.handle('get-session-marks', () => {
   ensureMarksWatcher();
-  return readSessionMarks();
+  // `known` travels with the marks: an unreadable store yields empty marks
+  // that must not be mistaken for "this user has no pins" (see MarksRead).
+  const read = readSessionMarksResult();
+  return { ...read.marks, known: read.known };
 });
 
 ipcMain.handle('pin-session', (_event, sessionId: string, info: { cwd?: string; accountLabel?: string }) => {

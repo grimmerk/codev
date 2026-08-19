@@ -136,6 +136,8 @@ interface IElectronAPI {
       { pinnedAt: string; cwd: string; accountLabel?: string; group: string | null }
     >;
     hidden: string[];
+    /** False when the store exists but could not be read — the pin set is unknown, not empty. */
+    known: boolean;
   }>;
   pinSession: (
     sessionId: string,

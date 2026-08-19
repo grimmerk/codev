@@ -128,13 +128,36 @@ export const withoutHidden = (
 
 const MARKS_FILENAME = 'session-marks.json';
 
-export const readMarksFile = (filePath: string): SessionMarks => {
+/**
+ * A read plus whether its result is authoritative.
+ *
+ * `known: false` means the pin set is UNKNOWN, not empty. Callers that act on
+ * emptiness — clearing a stored browse preference, broadcasting a change —
+ * must not act on an unknown read, or a transient filesystem failure destroys
+ * user state that is still perfectly intact on disk.
+ */
+export interface MarksRead {
+  marks: SessionMarks;
+  known: boolean;
+}
+
+export const readMarksFileResult = (filePath: string): MarksRead => {
   try {
-    return normalizeMarks(JSON.parse(fs.readFileSync(filePath, 'utf-8')));
-  } catch {
-    return emptyMarks();
+    return {
+      marks: normalizeMarks(JSON.parse(fs.readFileSync(filePath, 'utf-8'))),
+      known: true,
+    };
+  } catch (err) {
+    // A missing file IS authoritative: no store yet means no marks yet, which
+    // is simply the first run. Anything else — permissions, IO, malformed
+    // JSON — leaves the real contents unknown.
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    return { marks: emptyMarks(), known: code === 'ENOENT' };
   }
 };
+
+export const readMarksFile = (filePath: string): SessionMarks =>
+  readMarksFileResult(filePath).marks;
 
 export const writeMarksFile = (filePath: string, marks: SessionMarks): void => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -149,6 +172,9 @@ const defaultMarksPath = (): string =>
 
 export const readSessionMarks = (): SessionMarks =>
   readMarksFile(defaultMarksPath());
+
+export const readSessionMarksResult = (): MarksRead =>
+  readMarksFileResult(defaultMarksPath());
 
 export const writeSessionMarks = (marks: SessionMarks): void =>
   writeMarksFile(defaultMarksPath(), marks);
@@ -174,7 +200,13 @@ export const watchMarksFile = (
     if (changed && changed !== filename) return;
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      onChange(readMarksFile(filePath));
+      const read = readMarksFileResult(filePath);
+      // Never broadcast an unknown read. Announcing "the marks are now empty"
+      // because the file could not be parsed would push every listener into
+      // acting on state that is still intact on disk; staying silent leaves
+      // them on the last thing actually seen.
+      if (!read.known) return;
+      onChange(read.marks);
     }, 50);
   });
 
