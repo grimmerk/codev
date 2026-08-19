@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   emptyMarks,
   normalizeMarks,
+  isKnownMarksShape,
   mutateMarksFile,
   readMarksFile,
   readMarksFileResult,
@@ -141,6 +142,41 @@ describe('marks file roundtrip', () => {
     });
     writeMarksFile(file, marks);
     expect(readMarksFileResult(file)).toEqual({ marks, known: true });
+  });
+
+  // normalizeMarks is deliberately forgiving so a partly-corrupt store still
+  // renders. That is right for display and wrong for authority: a file that
+  // parses but is not our schema must not be declared authoritative, or the
+  // next pin overwrites it.
+  it('treats a parseable but schema-invalid store as unknown', () => {
+    const file = path.join(dir, 'session-marks.json');
+    const cases: [string, string][] = [
+      ['[]', 'an array is not a marks object'],
+      [
+        '{"version":2,"pins":{},"hidden":[]}',
+        'a newer format this build cannot read',
+      ],
+      ['{"pins":[]}', 'pins must be an object'],
+      ['{"hidden":{}}', 'hidden must be an array'],
+    ];
+    for (const [json, why] of cases) {
+      fs.writeFileSync(file, json);
+      expect(readMarksFileResult(file).known, why).toBe(false);
+      // and therefore untouchable
+      expect(mutateMarksFile(file, (p) => withHidden(p, 'x')).known).toBe(
+        false,
+      );
+      expect(fs.readFileSync(file, 'utf-8')).toBe(json);
+    }
+    // A store we do understand stays writable.
+    writeMarksFile(file, emptyMarks());
+    expect(readMarksFileResult(file).known).toBe(true);
+  });
+
+  it('accepts our own shape, including a bare object', () => {
+    expect(isKnownMarksShape({ version: 1, pins: {}, hidden: [] })).toBe(true);
+    expect(isKnownMarksShape({})).toBe(true);
+    expect(isKnownMarksShape(null)).toBe(false);
   });
 
   // Every mutation is read-modify-write over the whole file, so a read that

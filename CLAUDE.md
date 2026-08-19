@@ -16,13 +16,22 @@
 - **A green `CodeRabbit pass` does not mean it reviewed anything.** `gh pr checks` prints the same green tick whether CodeRabbit reviewed and found nothing or never ran. The distinction is only in the status description:
 
   ```bash
-  gh api repos/grimmerk/codev/commits/<head-sha>/statuses \
+  SHA=$(gh pr view <pr-number> --json headRefOid --jq .headRefOid)
+  gh api repos/grimmerk/codev/commits/"$SHA"/statuses \
     --jq '.[] | select(.context=="CodeRabbit") | "\(.state) — \(.description)"'
   # "success — Review completed"     ← actually reviewed
   # "success — Review rate limited"  ← never ran; the tick is meaningless
   ```
 
-  cubic states it differently: its review body embeds the commit SHA it reviewed (`<!-- cubic:review-post:…:<sha>:… -->`), so that is the thing to check rather than the tick.
+  **cubic needs a different source, and its review body is not it** — it does not always post one. On PR #137 it reviewed a head, found nothing, and posted no body at all, so a body-based check reported "not reviewed yet". Read the check-run output, which is always present and states the counts:
+
+  ```bash
+  gh api repos/grimmerk/codev/commits/"$SHA"/check-runs \
+    --jq '.check_runs[] | select(.name|test("cubic")) | "\(.conclusion) — \(.output.summary)"'
+  # "success — AI review completed with 1 review. 0 issues found across 4 files"
+  ```
+
+  When it *does* post a body, that body embeds the SHA it reviewed (`<!-- cubic:review-post:…:<sha>:… -->`), which is useful corroboration but not a substitute.
 - **Findings arrive in three places, and only one of them has an unresolved count.** Inline review comments become threads (`reviewThreads`, resolvable); plain comments are issue comments; and CodeRabbit puts `🧹 Nitpick` and `⚠️ Outside diff range` blocks in the **review body** (`gh api repos/.../pulls/<n>/reviews --jq '.[].body'`), which is neither. Measured on PR #137: `reviewThreads` reported zero unresolved twice while a real finding — once a Major — sat in a review body. A review-body finding has no thread, so answer it with `gh pr comment` quoting it.
 - **Whether a bot must review before merging is a judgment, not a rule.** Nothing here requires it, and CodeRabbit's free-plan rate limit can withhold a review indefinitely (it was limited on 4 of 6 heads in one evening on PR #137, largely self-inflicted by pushing four times). Default: wait for both. Escape hatch, when the wait stops being informative — if two attempts on the *current* head both come back rate-limited (the automatic run from the push, then one `@coderabbitai review` posted at least ~30 minutes after the rate-limit timestamp), treat CodeRabbit as unavailable and judge on cubic plus CI. Say so explicitly rather than reporting that both reviewers passed.
 

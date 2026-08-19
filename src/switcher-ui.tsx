@@ -440,6 +440,8 @@ function SwitcherApp() {
   // False until the first getSessionMarks() response lands. Before that an
   // empty pin set means "not known yet", not "no pins".
   const [marksLoaded, setMarksLoaded] = useState(false);
+  // Set by the first fs.watch push; makes the initial read's response stale.
+  const marksPushSeenRef = useRef(false);
   const [pinnedCollapsed, setPinnedCollapsed] = useState(() => {
     try {
       return localStorage.getItem('codev-pinned-collapsed') === '1';
@@ -795,11 +797,19 @@ function SwitcherApp() {
       .getSessionMarks()
       .then((m: any) => {
         if (!m) return;
+        // A watcher push that has already landed is newer than this response by
+        // definition — the store changed after we asked. Applying the in-flight
+        // snapshot on top of it would roll the pin set back, and an emptier
+        // snapshot would then clear and PERSIST pinnedOnly.
+        if (marksPushSeenRef.current) return;
         // Guard BEFORE touching state: an unknown read carries empty marks,
         // and applying them would hide valid pins from the UI until something
         // else re-reads the store.
         if (m.known === false) return;
-        setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+        setSessionMarks({
+          pins: m.pins || {},
+          hidden: m.hidden || [],
+        });
         // Only an AUTHORITATIVE read makes the pin set trustworthy. A
         // rejection, a nullish payload, or `known: false` (the store exists
         // but could not be parsed — main returns empty marks either way) all
@@ -814,8 +824,12 @@ function SwitcherApp() {
     const unsubscribe = window.electronAPI.onSessionMarksUpdated(
       (_event: any, m: any) => {
         if (m) {
+          marksPushSeenRef.current = true;
           suppressHoverSelection();
-          setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+          setSessionMarks({
+            pins: m.pins || {},
+            hidden: m.hidden || [],
+          });
           // A push is a real read: the main-side watcher drops unknown reads
           // rather than broadcasting them, so arriving here means the store
           // was parsed successfully.

@@ -141,12 +141,38 @@ export interface MarksRead {
   known: boolean;
 }
 
+/** The only store version this build understands. */
+const SUPPORTED_VERSION = 1;
+
+/**
+ * Does a parsed value look like a store we understand?
+ *
+ * `normalizeMarks` is deliberately forgiving — it coerces anything into valid
+ * v1 marks so a partly-corrupt store still renders. That is right for display
+ * and wrong for authority: without this check a `[]`, a `pins: []`, or a
+ * version-2 file written by a future build would parse, normalize to empty,
+ * be declared authoritative, and then be OVERWRITTEN by the next pin. Rejecting
+ * an unsupported version matters most — that is the case where the data is
+ * perfectly good and only this build is too old to read it.
+ */
+export const isKnownMarksShape = (raw: unknown): boolean => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const o = raw as Record<string, unknown>;
+  if (o.version !== undefined && o.version !== SUPPORTED_VERSION) return false;
+  if (
+    o.pins !== undefined &&
+    (typeof o.pins !== 'object' || o.pins === null || Array.isArray(o.pins))
+  ) {
+    return false;
+  }
+  if (o.hidden !== undefined && !Array.isArray(o.hidden)) return false;
+  return true;
+};
+
 export const readMarksFileResult = (filePath: string): MarksRead => {
   try {
-    return {
-      marks: normalizeMarks(JSON.parse(fs.readFileSync(filePath, 'utf-8'))),
-      known: true,
-    };
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    return { marks: normalizeMarks(raw), known: isKnownMarksShape(raw) };
   } catch (err) {
     // A missing file IS authoritative: no store yet means no marks yet, which
     // is simply the first run. Anything else — permissions, IO, malformed
