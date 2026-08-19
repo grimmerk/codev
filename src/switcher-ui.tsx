@@ -5,7 +5,7 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
-import { isMinorSession } from './session-search';
+import { buildSessionListView } from './session-list-view';
 import TerminalTab from './terminal-tab';
 
 type SwitcherMode = 'projects' | 'sessions' | 'terminal';
@@ -319,7 +319,9 @@ const OptionUI = (
 };
 
 /** Format relative time for session display */
-const formatRelativeTime = (timestamp: string): string => {
+// Sessions carry epoch-ms numbers; the old `string` annotation only survived
+// because every caller went through an `any` row. `new Date()` takes both.
+const formatRelativeTime = (timestamp: number | string): string => {
   if (!timestamp) return '';
   const diff = Date.now() - new Date(timestamp).getTime();
   const minutes = Math.floor(diff / 60000);
@@ -561,137 +563,41 @@ function SwitcherApp() {
     }, 180);
   };
 
-  // C1: fold minor (junk) sessions while browsing; searching shows everything.
-  // Minors keep their recency order but render below the fold row at the end.
-  // A user-hidden session is forced into the fold regardless of its stats.
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
   const hiddenSet = new Set(sessionMarks.hidden);
   const hasPins = Object.keys(sessionMarks.pins).length > 0;
-  // Two independent browse states, both driven from the zone header:
-  // - "only" scopes the list (and the search) to pinned sessions.
-  // - collapsing the zone UNGROUPS rather than hides: pins fall back to their
-  //   chronological slot, still marked ★. That is the "everything in time
-  //   order" mode, and it means no browsing state can make a pin invisible
-  //   (the old collapse dropped them from the zone AND the timeline at once).
-  const pinnedOnlyActive = pinnedOnly && hasPins;
-  const groupPinned =
-    !isSearchingSessions && !pinnedOnlyActive && !pinnedCollapsed;
-  const majorSessions: any[] = [];
-  const minorSessions: any[] = [];
-  for (const s of sessions) {
-    const isPinned = !!sessionMarks.pins[s.sessionId];
-    if (pinnedOnlyActive && !isPinned) continue;
-    // Lifted into the zone — no second copy in the timeline (user verdict:
-    // the duplicate was more noise than signal).
-    if (groupPinned && isPinned) continue;
-    const minor =
-      !isSearchingSessions &&
-      // An ungrouped pin must never fold into the minor group: pinning is an
-      // explicit "keep this", and a pinned session can still be a short
-      // untitled one that the junk predicate would happily fold away.
-      !isPinned &&
-      (hiddenSet.has(s.sessionId) ||
-        (activeDetectionReady &&
-          isMinorSession(s, !!customTitles[s.sessionId], !!prLinks[s.sessionId])));
-    (minor ? minorSessions : majorSessions).push(s);
-  }
+  // Which rows appear, in which group, in which order — one pure function so
+  // the browse-state matrix (search x pinned-only x grouped) is testable
+  // without running the app. See src/session-list-view.ts.
+  const {
+    pinnedRows,
+    visiblePinnedRows,
+    minorSessions,
+    displayedSessions,
+    minorFoldHeaderIndex,
+    hiddenMinorCount,
+    pinnedOnlyActive,
+    canGroupPins,
+  } = buildSessionListView({
+    sessions,
+    allSessions,
+    extraPinnedSessions,
+    pins: sessionMarks.pins,
+    hidden: sessionMarks.hidden,
+    activePids: activeStateRef.current,
+    hasCustomTitle: (id: string) => !!customTitles[id],
+    hasPrLink: (id: string) => !!prLinks[id],
+    isSearching: isSearchingSessions,
+    pinnedOnly,
+    pinnedCollapsed,
+    minorsExpanded,
+    activeDetectionReady,
+  });
   // Manually hidden sessions may be titled/long — keep the fold label honest.
-  const hiddenMinorCount = minorSessions.filter((s: any) =>
-    hiddenSet.has(s.sessionId),
-  ).length;
   const minorFoldSuffix =
     hiddenMinorCount > 0
       ? `(≤2 msgs, untitled · ${hiddenMinorCount} hidden)`
       : '(≤2 msgs, untitled)';
-
-  // Pinned zone (PR-2): rows come from the loaded list when available, else
-  // from the by-id fetch. Zone-only model: pinning MOVES the session here
-  // (the timeline keeps no duplicate; search mode still shows everything).
-  const pinnedById = new Map<string, any>();
-  for (const s of allSessions) {
-    if (sessionMarks.pins[s.sessionId]) pinnedById.set(s.sessionId, s);
-  }
-  for (const s of extraPinnedSessions) {
-    if (sessionMarks.pins[s.sessionId] && !pinnedById.has(s.sessionId)) {
-      pinnedById.set(s.sessionId, s);
-    }
-  }
-  const pinnedRows = Object.entries(sessionMarks.pins)
-    .map(([id, info]) => {
-      // Fall back to a placeholder built from the pin record itself: a pin
-      // can be momentarily (VS Code sessions are absent from history.jsonl
-      // until the closed-scan merges them in) or permanently unresolvable —
-      // without this the zone count flaps on every tab switch.
-      const s = pinnedById.get(id) ?? {
-        sessionId: id,
-        project: info.cwd || '',
-        projectName:
-          (info.cwd || '').split('/').filter(Boolean).pop() || id.slice(0, 8),
-        firstUserMessage: '',
-        lastUserMessage: '',
-        lastTimestamp: 0,
-        // undefined, not 0: the row renders '… msgs' instead of a misleading
-        // '0 msgs' while the session is unresolved (or permanently gone)
-        messageCount: undefined,
-        isActive: false,
-        accountLabel: info.accountLabel,
-      };
-      return {
-        ...s,
-        __pinnedRow: true,
-        __pinnedAt: info.pinnedAt || '',
-        isActive: s.sessionId in activeStateRef.current || s.isActive,
-        activePid: activeStateRef.current[s.sessionId] ?? s.activePid,
-      };
-    })
-    // Recency first, like every other list in the app. The previous pinnedAt
-    // ASC order (chosen so a new pin appended at the bottom instead of
-    // reshuffling rows under the cursor) buried the session touched five
-    // minutes ago beneath months-old pins; the hover-suppression added in
-    // PR #136 already absorbs the layout movement that ordering was avoiding.
-    // Unresolved placeholders carry lastTimestamp 0 and sink to the bottom,
-    // where pinnedAt DESC puts the newest pin first among them.
-    .sort(
-      (a, b) =>
-        (b.lastTimestamp || 0) - (a.lastTimestamp || 0) ||
-        (b.__pinnedAt || '').localeCompare(a.__pinnedAt || ''),
-    );
-  const showPinnedZone = groupPinned && pinnedRows.length > 0;
-  const visiblePinnedRows = showPinnedZone ? pinnedRows : [];
-  // The header owns both toggles, so it must stay reachable in every state
-  // that has pins — including during a search, where turning "only" on is how
-  // you scope the results, and including an empty result set, which would
-  // otherwise trap the user inside pinned-only mode with no way back.
-  const canGroupPins = !isSearchingSessions && !pinnedOnlyActive;
-
-  // A pin older than the loaded window exists ONLY in pinnedRows (resolved by
-  // id, with a placeholder when even that fails). The zone renders it while
-  // grouping is on; once ungrouped it would vanish from both places, so append
-  // it to the timeline instead. The loaded list is the top-N by recency, so
-  // anything outside it is older than every row already there and belongs at
-  // the bottom.
-  const timelineIds = new Set<string>();
-  for (const s of majorSessions) timelineIds.add(s.sessionId);
-  for (const s of minorSessions) timelineIds.add(s.sessionId);
-  const ungroupedPins =
-    !groupPinned && !pinnedOnlyActive && !isSearchingSessions
-      ? pinnedRows.filter((s: any) => !timelineIds.has(s.sessionId))
-      : [];
-  const timelineRows = [...majorSessions, ...ungroupedPins];
-
-  const displayedSessions =
-    pinnedOnlyActive && !isSearchingSessions
-      ? // Same reason: scope to the resolved pin set rather than filtering
-        // `sessions`, which would silently drop the out-of-window ones.
-        pinnedRows
-      : [
-          ...visiblePinnedRows,
-          ...(minorsExpanded
-            ? [...timelineRows, ...minorSessions]
-            : timelineRows),
-        ];
-  // Row index the expanded minor-group header sits above.
-  const minorFoldHeaderIndex = visiblePinnedRows.length + timelineRows.length;
 
   // Pin/hide moves rows under a STATIONARY cursor; Chromium then re-hit-tests
   // and fires mouseenter on whatever row slid under the mouse, teleporting the
@@ -756,6 +662,24 @@ function SwitcherApp() {
     // same as the minors fold collapse does.
     setSelectedSessionIndex(0);
   };
+  // Removing the last pin drops out of pinned-only implicitly (the scope needs
+  // pins to mean anything), so clear the STORED preference too — otherwise the
+  // next pin, possibly weeks later, silently collapses the list to that one
+  // row. Keyed off a real non-empty → empty transition, because at mount the
+  // marks are empty until the IPC load lands and a plain `!hasPins` check
+  // would wipe a legitimately stored preference.
+  const hadPinsRef = useRef(false);
+  useEffect(() => {
+    if (hasPins) {
+      hadPinsRef.current = true;
+      return;
+    }
+    if (!hadPinsRef.current || !pinnedOnly) return;
+    setPinnedOnly(false);
+    try {
+      localStorage.setItem('codev-pinned-only', '0');
+    } catch {}
+  }, [hasPins, pinnedOnly]);
   const togglePinnedOnly = () => {
     setPinnedOnly((prev) => {
       const next = !prev;
