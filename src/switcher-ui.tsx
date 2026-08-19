@@ -5,7 +5,7 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
-import { buildSessionListView } from './session-list-view';
+import { buildSessionListView, mergeSessionsById } from './session-list-view';
 import TerminalTab from './terminal-tab';
 
 type SwitcherMode = 'projects' | 'sessions' | 'terminal';
@@ -452,6 +452,11 @@ function SwitcherApp() {
   });
   // Pinned sessions living outside the loaded list (fetched by id)
   const [extraPinnedSessions, setExtraPinnedSessions] = useState<any[]>([]);
+  // Mirrored into a ref: applySearchFilter runs from a debounced timeout and
+  // from setState updaters, where reading React state gives the value captured
+  // when the callback was created (the stale-closure trap this file has been
+  // bitten by twice — see sessionSearchRef2).
+  const extraPinnedSessionsRef = useRef<any[]>([]);
   const extraPinnedKeyRef = useRef('');
   // Keep the selection on the same session after pin/hide reshuffles the list
   const reanchorSelectionRef = useRef<string | null>(null);
@@ -500,7 +505,18 @@ function SwitcherApp() {
   // results (issue #131). Deep matches outside the loaded list are appended,
   // then everything re-sorts into the usual recency order.
   const applySearchFilter = (allItems: any[], query: string) => {
-    const base = filterSessionsLocally(allItems, query);
+    // Pins outside the loaded window are only in the by-id fetch, and their
+    // title / branch / PR live in renderer enrichment the main-side prompt
+    // search cannot see — without widening the candidate set here, searching
+    // for such a pin's title finds nothing, and in pinned-only mode that reads
+    // as "no pinned session matches" for a pin that is visible while browsing.
+    // Only while a query is live: this runs on every keystroke including the
+    // one that empties the box, and widening the browse list is not this
+    // function's job.
+    const candidates = query.trim()
+      ? mergeSessionsById(allItems, extraPinnedSessionsRef.current)
+      : allItems;
+    const base = filterSessionsLocally(candidates, query);
     if (!query.trim() || deepMatchesRef.current.length === 0) return base;
     const seen = new Set(base.map((s: any) => s.sessionId));
     const extra = deepMatchesRef.current
@@ -743,6 +759,7 @@ function SwitcherApp() {
     if (key === extraPinnedKeyRef.current) return;
     extraPinnedKeyRef.current = key;
     if (missing.length === 0) {
+      extraPinnedSessionsRef.current = [];
       setExtraPinnedSessions([]);
       return;
     }
@@ -750,6 +767,7 @@ function SwitcherApp() {
       // Drop stale responses (a newer pin set superseded this request)
       if (extraPinnedKeyRef.current !== key) return;
       const found = result || [];
+      extraPinnedSessionsRef.current = found;
       setExtraPinnedSessions(found);
       if (found.length === 0) return;
       window.electronAPI.loadSessionEnrichment(found).then((enrichment) => {
@@ -1658,7 +1676,9 @@ function SwitcherApp() {
               }}
             />
             <span style={{ color: THEME.text.secondary, fontSize: '12px', whiteSpace: 'nowrap' }}>
-              {sessions.length} sessions
+              {/* Scoped modes must report what is on screen — an unscoped
+                  count next to a pin-filtered list reads as a bug. */}
+              {pinnedOnlyActive ? displayedSessions.length : sessions.length} sessions
             </span>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
@@ -1675,7 +1695,10 @@ function SwitcherApp() {
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={canGroupPins ? togglePinnedCollapsed : undefined}
                   onKeyDown={(e) => {
-                    if (canGroupPins && (e.key === 'Enter' || e.key === ' ')) {
+                    if (
+                      canGroupPins &&
+                      (e.key === 'Enter' || e.key === ' ')
+                    ) {
                       e.preventDefault();
                       togglePinnedCollapsed();
                     }
@@ -1701,7 +1724,11 @@ function SwitcherApp() {
                       togglePinnedOnly();
                     }
                   }}
-                  style={pinnedOnlyActive ? PINNED_ONLY_CHIP_ACTIVE_STYLE : PINNED_ONLY_CHIP_STYLE}
+                  style={
+                    pinnedOnlyActive
+                      ? PINNED_ONLY_CHIP_ACTIVE_STYLE
+                      : PINNED_ONLY_CHIP_STYLE
+                  }
                 >
                   only
                 </span>
@@ -1711,7 +1738,9 @@ function SwitcherApp() {
               <div style={{ color: THEME.text.secondary, textAlign: 'center', padding: '20px 0' }}>
                 {pinnedOnlyActive
                   ? '⚠️ No pinned session matches — click "only" above to leave pinned-only'
-                  : sessionSearchValue ? '⚠️ No matching sessions found' : '🤖 No Claude Code sessions found'}
+                  : sessionSearchValue
+                    ? '⚠️ No matching sessions found'
+                    : '🤖 No Claude Code sessions found'}
               </div>
             ) : (<>
               {displayedSessions.map((session, index) => (
@@ -1719,7 +1748,9 @@ function SwitcherApp() {
                 {visiblePinnedRows.length > 0 && index === visiblePinnedRows.length && (
                   <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 2px 3px' }} />
                 )}
-                {minorsExpanded && minorSessions.length > 0 && index === minorFoldHeaderIndex && (
+                {minorsExpanded &&
+                  minorSessions.length > 0 &&
+                  index === minorFoldHeaderIndex && (
                   <div
                     role="button"
                     tabIndex={0}

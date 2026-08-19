@@ -7,6 +7,8 @@
   - **Collapsing the zone now ungroups instead of hiding**: pinned sessions fall back to their normal chronological position, still marked ★ — that gives you a pure "everything in time order" list, and no browsing state can make a pinned session invisible any more
   - **New `only` toggle** on the right of the header: show — and search — pinned sessions only
   - A pinned session is never folded away into the "minor sessions" group, and pins older than the loaded list stay visible in every mode
+  - Searching now also matches the title / branch / PR link of pinned sessions older than the loaded list — previously such a pin was visible while browsing but reported as "no match" the moment you searched for its name
+  - The `N sessions` count next to the search box reports the scoped total while `only` is on, instead of the unfiltered one
 
 ## 1.0.84
 

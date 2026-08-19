@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildSessionListView, BuildListViewArgs } from './session-list-view';
+import {
+  buildSessionListView,
+  BuildListViewArgs,
+  mergeSessionsById,
+} from './session-list-view';
 
 // Recency-sorted, like the real list. `old` sits outside the loaded window on
 // purpose (see `outOfWindowPin`), and `junk` satisfies the minor predicate.
 const recent = { sessionId: 'recent', lastTimestamp: 500, messageCount: 40 };
 const middle = { sessionId: 'middle', lastTimestamp: 300, messageCount: 20 };
 const junk = { sessionId: 'junk', lastTimestamp: 200, messageCount: 1 };
-const outOfWindowPin = { sessionId: 'old', lastTimestamp: 10, messageCount: 90 };
+const outOfWindowPin = {
+  sessionId: 'old',
+  lastTimestamp: 10,
+  messageCount: 90,
+};
 
 const at = (iso: string) => ({ pinnedAt: iso, cwd: '/tmp/proj' });
 
@@ -118,7 +126,10 @@ describe('buildSessionListView — invariants across the whole matrix', () => {
 
   it('never folds a pinned session away as a minor session', () => {
     // `junk` would fold on its own stats (1 msg, untitled, no PR, closed).
-    const v = build({ pins: { junk: at('2026-01-01T00:00:00Z') }, pinnedCollapsed: true });
+    const v = build({
+      pins: { junk: at('2026-01-01T00:00:00Z') },
+      pinnedCollapsed: true,
+    });
     expect(ids(v.minorSessions)).toEqual([]);
     expect(ids(v.displayedSessions)).toContain('junk');
   });
@@ -126,7 +137,12 @@ describe('buildSessionListView — invariants across the whole matrix', () => {
   it('places the minor-fold header directly after the last timeline row', () => {
     const v = build({ ...args, pinnedCollapsed: true, minorsExpanded: true });
     // recent, middle, then the out-of-window pin, then the fold header.
-    expect(ids(v.displayedSessions)).toEqual(['recent', 'middle', 'old', 'junk']);
+    expect(ids(v.displayedSessions)).toEqual([
+      'recent',
+      'middle',
+      'old',
+      'junk',
+    ]);
     expect(v.minorFoldHeaderIndex).toBe(3);
     expect(v.displayedSessions[v.minorFoldHeaderIndex].sessionId).toEqual(
       v.minorSessions[0].sessionId,
@@ -137,5 +153,34 @@ describe('buildSessionListView — invariants across the whole matrix', () => {
     const v = build({ hidden: ['middle'] });
     expect(ids(v.minorSessions)).toEqual(['middle', 'junk']);
     expect(v.hiddenMinorCount).toBe(1);
+  });
+
+  it('shows an out-of-window pin that only the widened search set could match', () => {
+    // The renderer widens its search candidates with mergeSessionsById, so a
+    // hit on such a pin's title/branch arrives here inside `sessions`.
+    const v = build({
+      ...args,
+      sessions: [outOfWindowPin],
+      isSearching: true,
+      pinnedOnly: true,
+    });
+    expect(ids(v.displayedSessions)).toEqual(['old']);
+  });
+});
+
+describe('mergeSessionsById', () => {
+  it('appends only rows the primary list does not already have', () => {
+    const merged = mergeSessionsById(
+      [recent, middle],
+      [middle, outOfWindowPin],
+    );
+    expect(ids(merged)).toEqual(['recent', 'middle', 'old']);
+  });
+
+  it('returns the primary list unchanged when there is nothing to add', () => {
+    const primary = [recent, middle];
+    // Identity, not just equality: a keystroke must not churn array identity.
+    expect(mergeSessionsById(primary, [])).toBe(primary);
+    expect(mergeSessionsById(primary, [recent])).toBe(primary);
   });
 });

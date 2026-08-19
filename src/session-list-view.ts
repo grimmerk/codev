@@ -22,19 +22,29 @@
 
 import { isMinorSession } from './session-search';
 
-/** A session row. Deliberately loose — the renderer's rows carry enrichment. */
+/**
+ * A session row as the Sessions tab renders it. Every field the renderer reads
+ * is declared; the index signature is `unknown` so anything undeclared has to
+ * be narrowed at the use site rather than silently typed as `any`.
+ */
 export interface ListViewSession {
   sessionId: string;
   project?: string;
   projectName?: string;
+  firstUserMessage?: string;
+  lastUserMessage?: string;
   lastTimestamp?: number;
   messageCount?: number;
   isActive?: boolean;
   activePid?: number;
   accountLabel?: string;
-  // Rows also carry renderer-side enrichment this module never reads; `any`
-  // keeps the consuming JSX compiling exactly as it did when rows were `any[]`.
-  [key: string]: any;
+  accountIsAnchor?: boolean;
+  /** `claude-vscode` for sessions launched from the VS Code extension. */
+  entrypoint?: string;
+  /** Set on rows lifted out of the pin store (zone rows and placeholders). */
+  __pinnedRow?: boolean;
+  __pinnedAt?: string;
+  [key: string]: unknown;
 }
 
 export interface PinRecord {
@@ -83,6 +93,26 @@ export interface ListView {
   /** Grouping is meaningless while searching or scoped to pins — the header hides its arrow. */
   canGroupPins: boolean;
 }
+
+/**
+ * Union two row lists by sessionId, first list wins.
+ *
+ * Used to widen the search candidate set. A pin outside the loaded window
+ * exists only in the by-id fetch, and its title / branch / PR link live in
+ * renderer-side enrichment that the main-side prompt search cannot see — so
+ * without this, a query matching only those fields finds nothing even though
+ * the very same pin is visible while browsing. Returns `primary` unchanged
+ * when there is nothing to add, so a keystroke does not churn array identity.
+ */
+export const mergeSessionsById = (
+  primary: ListViewSession[],
+  extra: ListViewSession[],
+): ListViewSession[] => {
+  if (extra.length === 0) return primary;
+  const seen = new Set(primary.map((s) => s.sessionId));
+  const added = extra.filter((s) => !seen.has(s.sessionId));
+  return added.length === 0 ? primary : [...primary, ...added];
+};
 
 /** Resolve one pin to a real row, or synthesize a placeholder from the pin record. */
 const resolvePinnedRow = (
@@ -158,7 +188,11 @@ export const buildSessionListView = ({
       !isPinned &&
       (hiddenSet.has(s.sessionId) ||
         (activeDetectionReady &&
-          isMinorSession(s, hasCustomTitle(s.sessionId), hasPrLink(s.sessionId))));
+          isMinorSession(
+            s,
+            hasCustomTitle(s.sessionId),
+            hasPrLink(s.sessionId),
+          )));
     (minor ? minorSessions : majorSessions).push(s);
   }
   // Manually hidden sessions may be titled/long — keep the fold label honest.
@@ -192,7 +226,8 @@ export const buildSessionListView = ({
         String(b.__pinnedAt || '').localeCompare(String(a.__pinnedAt || '')),
     );
 
-  const visiblePinnedRows = groupPinned && pinnedRows.length > 0 ? pinnedRows : [];
+  const visiblePinnedRows =
+    groupPinned && pinnedRows.length > 0 ? pinnedRows : [];
 
   // A pin older than the loaded window exists ONLY in pinnedRows. The zone
   // renders it while grouping is on; once ungrouped it would vanish from both
