@@ -786,17 +786,25 @@ function SwitcherApp() {
     window.electronAPI
       .getSessionMarks()
       .then((m: any) => {
-        if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+        if (!m) return;
+        setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+        // Only a real response makes the pin set authoritative. A rejection —
+        // or a nullish payload — leaves it UNKNOWN, not empty, and the
+        // pinned-only reset must never act on unknown: it would wipe a valid
+        // stored preference on a transient IPC or filesystem failure, which is
+        // the exact damage that reset exists to prevent. Not clearing is the
+        // safe direction; the watcher below promotes the flag if the store
+        // becomes readable later.
+        setMarksLoaded(true);
       })
-      .catch(() => {})
-      // Marked loaded either way: a failed read is still a completed attempt,
-      // and leaving the flag false would disable the pinned-only reset forever.
-      .finally(() => setMarksLoaded(true));
+      .catch(() => {});
     const unsubscribe = window.electronAPI.onSessionMarksUpdated(
       (_event: any, m: any) => {
         if (m) {
           suppressHoverSelection();
           setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+          // A push from the main-side fs.watch is a real read of the store.
+          setMarksLoaded(true);
         }
       },
     );
