@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   emptyMarks,
   normalizeMarks,
-  isKnownMarksShape,
+  isAuthoritativeRead,
   mutateMarksFile,
   readMarksFile,
   readMarksFileResult,
@@ -174,9 +174,38 @@ describe('marks file roundtrip', () => {
   });
 
   it('accepts our own shape, including a bare object', () => {
-    expect(isKnownMarksShape({ version: 1, pins: {}, hidden: [] })).toBe(true);
-    expect(isKnownMarksShape({})).toBe(true);
-    expect(isKnownMarksShape(null)).toBe(false);
+    const empty = emptyMarks();
+    expect(
+      isAuthoritativeRead({ version: 1, pins: {}, hidden: [] }, empty),
+    ).toBe(true);
+    expect(isAuthoritativeRead({}, empty)).toBe(true);
+    expect(isAuthoritativeRead(null, empty)).toBe(false);
+  });
+
+  // The envelope can be ours while individual entries are not: normalizeMarks
+  // drops those silently, and the next read-modify-write would erase them.
+  it('rejects a read whose entries do not survive normalization', () => {
+    const file = path.join(dir, 'session-marks.json');
+    const lossy: [string, string][] = [
+      [
+        '{"version":1,"pins":{"abc":"garbage"},"hidden":[]}',
+        'a pin entry that is not an object',
+      ],
+      ['{"version":1,"pins":{"abc":null},"hidden":[]}', 'a null pin entry'],
+      ['{"version":1,"pins":{},"hidden":["ok",42]}', 'a non-string hidden id'],
+      ['{"version":1,"pins":{},"hidden":[""]}', 'an empty hidden id'],
+    ];
+    for (const [json, why] of lossy) {
+      fs.writeFileSync(file, json);
+      expect(readMarksFileResult(file).known, why).toBe(false);
+      expect(mutateMarksFile(file, (p) => withHidden(p, 'x')).known).toBe(
+        false,
+      );
+      expect(fs.readFileSync(file, 'utf-8')).toBe(json);
+    }
+    // Duplicates are deduped, not dropped — still authoritative.
+    fs.writeFileSync(file, '{"version":1,"pins":{},"hidden":["a","a"]}');
+    expect(readMarksFileResult(file).known).toBe(true);
   });
 
   // Every mutation is read-modify-write over the whole file, so a read that

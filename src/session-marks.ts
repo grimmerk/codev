@@ -145,34 +145,64 @@ export interface MarksRead {
 const SUPPORTED_VERSION = 1;
 
 /**
- * Does a parsed value look like a store we understand?
+ * Is a parsed value a store we may treat as AUTHORITATIVE?
  *
- * `normalizeMarks` is deliberately forgiving — it coerces anything into valid
- * v1 marks so a partly-corrupt store still renders. That is right for display
- * and wrong for authority: without this check a `[]`, a `pins: []`, or a
- * version-2 file written by a future build would parse, normalize to empty,
- * be declared authoritative, and then be OVERWRITTEN by the next pin. Rejecting
- * an unsupported version matters most — that is the case where the data is
- * perfectly good and only this build is too old to read it.
+ * `normalizeMarks` is forgiving by design — it coerces anything into valid v1
+ * marks so a partly-corrupt store still renders. That is right for display and
+ * wrong for authority: whatever it silently drops would be erased for real by
+ * the next read-modify-write.
+ *
+ * Two independent ways to lose data, so two checks:
+ *
+ * 1. The envelope has to be ours. A `[]`, a `pins: []`, or a version this build
+ *    does not know would normalize to empty and then be overwritten. The
+ *    version case matters most — there the data is perfectly good and only this
+ *    build is too old to read it.
+ * 2. Normalization has to be LOSSLESS. An envelope can be fine while individual
+ *    entries are not (`pins: {"abc": "garbage"}`), and those are dropped
+ *    silently. This compares counts against the normalized result rather than
+ *    re-listing the normalizer's rules: one definition, so widening its
+ *    tolerance cannot leave a second copy behind to drift.
  */
-export const isKnownMarksShape = (raw: unknown): boolean => {
+export const isAuthoritativeRead = (
+  raw: unknown,
+  marks: SessionMarks,
+): boolean => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
   const o = raw as Record<string, unknown>;
   if (o.version !== undefined && o.version !== SUPPORTED_VERSION) return false;
-  if (
-    o.pins !== undefined &&
-    (typeof o.pins !== 'object' || o.pins === null || Array.isArray(o.pins))
-  ) {
+
+  const pins = o.pins;
+  if (pins !== undefined) {
+    if (typeof pins !== 'object' || pins === null || Array.isArray(pins)) {
+      return false;
+    }
+    if (Object.keys(pins).length !== Object.keys(marks.pins).length) {
+      return false;
+    }
+  } else if (Object.keys(marks.pins).length !== 0) {
     return false;
   }
-  if (o.hidden !== undefined && !Array.isArray(o.hidden)) return false;
+
+  const hidden = o.hidden;
+  if (hidden !== undefined) {
+    if (!Array.isArray(hidden)) return false;
+    // The normalizer dedupes, so compare against the deduped input; a
+    // non-string or empty id survives the Set but not the filter, which is
+    // exactly the drop this check exists to catch.
+    if (new Set(hidden).size !== marks.hidden.length) return false;
+  } else if (marks.hidden.length !== 0) {
+    return false;
+  }
+
   return true;
 };
 
 export const readMarksFileResult = (filePath: string): MarksRead => {
   try {
     const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    return { marks: normalizeMarks(raw), known: isKnownMarksShape(raw) };
+    const marks = normalizeMarks(raw);
+    return { marks, known: isAuthoritativeRead(raw, marks) };
   } catch (err) {
     // A missing file IS authoritative: no store yet means no marks yet, which
     // is simply the first run. Anything else — permissions, IO, malformed
