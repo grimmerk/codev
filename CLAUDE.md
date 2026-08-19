@@ -26,6 +26,7 @@
   **cubic needs a different source, and its review body is not it** — it does not always post one. On PR #137 it reviewed a head, found nothing, and posted no body at all, so a body-based check reported "not reviewed yet". Read the check-run output, which is always present and states the counts:
 
   ```bash
+  SHA=$(gh pr view <pr-number> --json headRefOid --jq .headRefOid)
   gh api repos/grimmerk/codev/commits/"$SHA"/check-runs \
     --jq '.check_runs[] | select(.name|test("cubic")) | "\(.conclusion) — \(.output.summary)"'
   # "success — AI review completed with 1 review. 0 issues found across 4 files"

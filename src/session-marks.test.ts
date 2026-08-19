@@ -173,39 +173,80 @@ describe('marks file roundtrip', () => {
     expect(readMarksFileResult(file).known).toBe(true);
   });
 
-  it('accepts our own shape, including a bare object', () => {
-    const empty = emptyMarks();
-    expect(
-      isAuthoritativeRead({ version: 1, pins: {}, hidden: [] }, empty),
-    ).toBe(true);
-    expect(isAuthoritativeRead({}, empty)).toBe(true);
-    expect(isAuthoritativeRead(null, empty)).toBe(false);
+  // The guard that matters most: if strict authority ever rejected our OWN
+  // output, pins would silently stop persisting. Round-tripping must hold.
+  it('treats a store this build wrote as authoritative', () => {
+    const file = path.join(dir, 'session-marks.json');
+    const marks = withHidden(
+      withPin(emptyMarks(), 'abc', {
+        pinnedAt: '2026-07-14T01:02:03Z',
+        cwd: '/repo',
+        accountLabel: 'work',
+      }),
+      'junk-1',
+    );
+    writeMarksFile(file, marks);
+    const read = readMarksFileResult(file);
+    expect(read.known).toBe(true);
+    expect(read.marks).toEqual(marks);
+    expect(isAuthoritativeRead(marks, marks)).toBe(true);
   });
 
-  // The envelope can be ours while individual entries are not: normalizeMarks
-  // drops those silently, and the next read-modify-write would erase them.
-  it('rejects a read whose entries do not survive normalization', () => {
+  // Authority is "normalization is a no-op". Enumerating the ways a forgiving
+  // normalizer can differ is not a list anyone can finish — four review rounds
+  // each found one more — so the check compares the whole result instead.
+  it('refuses any store this build would rewrite', () => {
     const file = path.join(dir, 'session-marks.json');
-    const lossy: [string, string][] = [
+    const rewritten: [string, string][] = [
+      ['[]', 'an array is not a marks object'],
+      ['{}', 'missing envelope — we would add version/pins/hidden'],
+      [
+        '{"version":2,"pins":{},"hidden":[]}',
+        'a newer format this build cannot read',
+      ],
+      ['{"version":1,"pins":[],"hidden":[]}', 'pins must be an object'],
+      ['{"version":1,"pins":{},"hidden":{}}', 'hidden must be an array'],
       [
         '{"version":1,"pins":{"abc":"garbage"},"hidden":[]}',
-        'a pin entry that is not an object',
+        'a pin entry that is dropped',
       ],
-      ['{"version":1,"pins":{"abc":null},"hidden":[]}', 'a null pin entry'],
+      [
+        '{"version":1,"pins":{"abc":{"pinnedAt":42,"cwd":7,"group":null}},"hidden":[]}',
+        'a pin entry whose FIELDS are coerced',
+      ],
       ['{"version":1,"pins":{},"hidden":["ok",42]}', 'a non-string hidden id'],
-      ['{"version":1,"pins":{},"hidden":[""]}', 'an empty hidden id'],
+      [
+        '{"version":1,"pins":{},"hidden":["a","a"]}',
+        'duplicates we would collapse',
+      ],
+      [
+        '{"version":1,"pins":{},"hidden":[],"groups":{"x":1}}',
+        'an unknown field a future build added',
+      ],
     ];
-    for (const [json, why] of lossy) {
+    for (const [json, why] of rewritten) {
       fs.writeFileSync(file, json);
       expect(readMarksFileResult(file).known, why).toBe(false);
       expect(mutateMarksFile(file, (p) => withHidden(p, 'x')).known).toBe(
         false,
       );
-      expect(fs.readFileSync(file, 'utf-8')).toBe(json);
+      expect(fs.readFileSync(file, 'utf-8'), why).toBe(json);
     }
-    // Duplicates are deduped, not dropped — still authoritative.
-    fs.writeFileSync(file, '{"version":1,"pins":{},"hidden":["a","a"]}');
-    expect(readMarksFileResult(file).known).toBe(true);
+  });
+
+  it('ignores key order, which is not a rewrite', () => {
+    const marks = withPin(emptyMarks(), 'abc', {
+      pinnedAt: '2026-07-14T01:02:03Z',
+      cwd: '/repo',
+    });
+    const reordered = {
+      hidden: [],
+      pins: {
+        abc: { group: null, cwd: '/repo', pinnedAt: '2026-07-14T01:02:03Z' },
+      },
+      version: 1,
+    };
+    expect(isAuthoritativeRead(reordered, marks)).toBe(true);
   });
 
   // Every mutation is read-modify-write over the whole file, so a read that

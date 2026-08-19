@@ -144,59 +144,44 @@ export interface MarksRead {
 /** The only store version this build understands. */
 const SUPPORTED_VERSION = 1;
 
+/** Stable JSON — object keys sorted, so key ORDER can never fake a difference. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, val) =>
+    val && typeof val === 'object' && !Array.isArray(val)
+      ? Object.fromEntries(
+          Object.entries(val as Record<string, unknown>).sort(([x], [y]) =>
+            x < y ? -1 : x > y ? 1 : 0,
+          ),
+        )
+      : val,
+  );
+
 /**
  * Is a parsed value a store we may treat as AUTHORITATIVE?
  *
  * `normalizeMarks` is forgiving by design — it coerces anything into valid v1
  * marks so a partly-corrupt store still renders. That is right for display and
- * wrong for authority: whatever it silently drops would be erased for real by
- * the next read-modify-write.
+ * wrong for authority: whatever it changes would be written back for real by
+ * the next read-modify-write, erasing the original.
  *
- * Two independent ways to lose data, so two checks:
+ * So the invariant is simply **normalization must be a no-op**. Earlier
+ * versions of this check enumerated the ways normalization can differ — the
+ * envelope, then dropped entries, then coerced fields, then unknown top-level
+ * keys — and each round of review found one more that the enumeration missed,
+ * because "all the ways a forgiving function can be forgiving" is not a list
+ * anyone can finish. Comparing the whole normalized result against the input
+ * has no narrower case left to miss, and it tracks `normalizeMarks`
+ * automatically instead of restating its rules beside it.
  *
- * 1. The envelope has to be ours. A `[]`, a `pins: []`, or a version this build
- *    does not know would normalize to empty and then be overwritten. The
- *    version case matters most — there the data is perfectly good and only this
- *    build is too old to read it.
- * 2. Normalization has to be LOSSLESS. An envelope can be fine while individual
- *    entries are not (`pins: {"abc": "garbage"}`), and those are dropped
- *    silently. This compares counts against the normalized result rather than
- *    re-listing the normalizer's rules: one definition, so widening its
- *    tolerance cannot leave a second copy behind to drift.
+ * Deliberately strict: a store this build would rewrite in ANY way — including
+ * one carrying a field a future version added, or a bare `{}` — is refused
+ * rather than silently rewritten. Refusing costs a lost pin action; rewriting
+ * costs the user's data.
  */
 export const isAuthoritativeRead = (
   raw: unknown,
   marks: SessionMarks,
-): boolean => {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
-  const o = raw as Record<string, unknown>;
-  if (o.version !== undefined && o.version !== SUPPORTED_VERSION) return false;
-
-  const pins = o.pins;
-  if (pins !== undefined) {
-    if (typeof pins !== 'object' || pins === null || Array.isArray(pins)) {
-      return false;
-    }
-    if (Object.keys(pins).length !== Object.keys(marks.pins).length) {
-      return false;
-    }
-  } else if (Object.keys(marks.pins).length !== 0) {
-    return false;
-  }
-
-  const hidden = o.hidden;
-  if (hidden !== undefined) {
-    if (!Array.isArray(hidden)) return false;
-    // The normalizer dedupes, so compare against the deduped input; a
-    // non-string or empty id survives the Set but not the filter, which is
-    // exactly the drop this check exists to catch.
-    if (new Set(hidden).size !== marks.hidden.length) return false;
-  } else if (marks.hidden.length !== 0) {
-    return false;
-  }
-
-  return true;
-};
+): boolean => canonical(raw) === canonical(marks);
 
 export const readMarksFileResult = (filePath: string): MarksRead => {
   try {
