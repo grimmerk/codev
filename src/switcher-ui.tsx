@@ -5,7 +5,11 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
-import { buildSessionListView, mergeSessionsById } from './session-list-view';
+import {
+  buildSessionListView,
+  ListViewSession,
+  mergeSessionsById,
+} from './session-list-view';
 import TerminalTab from './terminal-tab';
 
 type SwitcherMode = 'projects' | 'sessions' | 'terminal';
@@ -433,6 +437,9 @@ function SwitcherApp() {
     pins: Record<string, { pinnedAt: string; cwd: string; accountLabel?: string }>;
     hidden: string[];
   }>({ pins: {}, hidden: [] });
+  // False until the first getSessionMarks() response lands. Before that an
+  // empty pin set means "not known yet", not "no pins".
+  const [marksLoaded, setMarksLoaded] = useState(false);
   const [pinnedCollapsed, setPinnedCollapsed] = useState(() => {
     try {
       return localStorage.getItem('codev-pinned-collapsed') === '1';
@@ -451,12 +458,14 @@ function SwitcherApp() {
     }
   });
   // Pinned sessions living outside the loaded list (fetched by id)
-  const [extraPinnedSessions, setExtraPinnedSessions] = useState<any[]>([]);
+  const [extraPinnedSessions, setExtraPinnedSessions] = useState<
+    ListViewSession[]
+  >([]);
   // Mirrored into a ref: applySearchFilter runs from a debounced timeout and
   // from setState updaters, where reading React state gives the value captured
   // when the callback was created (the stale-closure trap this file has been
   // bitten by twice — see sessionSearchRef2).
-  const extraPinnedSessionsRef = useRef<any[]>([]);
+  const extraPinnedSessionsRef = useRef<ListViewSession[]>([]);
   const extraPinnedKeyRef = useRef('');
   // Keep the selection on the same session after pin/hide reshuffles the list
   const reanchorSelectionRef = useRef<string | null>(null);
@@ -579,6 +588,38 @@ function SwitcherApp() {
     }, 180);
   };
 
+  // `sessions` is a materialized filter result, so anything that arrives after
+  // the query was typed is invisible to it: the by-id pin fetch, and the
+  // title / branch / PR / last-reply enrichment those rows are matched on.
+  // Without this, a row that matches only on a late-arriving field stays
+  // missing until the next keystroke — and in pinned-only mode that reads as
+  // "no pinned session matches" for a pin you can see while browsing.
+  useEffect(() => {
+    const search = sessionSearchRef2.current;
+    if (!search.trim()) return;
+    setSessions((prev: any[]) => {
+      const next = applySearchFilter(allSessionsRef.current, search);
+      // Identical rows in identical order → keep the old array. Some of the
+      // deps below are refreshed by polling, and a fresh array every tick
+      // would re-render the list for nothing.
+      if (
+        next.length === prev.length &&
+        next.every((s: any, i: number) => s.sessionId === prev[i].sessionId)
+      ) {
+        return prev;
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    customTitles,
+    branches,
+    prLinks,
+    assistantResponses,
+    terminalApps,
+    extraPinnedSessions,
+  ]);
+
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
   const hiddenSet = new Set(sessionMarks.hidden);
   const hasPins = Object.keys(sessionMarks.pins).length > 0;
@@ -676,12 +717,18 @@ function SwitcherApp() {
         'codev-pinned-collapsed',
         pinnedCollapsed ? '1' : '0',
       );
-    } catch {}
+    } catch {
+      // Best effort: a browsing preference is not worth failing a render over
+      // (localStorage throws when the quota is full or storage is blocked).
+      // The in-memory state stays correct; only the next launch forgets it.
+    }
   }, [pinnedCollapsed]);
   useEffect(() => {
     try {
       localStorage.setItem('codev-pinned-only', pinnedOnly ? '1' : '0');
-    } catch {}
+    } catch {
+      // Best effort, same as above.
+    }
   }, [pinnedOnly]);
   const togglePinnedCollapsed = () => {
     setPinnedCollapsed((prev) => !prev);
@@ -689,21 +736,21 @@ function SwitcherApp() {
     // same as the minors fold collapse does.
     setSelectedSessionIndex(0);
   };
-  // Removing the last pin drops out of pinned-only implicitly (the scope needs
-  // pins to mean anything), so clear the preference too — otherwise the next
-  // pin, possibly weeks later, silently collapses the list to that one row.
-  // Keyed off a real non-empty → empty transition, because at mount the marks
-  // are empty until the IPC load lands and a plain `!hasPins` check would wipe
-  // a legitimately stored preference.
-  const hadPinsRef = useRef(false);
+  // Pinned-only needs pins to mean anything, so an empty pin set must clear the
+  // stored preference — otherwise the next pin, possibly weeks later, silently
+  // collapses the list to that one row.
+  //
+  // Gated on the marks having actually loaded, not on having seen pins earlier
+  // in this run: at mount the pin set is empty simply because the IPC load has
+  // not landed, and an ungated `!hasPins` check would wipe a legitimately
+  // stored preference. Watching for a non-empty → empty transition instead
+  // would only cover the case where the last pin is removed while the app is
+  // running, and miss the one where it is already gone at launch (a reset or
+  // hand-edited marks file) — which is the same footgun, one restart later.
   useEffect(() => {
-    if (hasPins) {
-      hadPinsRef.current = true;
-      return;
-    }
-    if (!hadPinsRef.current || !pinnedOnly) return;
+    if (!marksLoaded || hasPins || !pinnedOnly) return;
     setPinnedOnly(false);
-  }, [hasPins, pinnedOnly]);
+  }, [marksLoaded, hasPins, pinnedOnly]);
   const togglePinnedOnly = () => {
     setPinnedOnly((prev) => !prev);
     setSelectedSessionIndex(0);
@@ -741,7 +788,10 @@ function SwitcherApp() {
       .then((m: any) => {
         if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
       })
-      .catch(() => {});
+      .catch(() => {})
+      // Marked loaded either way: a failed read is still a completed attempt,
+      // and leaving the flag false would disable the pinned-only reset forever.
+      .finally(() => setMarksLoaded(true));
     const unsubscribe = window.electronAPI.onSessionMarksUpdated(
       (_event: any, m: any) => {
         if (m) {
@@ -1095,7 +1145,12 @@ function SwitcherApp() {
             setSessions((prev: any[]) => {
               const updated = updateSessions(prev);
               const search = sessionSearchRef2.current;
-              return search.trim() ? filterSessionsLocally(updated, search) : updated;
+              // applySearchFilter, not filterSessionsLocally: the list being
+              // re-filtered here already contains deep-search hits, which
+              // matched on middle prompts that the local filter's haystack
+              // does not contain — running the local filter alone drops every
+              // prompt-only match the moment a closed-VS-Code scan lands.
+              return search.trim() ? applySearchFilter(updated, search) : updated;
             });
           });
         }, 300);
