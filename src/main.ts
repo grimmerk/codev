@@ -33,14 +33,13 @@ import {
   getSessionsByIds,
 } from './claude-session-utility';
 import {
-  readSessionMarks,
+  mutateSessionMarks,
   readSessionMarksResult,
   watchSessionMarks,
   withHidden,
   withoutHidden,
   withoutPin,
   withPin,
-  writeSessionMarks,
 } from './session-marks';
 import {
   installHooks,
@@ -2395,12 +2394,23 @@ ipcMain.handle('pin-session', (_event, sessionId: string, info: { cwd?: string; 
   if (!sessionId || typeof sessionId !== 'string') {
     return { ok: false, error: 'invalid sessionId' };
   }
-  const marks = withPin(readSessionMarks(), sessionId, {
-    pinnedAt: new Date().toISOString(),
-    cwd: typeof info?.cwd === 'string' ? info.cwd : '',
-    accountLabel: typeof info?.accountLabel === 'string' ? info.accountLabel : undefined,
-  });
-  writeSessionMarks(marks);
+  const res = mutateSessionMarks((prev) =>
+    withPin(prev, sessionId, {
+      pinnedAt: new Date().toISOString(),
+      cwd: typeof info?.cwd === 'string' ? info.cwd : '',
+      accountLabel:
+        typeof info?.accountLabel === 'string'
+          ? info.accountLabel
+          : undefined,
+    }),
+  );
+  if (!res.known) {
+    // The store exists but could not be read. Writing now would overwrite it
+    // with an empty set plus this one change, erasing every other mark.
+    console.warn('[session-marks] pin refused: store unreadable', sessionId);
+    return { ok: false, error: 'marks store unreadable' };
+  }
+  const marks = res.marks;
   // Audit trail for the lost-pin reports (visible in Console.app / stdout)
   console.log('[session-marks] pin', sessionId, 'pins:', Object.keys(marks.pins).length);
   return { ok: true, marks };
@@ -2410,8 +2420,14 @@ ipcMain.handle('unpin-session', (_event, sessionId: string) => {
   if (!sessionId || typeof sessionId !== 'string') {
     return { ok: false, error: 'invalid sessionId' };
   }
-  const marks = withoutPin(readSessionMarks(), sessionId);
-  writeSessionMarks(marks);
+  const res = mutateSessionMarks((prev) => withoutPin(prev, sessionId));
+  if (!res.known) {
+    // The store exists but could not be read. Writing now would overwrite it
+    // with an empty set plus this one change, erasing every other mark.
+    console.warn('[session-marks] unpin refused: store unreadable', sessionId);
+    return { ok: false, error: 'marks store unreadable' };
+  }
+  const marks = res.marks;
   console.log('[session-marks] unpin', sessionId, 'pins:', Object.keys(marks.pins).length);
   return { ok: true, marks };
 });
@@ -2420,8 +2436,14 @@ ipcMain.handle('hide-session', (_event, sessionId: string) => {
   if (!sessionId || typeof sessionId !== 'string') {
     return { ok: false, error: 'invalid sessionId' };
   }
-  const marks = withHidden(readSessionMarks(), sessionId);
-  writeSessionMarks(marks);
+  const res = mutateSessionMarks((prev) => withHidden(prev, sessionId));
+  if (!res.known) {
+    // The store exists but could not be read. Writing now would overwrite it
+    // with an empty set plus this one change, erasing every other mark.
+    console.warn('[session-marks] hide refused: store unreadable', sessionId);
+    return { ok: false, error: 'marks store unreadable' };
+  }
+  const marks = res.marks;
   console.log('[session-marks] hide', sessionId, 'pins:', Object.keys(marks.pins).length, 'hidden:', marks.hidden.length);
   return { ok: true, marks };
 });
@@ -2430,8 +2452,14 @@ ipcMain.handle('unhide-session', (_event, sessionId: string) => {
   if (!sessionId || typeof sessionId !== 'string') {
     return { ok: false, error: 'invalid sessionId' };
   }
-  const marks = withoutHidden(readSessionMarks(), sessionId);
-  writeSessionMarks(marks);
+  const res = mutateSessionMarks((prev) => withoutHidden(prev, sessionId));
+  if (!res.known) {
+    // The store exists but could not be read. Writing now would overwrite it
+    // with an empty set plus this one change, erasing every other mark.
+    console.warn('[session-marks] unhide refused: store unreadable', sessionId);
+    return { ok: false, error: 'marks store unreadable' };
+  }
+  const marks = res.marks;
   console.log('[session-marks] unhide', sessionId, 'hidden:', marks.hidden.length);
   return { ok: true, marks };
 });

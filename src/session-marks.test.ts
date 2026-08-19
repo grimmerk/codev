@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   emptyMarks,
   normalizeMarks,
+  mutateMarksFile,
   readMarksFile,
   readMarksFileResult,
   withHidden,
@@ -140,5 +141,49 @@ describe('marks file roundtrip', () => {
     });
     writeMarksFile(file, marks);
     expect(readMarksFileResult(file)).toEqual({ marks, known: true });
+  });
+
+  // Every mutation is read-modify-write over the whole file, so a read that
+  // degrades to empty marks turns the next pin into a full overwrite.
+  describe('mutateMarksFile', () => {
+    it('applies and persists the mutation on a readable store', () => {
+      const file = path.join(dir, 'session-marks.json');
+      writeMarksFile(file, withHidden(emptyMarks(), 'junk-1'));
+
+      const res = mutateMarksFile(file, (prev) =>
+        withPin(prev, 'abc', {
+          pinnedAt: '2026-07-14T01:02:03Z',
+          cwd: '/repo',
+        }),
+      );
+
+      expect(res.known).toBe(true);
+      expect(Object.keys(res.marks.pins)).toEqual(['abc']);
+      expect(readMarksFile(file).hidden).toEqual(['junk-1']);
+    });
+
+    it('creates the store on the first-ever mutation (ENOENT is authoritative)', () => {
+      const file = path.join(dir, 'nested', 'session-marks.json');
+      const res = mutateMarksFile(file, (prev) => withHidden(prev, 'junk-1'));
+      expect(res.known).toBe(true);
+      expect(readMarksFile(file).hidden).toEqual(['junk-1']);
+    });
+
+    it('refuses to write when the store is unreadable, leaving it byte-identical', () => {
+      const file = path.join(dir, 'session-marks.json');
+      const corrupt = "{not json — but somebody's real pins are in here";
+      fs.writeFileSync(file, corrupt);
+
+      const res = mutateMarksFile(file, (prev) =>
+        withPin(prev, 'abc', {
+          pinnedAt: '2026-07-14T01:02:03Z',
+          cwd: '/repo',
+        }),
+      );
+
+      expect(res.known).toBe(false);
+      // Not "the mutation was skipped" — nothing was written at all.
+      expect(fs.readFileSync(file, 'utf-8')).toBe(corrupt);
+    });
   });
 });

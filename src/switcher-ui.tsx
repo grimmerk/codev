@@ -795,6 +795,10 @@ function SwitcherApp() {
       .getSessionMarks()
       .then((m: any) => {
         if (!m) return;
+        // Guard BEFORE touching state: an unknown read carries empty marks,
+        // and applying them would hide valid pins from the UI until something
+        // else re-reads the store.
+        if (m.known === false) return;
         setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
         // Only an AUTHORITATIVE read makes the pin set trustworthy. A
         // rejection, a nullish payload, or `known: false` (the store exists
@@ -804,7 +808,6 @@ function SwitcherApp() {
         // transient filesystem failure, which is the exact damage that reset
         // exists to prevent. Not clearing is the safe direction; the watcher
         // below promotes the flag if the store becomes readable later.
-        if (m.known === false) return;
         setMarksLoaded(true);
       })
       .catch(() => {});

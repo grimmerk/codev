@@ -176,6 +176,36 @@ export const readSessionMarks = (): SessionMarks =>
 export const readSessionMarksResult = (): MarksRead =>
   readMarksFileResult(defaultMarksPath());
 
+/**
+ * Read-modify-write that REFUSES to write when the store could not be read.
+ *
+ * Every mutation here is read-modify-write over the whole file, so a read that
+ * silently degrades to empty marks turns the next pin or hide into a full
+ * overwrite: one keystroke against an unreadable store would erase every other
+ * pin and hidden id on disk. A missing file is still fine — ENOENT is
+ * authoritative (see MarksRead), so the first-ever pin creates the store as
+ * usual.
+ *
+ * Returns the resulting marks with `known: true` when the write happened, or
+ * the unknown read (`known: false`) when it was refused and nothing was
+ * touched. Collapsing the four callers onto this one path is deliberate: four
+ * copies of read-modify-write are four chances to forget the guard.
+ */
+export const mutateMarksFile = (
+  filePath: string,
+  mutate: (marks: SessionMarks) => SessionMarks,
+): MarksRead => {
+  const read = readMarksFileResult(filePath);
+  if (!read.known) return read;
+  const next = mutate(read.marks);
+  writeMarksFile(filePath, next);
+  return { marks: next, known: true };
+};
+
+export const mutateSessionMarks = (
+  mutate: (marks: SessionMarks) => SessionMarks,
+): MarksRead => mutateMarksFile(defaultMarksPath(), mutate);
+
 export const writeSessionMarks = (marks: SessionMarks): void =>
   writeMarksFile(defaultMarksPath(), marks);
 
