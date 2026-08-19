@@ -1,8 +1,12 @@
 # Session-Finding Improvement Plan (search / browse / pins / preview)
 
-> **Status: decided; Batch 1 in flight** (finalized 2026-07-12 via a brainstorm session).
+> **Status: Batch 1 shipped; Batch 2/3 not started** (finalized 2026-07-12 via a brainstorm session).
 > PR-1 "search & noise" (§4.1–§4.3: B2 highlight + A1/B1 full search + C1 folding) = **PR #132 (merged)**;
-> PR-2 "pins" (§4.4 D1, incl. C1's manual hide) = **PR #136**; Batch 2/3 not started.
+> PR-2 "pins" (§4.4 D1, incl. C1's manual hide) = **PR #136 (merged)**, plus a browse-modes
+> follow-up (§4.4: recency ordering · ungroup · pinned-only scope).
+> **Live review 2026-08-20** re-measured the remaining pain and produced a follow-up queue —
+> row readability (§4.5), PR-reference canonicalization (§4.6), a frecency list (§6) — recorded
+> below with the measurements that justify each.
 > This document is the cross-session / cross-model implementation reference: every "decision"
 > below was confirmed point-by-point with the user — do not re-open decided options;
 > implementation details (§4–§6) may adapt to what you find.
@@ -122,19 +126,35 @@ Pure CSS in `switcher-ui.tsx`.
 Groundwork in `docs/pin-feature-handoff.md` (its §5 [REC] is the base; deviations below are
 multi-account-era updates).
 
-**UI spec (proposed to the user):**
+**UI spec — as shipped** (PR #136 + the browse-modes follow-up; supersedes the original
+proposal, which is kept below as the rejected-options record):
 - Hovering a session row reveals a 📌 button on the right; click toggles; pinned rows show a
   persistent small ★.
-- Top of the Sessions list: a collapsible "📌 Pinned (N)" section, expanded by default; rows
-  fully reuse the existing session row (status dot / badges / PR / title all intact).
-- A pinned session **also** stays in its chronological position (with the ★) — the section is
-  a shortcut, not a move (Notion favorites behave the same).
-- While searching: the pinned section hides; results are one unified list (matching pinned
-  rows keep the ★).
-- Unpin: hover-`x` on the pinned row (the recent-projects list already has this pattern) or
-  click 📌 again.
-- One-line empty-state hint.
-- v1 ordering: pinnedAt desc; named groups are v2 (schema keeps a `group?` field now).
+- Top of the Sessions list: a "📌 Pinned (N)" header, rows fully reuse the existing session
+  row (status dot / badges / PR / title all intact).
+- **Zone-only, not dual placement**: pinning MOVES the session into the zone; the timeline
+  keeps no duplicate. (User verdict during PR #136 live testing: the duplicate was more noise
+  than signal. The original proposal — and Notion's favorites — kept both.)
+- **Ordering: `lastTimestamp` DESC** (recency), `pinnedAt` DESC as the tie-break for
+  unresolved placeholder rows. PR #136 shipped `pinnedAt` ASC so a new pin appended at the
+  zone bottom rather than reshuffling rows under the cursor; that traded away the ordering
+  every other list uses, and the hover-suppression in `suppressHoverSelection()` already
+  absorbs the layout movement it was avoiding.
+- **Two independent toggles on the header** (both persisted in localStorage):
+  - label / `▾▸` = **group / ungroup**. Ungrouped, pins fall back to their chronological slot
+    with the ★ — the "everything in time order" browsing mode. It replaces the earlier
+    collapse semantics, where collapsing removed pins from the zone *and* the timeline at
+    once, i.e. browsing could make a pinned session invisible.
+  - `only` chip = **scope**: list and search are restricted to pinned sessions.
+  - Both toggles live on one line because vertical space is the scarce resource in a
+    menu-bar popup.
+- While searching: the zone does not group; results are one unified list (matching pinned
+  rows keep the ★). With `only` on, the search is scoped to pins.
+- A pinned session is never folded into the minor-sessions group regardless of its stats
+  (pinning is an explicit "keep this"); pins outside the loaded window are appended to the
+  timeline when ungrouped, so no mode can drop them.
+- Unpin: click 📌 again, or `⌘D` on the selected row.
+- Named groups are v2 (the schema already keeps a `group?` field).
 
 **Store (deviation from the handoff [REC], justified: multi-account era + hidden list too):**
 - Single file `~/.config/codev/session-marks.json` (one per machine, cross-account;
@@ -153,6 +173,93 @@ multi-account-era updates).
 - ⇒ **Keying pins by sessionId is enough**; normal resumes need no migration machinery.
 - Edge cases (v1 ignores them; re-pin manually if hit): explicit `--fork-session`,
   cross-account copy-fork (issue #128).
+
+### 4.5 Row readability: a matched row must show *why* it matched (2026-08-20 review)
+
+The user's report — "a long title still filters correctly, but I see no highlight" — has three
+independent causes, all confirmed in code, plus one finding that turned out to be **bigger than
+the reported symptom**.
+
+**Measured on the user's machine (2026-08-20), 125 unique custom titles:**
+
+| Measurement | Value |
+|---|---|
+| Title length | median **44** chars, max **165** |
+| Longer than the UI's 35-char hard slice | **64%** |
+| Chain-style (`A -> B > C`, newest step at the END) | **38%** |
+| **Titles sharing their first 35 chars with another title** | **48/125 = 38%**, in 13 groups |
+| Largest such group | **8 sessions** all rendering as `fred-ff nextjs backend and mcp arch` |
+| First prompts longer than the 50-char slice (`both` display mode) | **39%** (of 522 sessions) |
+| Last prompts longer than the 40-char slice | **42%** |
+| Titled sessions whose title never appears as a `/rename` prompt | **27/78 = 35%** |
+
+⇒ The title column — the user's primary identification signal, since they hand-title every
+non-throwaway session — **is visually ambiguous for 38% of sessions even without searching**.
+Fixing the highlight is necessary; fixing identifiability is worth more.
+
+**Causes:**
+
+- **R1 — hard slice.** `customTitles[id].slice(0, 35)` is applied *before* `Highlighter`, while
+  `filterSessionsLocally` matches the *full* title ⇒ a match past char 35 filters the row in and
+  highlights nothing.
+- **R2 — CSS clip.** Row line 1 is `nowrap + overflow:hidden + ellipsis` with all right-hand
+  badges `flexShrink: 0`; the branch renders after the title and is the first casualty. (Branch
+  is not hard-sliced — same visible effect, different mechanism.)
+- **R3 — snippet suppression hole.** The `⌕` line is suppressed when the match is in prompt #0
+  or the last prompt, on the grounds that the row already displays those — but it displays only
+  their first 50/40 chars. A match past the slice is then suppressed *and* invisible.
+- **R4 — the two search paths carry different fields.** Main-side deep search sees
+  `projectName + project + all prompts` and is the only path that returns a snippet; the
+  renderer filter sees the enrichment fields (title / branch / PR / AI reply) but returns only
+  a boolean. A title-only match therefore produces no snippet at all — which matters for the
+  35% of titled sessions with no `/rename` prompt to fall back on.
+
+**Fixes (one PR):**
+
+- **T1 — middle-ellipsis title** (`head … tail`) instead of a head-only slice, plus the full
+  title on the `title=` attribute. Fixes the 38% ambiguity, and needs no search to pay off.
+- **T2 — match-aware window**: when searching, if the first match falls outside the visible
+  window, move the window to the match (reuse the pure `extractSnippet()` in
+  `session-search.ts`). Apply to title / first / last / assistant lines. **This subsumes a fix
+  for R3** — once the visible line scrolls to the match, the suppression is correct again.
+- **T3 — branch**: same windowing, and consider moving the branch to line 2 so it stops
+  competing with the title for line 1.
+
+**Naming guidance given to the user** (their titles are a running log, and every list UI
+truncates from the right): put the discriminator in the first ~20 chars, drop the leading
+project name (the row already prints it), and prefer `<stem>-<n> <current focus>` over an
+ever-growing `A > B > C` chain. After T1 the constraint relaxes to "head 15 + tail 15 must be
+unique", so chaining becomes viable again if each appended step stays short.
+
+### 4.6 PR-reference canonicalization: `#123` ⇄ the full URL (2026-08-20 review)
+
+Searching a session's *own* PR works either way today, because `filterSessionsLocally` builds
+the badge haystack as `PR #<n> <url>`. Searching **user prompts** does not: the haystack is the
+raw prompt text, so the query has to use the same form the prompt happened to use.
+
+**Measured**: 2,506 (session, PR-number) pairs mentioned across all prompts —
+
+| Forms present in the prompts | Pairs | Consequence today |
+|---|---|---|
+| both `#N` and the URL | 486 (**19.4%**) | either query finds it |
+| URL only | 960 (**38.3%**) | searching `#N` misses it |
+| `#N` only | 1,060 (**42.3%**) | searching the URL misses it |
+
+⇒ **80.6% of PR mentions are reachable by only one of the two forms.**
+
+**Fix**: a pure term parser in `session-search.ts`, applied to *both* the main-side deep search
+and the renderer filter (one comparison, two callers — not two implementations). A query word
+recognized as a PR reference (`https://github.com/o/r/pull/N`, `#N`, `o/r#N`) matches if any
+equivalent form appears in the target (`#N`, `/pull/N`, `/issues/N`, `o/r#N`). **Require a
+delimiter — never match a bare number** (`#1598` must not hit `15980`).
+
+Cost: a query with no PR reference takes exactly today's path (one `String.includes` per word);
+a PR term costs at most 3 `includes` instead of 1, cheapest form first. Full-corpus search is
+5–20ms behind a 180ms debounce, so this stays imperceptible — but measure and record the timing
+in the PR.
+
+Free follow-on: the same parser gives the §6 `B4` filters (`is:pinned`, `has:pr`, `pr:1598`,
+`project:`, `branch:`, `after:`).
 
 ## 5. Batch 2 — structural investments
 
@@ -205,7 +312,8 @@ multi-account-era updates).
 | Item | Content | Note |
 |---|---|---|
 | D3 `/pin` | Custom slash command: leverages Claude Code's slash **autocomplete** (answers the user's dislike of `!` having none); the command runs `codev pin`; sessionId from the **`CLAUDE_CODE_SESSION_ID` env var** ([FACT], §7); accepts one LLM turn (user OK'd). Args possible: `/pin as "…"` | UI pin remains primary |
-| B4 filters | `project:` `branch:` `account:` `has:pr` `msgs:>10` `after:` chips | |
+| B4 filters | `project:` `branch:` `account:` `has:pr` `msgs:>10` `after:` `is:pinned` chips | **Promoted** (2026-08-20): the §4.6 term parser does most of the work, and `is:pinned` overlaps the pinned-only scope |
+| D4 "Frequent" list | A frecency scope (`distinct active days × log(1+prompts) × exp(-age/14d)`) alongside the pinned scope. **Derive it from `history.jsonl`, which is already loaded** — no click instrumentation, so no weeks-long cold start | **Measured 2026-08-20, and the numbers argue for modest expectations**: only 3 of the frecency top-10 are outside the recency top-20, so most of it is a re-ordering of rows you can already see. It does **not** subsume pins — of the user's 7 real pins, 3 rank in the frecency top-10 but three others rank #26/#63/#72, because a pin is often exactly the *low*-activity session you refuse to lose. The two intents are complementary: frecency = "I keep coming back", pin = "I decided this matters" |
 | A4-lite | "Generate title" button in the preview (haiku, writes a custom title) | No batch auto-summarizing |
 | C3 chain collapse | **Essentially defunct** (2026-07-12): normal resumes reuse the sessionId (§4.4) — no generation chains exist; only meaningful if `--fork-session` / copy-fork become common | Kept for the record |
 
@@ -248,9 +356,11 @@ multi-account-era updates).
 
 ## 8. Open questions (decide during implementation)
 
-- "Pinned section AND chronological position both show the row" is the proposed default; the
-  user hasn't given a final verdict (switch to section-only if they object).
-- `session-marks.json` single file vs. the handoff's `~/.claude/codev-status/pinned.json`:
-  this doc leans to the former (multi-account + hidden list); revisit at implementation time.
+- ~~"Pinned section AND chronological position both show the row"~~ — **settled**: dual
+  placement was rejected by the user during PR #136 live testing (zone-only). The browse-modes
+  follow-up then gave the chronological view back as an explicit *ungroup* toggle rather than
+  as a duplicate row; see §4.4.
+- ~~`session-marks.json` single file vs. the handoff's `~/.claude/codev-status/pinned.json`~~ —
+  **settled**: single cross-account file at `~/.config/codev/session-marks.json` (shipped).
 - Whether C4 v1 card and v2 pane ship together: judge by effort at the time.
 - Whether FTS indexes thinking blocks: v1 no (size/noise), keep a flag.
