@@ -666,24 +666,35 @@ function SwitcherApp() {
         .catch(() => {});
     }
   };
+  // Persist the two header toggles from effects, never from inside a state
+  // updater: an updater must be pure (React is free to call it more than once),
+  // and one effect owning each key means no second writer can disagree with it
+  // about what is stored — the reset below just sets state and this follows.
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'codev-pinned-collapsed',
+        pinnedCollapsed ? '1' : '0',
+      );
+    } catch {}
+  }, [pinnedCollapsed]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('codev-pinned-only', pinnedOnly ? '1' : '0');
+    } catch {}
+  }, [pinnedOnly]);
   const togglePinnedCollapsed = () => {
-    setPinnedCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('codev-pinned-collapsed', next ? '1' : '0');
-      } catch {}
-      return next;
-    });
+    setPinnedCollapsed((prev) => !prev);
     // The list just changed length — snap the selection back to the top,
     // same as the minors fold collapse does.
     setSelectedSessionIndex(0);
   };
   // Removing the last pin drops out of pinned-only implicitly (the scope needs
-  // pins to mean anything), so clear the STORED preference too — otherwise the
-  // next pin, possibly weeks later, silently collapses the list to that one
-  // row. Keyed off a real non-empty → empty transition, because at mount the
-  // marks are empty until the IPC load lands and a plain `!hasPins` check
-  // would wipe a legitimately stored preference.
+  // pins to mean anything), so clear the preference too — otherwise the next
+  // pin, possibly weeks later, silently collapses the list to that one row.
+  // Keyed off a real non-empty → empty transition, because at mount the marks
+  // are empty until the IPC load lands and a plain `!hasPins` check would wipe
+  // a legitimately stored preference.
   const hadPinsRef = useRef(false);
   useEffect(() => {
     if (hasPins) {
@@ -692,18 +703,9 @@ function SwitcherApp() {
     }
     if (!hadPinsRef.current || !pinnedOnly) return;
     setPinnedOnly(false);
-    try {
-      localStorage.setItem('codev-pinned-only', '0');
-    } catch {}
   }, [hasPins, pinnedOnly]);
   const togglePinnedOnly = () => {
-    setPinnedOnly((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('codev-pinned-only', next ? '1' : '0');
-      } catch {}
-      return next;
-    });
+    setPinnedOnly((prev) => !prev);
     setSelectedSessionIndex(0);
   };
 
