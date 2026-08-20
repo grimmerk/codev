@@ -188,4 +188,49 @@ describe('windowAroundMatch', () => {
       'tiny NEEDLE',
     );
   });
+
+  // A repeated word: the earliest occurrence picks where to centre, but if the
+  // ordinary rendering already shows a LATER one the reader still gets a
+  // highlight — and gets it without the text jumping. The contract is "a match
+  // is visible", not "this particular occurrence is".
+  it('keeps the ordinary rendering when it already shows some occurrence', () => {
+    const text = `head NEEDLE ${'m'.repeat(200)} NEEDLE tail`;
+    const plain = truncateMiddle(text, 60);
+    expect(plain).toContain('NEEDLE');
+    expect(windowAroundMatch(text, ['needle'], 60)).toBe(plain);
+  });
+
+  it('windows when NO occurrence survives the ordinary rendering', () => {
+    const text = `${'a'.repeat(60)}NEEDLE${'b'.repeat(60)}NEEDLE${'c'.repeat(200)}`;
+    expect(truncateMiddle(text, 60)).not.toContain('NEEDLE');
+    expect(windowAroundMatch(text, ['needle'], 60)).toContain('NEEDLE');
+  });
+  // The windowed branch exists to contain the match, so a long search word
+  // must not be swallowed by the trailing ellipsis it makes room for.
+  it('keeps a LONG matched word whole, not just its start', () => {
+    const word = 'w'.repeat(30);
+    const text = `${'a'.repeat(200)}${word}${'b'.repeat(200)}`;
+    const out = windowAroundMatch(text, [word], 60);
+    expect(out).toContain(word);
+    expect(out.length).toBeLessThanOrEqual(60);
+  });
+
+  it('shows a word longer than the window from its first character', () => {
+    const word = 'w'.repeat(90);
+    const text = `${'a'.repeat(200)}${word}${'b'.repeat(200)}`;
+    const out = windowAroundMatch(text, [word], 60);
+    expect(out.length).toBeLessThanOrEqual(60);
+    // Cut at the end is unavoidable; cut at the START would hide where the
+    // match begins, which is the part that tells you why the row is here.
+    expect(out.replace(/…/g, '').startsWith('w')).toBe(true);
+  });
+});
+
+describe('truncateMiddle lower boundary', () => {
+  it('never returns more than max, even at 0 and 1', () => {
+    expect(truncateMiddle('ab', 0)).toBe('');
+    expect(truncateMiddle('ab', 1)).toBe('…');
+    expect(truncateMiddle('abcdef', 2).length).toBe(2);
+    expect(truncateMiddle('abcdef', 3).length).toBe(3);
+  });
 });

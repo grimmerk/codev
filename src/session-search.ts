@@ -86,7 +86,11 @@ export const isMinorSession = (
  * different sessions all rendered as `fred-ff nextjs backend and mcp arch`.
  */
 export const truncateMiddle = (text: string, max: number): string => {
-  if (max <= 1 || text.length <= max) return text;
+  if (max <= 0) return '';
+  if (text.length <= max) return text;
+  // At one character there is no room for head, tail AND a marker; the marker
+  // is the only honest thing to keep.
+  if (max === 1) return '…';
   // Bias the head slightly longer — it carries the topic, the tail the latest step.
   const head = Math.ceil((max - 1) / 2);
   const tail = max - 1 - head;
@@ -94,8 +98,14 @@ export const truncateMiddle = (text: string, max: number): string => {
 };
 
 /**
- * A `max`-char window over `text` that is guaranteed to CONTAIN the first
- * search match, with ellipses marking whichever end was cut.
+ * A `max`-char window over `text` that is guaranteed to show A match, with
+ * ellipses marking whichever end was cut.
+ *
+ * A match, not *the first* match: the earliest occurrence is only used to
+ * decide where to centre the window. If the ordinary rendering already shows
+ * some later occurrence of the same word, that rendering is returned unchanged
+ * — the reader still sees a highlight, and they see it in the familiar head+
+ * tail shape instead of a window that jumped for no visible reason.
  *
  * A row can only justify its place in the results if you can see why it
  * matched. Every line here is length-capped, so a hit past the cap filtered the
@@ -135,11 +145,25 @@ export const windowAroundMatch = (
 
   // Every ellipsis rendered counts against `max`, or a "capped" line silently
   // overruns the space the row reserved for it.
-  const start = Math.max(0, at - Math.floor(max / 3));
+  // Position roughly a third in, then pull the window forward if the match's
+  // TAIL would fall outside it. Centring alone is not enough: a long search
+  // word can start inside the window and still run past its end, so the
+  // trailing ellipsis swallows it and this branch fails at the one thing it
+  // exists to do.
+  const wantEnd = at + hit.length;
+  let start = Math.max(0, at - Math.floor(max / 3));
+  // Reserve the trailing ellipsis while positioning; give it back below if the
+  // window reaches the end of the text.
+  let room = max - (start > 0 ? 1 : 0) - 1;
+  if (start + room < wantEnd) {
+    // A word longer than the window cannot fit whole — then show it from its
+    // first character rather than from the middle of it.
+    start = Math.min(at, Math.max(0, wantEnd - room));
+    room = max - (start > 0 ? 1 : 0) - 1;
+  }
   const lead = start > 0 ? '…' : '';
-  const roomWithTail = max - lead.length - 1;
-  if (start + roomWithTail >= text.length) {
+  if (start + room >= text.length) {
     return `${lead}${text.slice(start, start + (max - lead.length))}`;
   }
-  return `${lead}${text.slice(start, start + roomWithTail)}…`;
+  return `${lead}${text.slice(start, start + room)}…`;
 };
