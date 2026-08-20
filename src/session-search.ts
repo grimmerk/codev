@@ -74,3 +74,144 @@ export const isMinorSession = (
   !hasPrLink &&
   typeof session.messageCount === 'number' &&
   session.messageCount <= 2;
+
+/**
+ * Where a match found in `text.toLowerCase()` lives in `text` itself.
+ *
+ * Folding is not length-preserving — 'İ' lowercases to two code units — so an
+ * offset found in the lowercased copy does not address the same character in
+ * the source. Matching still has to be done with `toLowerCase`, because that is
+ * what `matchesAllWords` uses to decide the row belongs in the results at all;
+ * a regex with `/i` folds differently and would list a row that shows no
+ * highlight. So the offset is translated, not re-derived.
+ *
+ * Translating by counting prefix lengths is not enough: a query can begin
+ * INSIDE an expansion (the combining dot of 'İ'), and a prefix count can only
+ * name whole source characters, so it reports the character AFTER the one the
+ * match started in and the span comes back empty. Recording which source
+ * character each folded unit came from answers both ends exactly.
+ */
+const foldedOrigins = (text: string): number[] => {
+  const origins: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const folded = text[i].toLowerCase();
+    for (let k = 0; k < folded.length; k++) origins.push(i);
+  }
+  return origins;
+};
+
+/**
+ * Shorten from the MIDDLE, keeping both ends: `head … tail`.
+ *
+ * Head-only truncation is wrong for this app's titles specifically. Measured on
+ * the reference machine (125 unique custom titles): median 44 chars, 64% longer
+ * than the old 35-char cut, and 38% written as `A -> B > C` chains whose newest
+ * step sits at the END — so the cut removed exactly the part that identifies
+ * the session. Worse, 48 of 125 titles shared their first 35 characters: eight
+ * different sessions all rendered as `fred-ff nextjs backend and mcp arch`.
+ */
+export const truncateMiddle = (text: string, max: number): string => {
+  if (max <= 0) return '';
+  if (text.length <= max) return text;
+  // At one character there is no room for head, tail AND a marker; the marker
+  // is the only honest thing to keep.
+  if (max === 1) return '…';
+  // Bias the head slightly longer — it carries the topic, the tail the latest step.
+  const head = Math.ceil((max - 1) / 2);
+  const tail = max - 1 - head;
+  return `${text.slice(0, head)}…${tail > 0 ? text.slice(text.length - tail) : ''}`;
+};
+
+/**
+ * A `max`-char window over `text` that is guaranteed to show A match, with
+ * ellipses marking whichever end was cut.
+ *
+ * A match, not *the first* match: the earliest occurrence is only used to
+ * decide where to centre the window. If the ordinary rendering already shows
+ * some later occurrence of the same word, that rendering is returned unchanged
+ * — the reader still sees a highlight, and they see it in the familiar head+
+ * tail shape instead of a window that jumped for no visible reason.
+ *
+ * A row can only justify its place in the results if you can see why it
+ * matched. Every line here is length-capped, so a hit past the cap filtered the
+ * row in and then showed nothing — measured: 39% of first prompts and 42% of
+ * last prompts exceed the cap they are rendered at. When nothing matches (or
+ * the match already sits inside the head window) this falls back to `fallback`,
+ * which is the ordinary non-search rendering.
+ */
+export const windowAroundMatch = (
+  text: string,
+  wordsLower: string[],
+  max: number,
+  fallback: (text: string, max: number) => string = truncateMiddle,
+): string => {
+  if (text.length <= max) return text;
+
+  // Match exactly as `matchesAllWords` does, then translate the offset into
+  // the source (see sourceIndexOfLowerIndex). Two matching rules for one
+  // question is how a row ends up listed with nothing highlighted.
+  const lower = text.toLowerCase();
+  let atLower = -1;
+  let wordLen = 0;
+  for (const w of wordsLower) {
+    if (!w) continue;
+    const i = lower.indexOf(w);
+    if (i !== -1 && (atLower === -1 || i < atLower)) {
+      atLower = i;
+      wordLen = w.length;
+    }
+  }
+  let at = -1;
+  let hit = '';
+  if (atLower !== -1) {
+    if (lower.length === text.length) {
+      // Nothing expanded, so the two strings share coordinates.
+      at = atLower;
+      hit = text.slice(at, at + wordLen);
+    } else {
+      const origins = foldedOrigins(text);
+      at = origins[atLower];
+      // Inclusive end: the source character the match's LAST folded unit came
+      // from, so a match that starts or ends inside an expansion still yields
+      // a non-empty span.
+      hit = text.slice(at, origins[atLower + wordLen - 1] + 1);
+    }
+  }
+  if (at === -1) return fallback(text, max);
+
+  // No useful window exists in one or two characters, and building one would
+  // spend the whole budget on ellipses; the fallback already honours the cap.
+  if (max <= 2) return fallback(text, max);
+
+  // ASK the fallback whether the match is already on screen rather than
+  // modelling where it keeps characters. An earlier version assumed a head
+  // window (`at < max - 1`) while the fallback truncated from the MIDDLE, so a
+  // match at index 40 of a 60-char budget was declared visible and then landed
+  // in the elided middle — the one thing this helper promises cannot happen.
+  const plain = fallback(text, max);
+  if (plain.toLowerCase().includes(hit.toLowerCase())) return plain;
+
+  // Every ellipsis rendered counts against `max`, or a "capped" line silently
+  // overruns the space the row reserved for it.
+  // Position roughly a third in, then pull the window forward if the match's
+  // TAIL would fall outside it. Centring alone is not enough: a long search
+  // word can start inside the window and still run past its end, so the
+  // trailing ellipsis swallows it and this branch fails at the one thing it
+  // exists to do.
+  const wantEnd = at + hit.length;
+  let start = Math.max(0, at - Math.floor(max / 3));
+  // Reserve the trailing ellipsis while positioning; give it back below if the
+  // window reaches the end of the text.
+  let room = max - (start > 0 ? 1 : 0) - 1;
+  if (start + room < wantEnd) {
+    // A word longer than the window cannot fit whole — then show it from its
+    // first character rather than from the middle of it.
+    start = Math.min(at, Math.max(0, wantEnd - room));
+    room = max - (start > 0 ? 1 : 0) - 1;
+  }
+  const lead = start > 0 ? '…' : '';
+  if (start + room >= text.length) {
+    return `${lead}${text.slice(start, start + (max - lead.length))}`;
+  }
+  return `${lead}${text.slice(start, start + room)}…`;
+};

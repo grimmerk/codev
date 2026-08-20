@@ -214,6 +214,13 @@ Fixing the highlight is necessary; fixing identifiability is worth more.
   a boolean. A title-only match therefore produces no snippet at all — which matters for the
   35% of titled sessions with no `/rename` prompt to fall back on.
 
+**Status: shipped** (v1.0.86). `truncateMiddle` and `windowAroundMatch` are pure
+helpers in `session-search.ts`; the row applies them through one `fitToRow()`
+so every capped line follows the same rule. The title budget went 35 → 60 and is
+expected to need tuning against the real window. Issue #138's snippet-line
+colour ships with it. R3 needed no separate fix: once the first/last lines
+window to the match, suppressing the duplicate `⌕` line is correct again.
+
 **Fixes (one PR):**
 
 - **T1 — middle-ellipsis title** (`head … tail`) instead of a head-only slice, plus the full
