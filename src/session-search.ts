@@ -75,9 +75,25 @@ export const isMinorSession = (
   typeof session.messageCount === 'number' &&
   session.messageCount <= 2;
 
-/** Escape a user-typed word so it can be matched as a literal. */
-const escapeForRegExp = (word: string): string =>
-  word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * The source index whose lowercased prefix is `lowerIndex` code units long.
+ *
+ * `toLowerCase()` can change length ('İ' becomes two code units), so an offset
+ * found in a lowercased copy does not address the same character in the
+ * source. Walking the prefix maps one to the other WITHOUT changing what
+ * counts as a match — matching has to stay `toLowerCase`-based because that is
+ * what `matchesAllWords` uses to decide the row belongs in the results at all.
+ * A regex with the `i` flag folds differently (it will not accept 'İ' for 'i'),
+ * so a row could be listed and then show no highlight.
+ */
+const sourceIndexOfLowerIndex = (text: string, lowerIndex: number): number => {
+  let lowerLen = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (lowerLen >= lowerIndex) return i;
+    lowerLen += text[i].toLowerCase().length;
+  }
+  return text.length;
+};
 
 /**
  * Shorten from the MIDDLE, keeping both ends: `head … tail`.
@@ -126,23 +142,27 @@ export const windowAroundMatch = (
 ): string => {
   if (text.length <= max) return text;
 
-  // Search the ORIGINAL string case-insensitively rather than lowercasing it
-  // first: `toLowerCase()` can change length (U+0130 'İ' becomes two code
-  // units), so an index taken in the lowercased copy does not address the same
-  // character in the source, and slicing by it can shear the first matched
-  // character off the window.
-  let at = -1;
-  let hit = '';
+  // Match exactly as `matchesAllWords` does, then translate the offset into
+  // the source (see sourceIndexOfLowerIndex). Two matching rules for one
+  // question is how a row ends up listed with nothing highlighted.
+  const lower = text.toLowerCase();
+  let atLower = -1;
+  let wordLen = 0;
   for (const w of wordsLower) {
     if (!w) continue;
-    const found = new RegExp(escapeForRegExp(w), 'i').exec(text);
-    if (found && (at === -1 || found.index < at)) {
-      at = found.index;
-      // The source match, not the query word: its length in the original text
-      // is what the window has to make room for.
-      hit = found[0];
+    const i = lower.indexOf(w);
+    if (i !== -1 && (atLower === -1 || i < atLower)) {
+      atLower = i;
+      wordLen = w.length;
     }
   }
+  const at = atLower === -1 ? -1 : sourceIndexOfLowerIndex(text, atLower);
+  // The SOURCE span, not the query word: its length in the original text is
+  // what the window has to make room for.
+  const hit =
+    atLower === -1
+      ? ''
+      : text.slice(at, sourceIndexOfLowerIndex(text, atLower + wordLen));
   if (at === -1) return fallback(text, max);
 
   // No useful window exists in one or two characters, and building one would

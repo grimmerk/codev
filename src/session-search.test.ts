@@ -194,9 +194,12 @@ describe('windowAroundMatch', () => {
   // highlight — and gets it without the text jumping. The contract is "a match
   // is visible", not "this particular occurrence is".
   it('keeps the ordinary rendering when it already shows some occurrence', () => {
-    const text = `head NEEDLE ${'m'.repeat(200)} NEEDLE tail`;
+    // The earliest occurrence must be ELIDED and a later one visible, or the
+    // test never reaches the branch it names.
+    const text = `${'a'.repeat(40)}NEEDLE${'b'.repeat(200)}NEEDLE-tail`;
     const plain = truncateMiddle(text, 60);
-    expect(plain).toContain('NEEDLE');
+    expect(plain.slice(0, 30)).not.toContain('NEEDLE'); // earliest is elided
+    expect(plain).toContain('NEEDLE'); // a later one survives
     expect(windowAroundMatch(text, ['needle'], 60)).toBe(plain);
   });
 
@@ -232,6 +235,15 @@ describe('windowAroundMatch', () => {
     const out = windowAroundMatch(text, ['needle'], 60);
     expect(out).toContain('NEEDLE');
     expect(out.length).toBeLessThanOrEqual(60);
+  });
+
+  // The row is listed by matchesAllWords, so the window must find the same
+  // match — a regex with /i folds differently and would show no highlight.
+  it('agrees with the filter on Unicode case folding', () => {
+    const text = `${'a'.repeat(200)}İ${'b'.repeat(200)}`;
+    expect(matchesAllWords(text.toLowerCase(), ['i'])).toBe(true);
+    const out = windowAroundMatch(text, ['i'], 60);
+    expect(out).toContain('İ');
   });
 
   it('treats a query word as literal text, not a pattern', () => {
