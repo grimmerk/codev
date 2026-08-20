@@ -111,16 +111,35 @@ export const windowAroundMatch = (
   fallback: (text: string, max: number) => string = truncateMiddle,
 ): string => {
   if (text.length <= max) return text;
+
   const lower = text.toLowerCase();
   let at = -1;
+  let hit = '';
   for (const w of wordsLower) {
     if (!w) continue;
     const i = lower.indexOf(w);
-    if (i !== -1 && (at === -1 || i < at)) at = i;
+    if (i !== -1 && (at === -1 || i < at)) {
+      at = i;
+      hit = w;
+    }
   }
-  // No match, or already visible in the plain head window: render as usual.
-  if (at === -1 || at < max - 1) return fallback(text, max);
+  if (at === -1) return fallback(text, max);
+
+  // ASK the fallback whether the match is already on screen rather than
+  // modelling where it keeps characters. An earlier version assumed a head
+  // window (`at < max - 1`) while the fallback truncated from the MIDDLE, so a
+  // match at index 40 of a 60-char budget was declared visible and then landed
+  // in the elided middle — the one thing this helper promises cannot happen.
+  const plain = fallback(text, max);
+  if (plain.toLowerCase().includes(hit)) return plain;
+
+  // Every ellipsis rendered counts against `max`, or a "capped" line silently
+  // overruns the space the row reserved for it.
   const start = Math.max(0, at - Math.floor(max / 3));
-  const end = Math.min(text.length, start + max - 1);
-  return `…${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+  const lead = start > 0 ? '…' : '';
+  const roomWithTail = max - lead.length - 1;
+  if (start + roomWithTail >= text.length) {
+    return `${lead}${text.slice(start, start + (max - lead.length))}`;
+  }
+  return `${lead}${text.slice(start, start + roomWithTail)}…`;
 };

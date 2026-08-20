@@ -17,29 +17,36 @@ type SwitcherMode = 'projects' | 'sessions' | 'terminal';
 // import { fetchVSCodeBasedOpenedWindows, SERVER_URL, deleteRecentProjectRecord } from "./vscode-based-ide-utility"
 export const SERVER_URL = 'http://localhost:55688';
 
+// The matched-prompt line answers "why is this row here". It used to be #999
+// with a U+2315 marker unreadable at 11px (reported as "•" and then "ρ" by the
+// person who asked for the feature), so it read as a second copy of the
+// first-message line — issue #138. The identity now lives in the chip below
+// rather than in the line's colour: an amber line body sat too close to the
+// orange last-message line, and the snippet IS a user prompt, so the neutral
+// prompt grey is also the honest colour for its text.
+const SNIPPET_LINE_STYLE = { color: '#999', fontSize: '11px' } as const;
+
 // Unified search-match highlight — high contrast on every row color scheme
 // (the previous per-site translucent styles were near-invisible on colored text).
-// The matched-prompt line answers "why is this row here", so it belongs to the
-// search affordance, not to the message lines. It used to be #999 — the same
-// grey as the first-message line, one pixel smaller — so it read as a second
-// copy of that line; and its U+2315 marker was unreadable at 11px (reported as
-// "•" and then "ρ" by the author of the feature). Amber ties it to the
-// highlight, and the marker is now a word (issue #138).
-const SNIPPET_LINE_STYLE = { color: '#c9a227', fontSize: '11px' } as const;
-
-const SNIPPET_MARKER_STYLE = {
-  color: '#1e1e1e',
-  backgroundColor: '#c9a227',
-  borderRadius: '2px',
-  padding: '0 4px',
-  fontSize: '10px',
-} as const;
-
 const SEARCH_HIGHLIGHT_STYLE = {
   backgroundColor: '#f5b942',
   color: '#1a1a1a',
   padding: '0 2px',
   borderRadius: '2px',
+  fontWeight: 600,
+} as const;
+
+// Deliberately the SAME amber as SEARCH_HIGHLIGHT_STYLE: the chip and the
+// highlighted words are one system, so the row reads as "search found this
+// here" at a glance. The line's text stays the neutral prompt grey — an amber
+// line body sat too close to the orange last-message line, and the snippet IS
+// a user prompt, so colouring it as one is also the honest choice.
+const SNIPPET_MARKER_STYLE = {
+  color: SEARCH_HIGHLIGHT_STYLE.color,
+  backgroundColor: SEARCH_HIGHLIGHT_STYLE.backgroundColor,
+  borderRadius: '2px',
+  padding: '0 4px',
+  fontSize: '10px',
   fontWeight: 600,
 } as const;
 

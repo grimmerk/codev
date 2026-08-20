@@ -3,7 +3,7 @@
 ## 1.0.86
 
 - Feat: session rows are readable again when titles are long
-  - **Long titles now shorten from the middle** (`head … tail`) instead of losing everything past 35 characters. Measured on a 125-title corpus: median length 44, 64% longer than the old cut, and **48 of them shared their first 35 characters** — eight different sessions all rendered as `fred-ff nextjs backend and mcp arch`. Titles written as `A -> B > C` chains keep their newest step, which is the part that identifies the session
+  - **Long titles now shorten from the middle** (`head … tail`) instead of losing everything past 35 characters. Measured on a 125-title corpus: the median title is **44 characters** against that 35-char cut, **64% of titles run past it**, and **48 of them shared their first 35 characters** — eight different sessions all rendered as `fred-ff nextjs backend and mcp arch`. Titles written as `A -> B > C` chains keep their newest step, which is the part that identifies the session
   - **Hover a title to read it in full** — the row shows a shortened form, the tooltip shows everything
   - **Searching moves each line's window to the match.** Every capped line — title, first and last message, branch, last AI reply — now shows *why* the row matched instead of filtering it in and showing nothing (39% of first prompts and 42% of last prompts were longer than the space they render in)
   - **The `match #N` line is no longer mistaken for a message line** ([#138](https://github.com/grimmerk/codev/issues/138)): it was the same grey as the first-message line with an unreadable `⌕` glyph; it is now amber, in the same family as the search highlight, with a labelled marker

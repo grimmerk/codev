@@ -135,6 +135,31 @@ describe('windowAroundMatch', () => {
     expect(out.endsWith('…')).toBe(true);
   });
 
+  // The band between the fallback's head slice and `max`. A head-window check
+  // (`at < max - 1`) calls this visible, but truncateMiddle elides the middle,
+  // so the match lands in the gap — the one thing this helper promises cannot
+  // happen. Asking the fallback whether it shows the match closes it.
+  it('reveals a match that the fallback would elide from the middle', () => {
+    const text = `${'a'.repeat(40)}NEEDLE${'c'.repeat(200)}`;
+    expect(truncateMiddle(text, 60)).not.toContain('NEEDLE');
+    expect(windowAroundMatch(text, ['needle'], 60)).toContain('NEEDLE');
+  });
+
+  // A "capped" line that overruns its cap is not capped. Both ellipses count.
+  it('never exceeds the budget, ellipses included', () => {
+    for (const max of [20, 40, 60, 81]) {
+      for (const words of [['needle'], ['absent'], []]) {
+        expect(windowAroundMatch(long, words, max).length).toBeLessThanOrEqual(
+          max,
+        );
+      }
+      const nearEnd = `${'a'.repeat(300)}NEEDLE`;
+      expect(
+        windowAroundMatch(nearEnd, ['needle'], max).length,
+      ).toBeLessThanOrEqual(max);
+    }
+  });
+
   it('falls back to the ordinary rendering when nothing matches', () => {
     expect(windowAroundMatch(long, ['absent'], 60)).toBe(
       truncateMiddle(long, 60),
@@ -142,16 +167,20 @@ describe('windowAroundMatch', () => {
     expect(windowAroundMatch(long, [], 60)).toBe(truncateMiddle(long, 60));
   });
 
-  it('does not move the window for a match already in view', () => {
+  it('does not move the window for a match the fallback already shows', () => {
     const text = `NEEDLE${'x'.repeat(200)}`;
     expect(windowAroundMatch(text, ['needle'], 60)).toBe(
       truncateMiddle(text, 60),
     );
   });
 
+  // Discriminating: the two candidate windows are disjoint, so centring on the
+  // later word would exclude the earlier one and the assertion would fail.
   it('uses the EARLIEST match when several words hit', () => {
-    const out = windowAroundMatch(long, ['bbb', 'needle'], 60);
-    expect(out).toContain('NEEDLE');
+    const text = `${'a'.repeat(150)}FIRST${'b'.repeat(400)}SECOND${'c'.repeat(150)}`;
+    const out = windowAroundMatch(text, ['second', 'first'], 60);
+    expect(out).toContain('FIRST');
+    expect(out).not.toContain('SECOND');
   });
 
   it('leaves text shorter than the window alone', () => {
