@@ -5,6 +5,8 @@ import {
   findPromptMatch,
   isMinorSession,
   matchesAllWords,
+  truncateMiddle,
+  windowAroundMatch,
 } from './session-search';
 
 describe('matchesAllWords', () => {
@@ -94,5 +96,67 @@ describe('isMinorSession', () => {
 
   it('treats unknown messageCount as not minor (conservative)', () => {
     expect(isMinorSession({ isActive: false }, false, false)).toBe(false);
+  });
+});
+
+describe('truncateMiddle', () => {
+  it('keeps both ends, which is where these titles carry meaning', () => {
+    // Real shape from the corpus: the newest step is at the end.
+    const t =
+      'fred-ff nextjs backend and mcp arch clean up -> nextjs backend arch alternative > canva debug';
+    const out = truncateMiddle(t, 60);
+    expect(out.length).toBe(60);
+    expect(out.startsWith('fred-ff nextjs')).toBe(true);
+    expect(out.endsWith('canva debug')).toBe(true);
+    expect(out).toContain('…');
+  });
+
+  it('distinguishes titles that share a long prefix', () => {
+    const a = 'fred-ff nextjs backend and mcp arch clean up -> alternative 0';
+    const b = 'fred-ff nextjs backend and mcp arch clean up -> canva debug';
+    // The old head-only cut rendered both identically at 35 chars.
+    expect(a.slice(0, 35)).toBe(b.slice(0, 35));
+    expect(truncateMiddle(a, 40)).not.toBe(truncateMiddle(b, 40));
+  });
+
+  it('leaves short text untouched', () => {
+    expect(truncateMiddle('short', 60)).toBe('short');
+    expect(truncateMiddle('exactly-ten', 11)).toBe('exactly-ten');
+  });
+});
+
+describe('windowAroundMatch', () => {
+  const long = `${'a'.repeat(200)}NEEDLE${'b'.repeat(200)}`;
+
+  it('moves the window so a far-away match is actually visible', () => {
+    const out = windowAroundMatch(long, ['needle'], 60);
+    expect(out).toContain('NEEDLE');
+    expect(out.startsWith('…')).toBe(true);
+    expect(out.endsWith('…')).toBe(true);
+  });
+
+  it('falls back to the ordinary rendering when nothing matches', () => {
+    expect(windowAroundMatch(long, ['absent'], 60)).toBe(
+      truncateMiddle(long, 60),
+    );
+    expect(windowAroundMatch(long, [], 60)).toBe(truncateMiddle(long, 60));
+  });
+
+  it('does not move the window for a match already in view', () => {
+    const text = `NEEDLE${'x'.repeat(200)}`;
+    expect(windowAroundMatch(text, ['needle'], 60)).toBe(
+      truncateMiddle(text, 60),
+    );
+  });
+
+  it('uses the EARLIEST match when several words hit', () => {
+    const out = windowAroundMatch(long, ['bbb', 'needle'], 60);
+    expect(out).toContain('NEEDLE');
+  });
+
+  it('leaves text shorter than the window alone', () => {
+    expect(windowAroundMatch('tiny NEEDLE', ['needle'], 60)).toBe(
+      'tiny NEEDLE',
+    );
   });
 });

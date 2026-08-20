@@ -10,6 +10,7 @@ import {
   ListViewSession,
   mergeSessionsById,
 } from './session-list-view';
+import { truncateMiddle, windowAroundMatch } from './session-search';
 import TerminalTab from './terminal-tab';
 
 type SwitcherMode = 'projects' | 'sessions' | 'terminal';
@@ -18,6 +19,22 @@ export const SERVER_URL = 'http://localhost:55688';
 
 // Unified search-match highlight — high contrast on every row color scheme
 // (the previous per-site translucent styles were near-invisible on colored text).
+// The matched-prompt line answers "why is this row here", so it belongs to the
+// search affordance, not to the message lines. It used to be #999 — the same
+// grey as the first-message line, one pixel smaller — so it read as a second
+// copy of that line; and its U+2315 marker was unreadable at 11px (reported as
+// "•" and then "ρ" by the author of the feature). Amber ties it to the
+// highlight, and the marker is now a word (issue #138).
+const SNIPPET_LINE_STYLE = { color: '#c9a227', fontSize: '11px' } as const;
+
+const SNIPPET_MARKER_STYLE = {
+  color: '#1e1e1e',
+  backgroundColor: '#c9a227',
+  borderRadius: '2px',
+  padding: '0 4px',
+  fontSize: '10px',
+} as const;
+
 const SEARCH_HIGHLIGHT_STYLE = {
   backgroundColor: '#f5b942',
   color: '#1a1a1a',
@@ -631,6 +648,17 @@ function SwitcherApp() {
   ]);
 
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
+  const searchWordsLower = sessionSearchValue
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  // One rule for every length-capped line in a row: while searching, the window
+  // moves to the first match so you can see WHY the row is in the results;
+  // otherwise it keeps both ends, because these titles put the newest step last.
+  const fitToRow = (text: string, max: number) =>
+    isSearchingSessions
+      ? windowAroundMatch(text, searchWordsLower, max)
+      : truncateMiddle(text, max);
   const hiddenSet = new Set(sessionMarks.hidden);
   const hasPins = Object.keys(sessionMarks.pins).length > 0;
   // Which rows appear, in which group, in which order — one pure function so
@@ -1918,11 +1946,21 @@ function SwitcherApp() {
                           />
                         </span>
                         {customTitles[session.sessionId] && (
-                          <span style={{ color: '#7ec87e', fontSize: '13px', fontWeight: '500' }}>
+                          <span
+                            title={customTitles[session.sessionId]}
+                            style={{
+                              color: '#7ec87e',
+                              fontSize: '13px',
+                              fontWeight: '500',
+                            }}
+                          >
                             {' '}* <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
-                              textToHighlight={customTitles[session.sessionId].slice(0, 35)}
+                              textToHighlight={fitToRow(
+                                customTitles[session.sessionId],
+                                60,
+                              )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
@@ -1932,7 +1970,10 @@ function SwitcherApp() {
                             {' '}[<Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
-                              textToHighlight={branches[session.sessionId]}
+                              textToHighlight={fitToRow(
+                                branches[session.sessionId],
+                                40,
+                              )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />]
                           </span>
@@ -2043,7 +2084,10 @@ function SwitcherApp() {
                             <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
-                              textToHighlight={(session.firstUserMessage || '').slice(0, sessionDisplayMode === 'both' ? 50 : 80)}
+                              textToHighlight={fitToRow(
+                                session.firstUserMessage || '',
+                                sessionDisplayMode === 'both' ? 50 : 80,
+                              )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
@@ -2053,7 +2097,10 @@ function SwitcherApp() {
                             <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
-                              textToHighlight={(session.lastUserMessage || '').slice(0, 80)}
+                              textToHighlight={fitToRow(
+                                session.lastUserMessage || '',
+                                80,
+                              )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
@@ -2064,7 +2111,10 @@ function SwitcherApp() {
                             <Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
-                              textToHighlight={(session.lastUserMessage || '').slice(0, 40)}
+                              textToHighlight={fitToRow(
+                                session.lastUserMessage || '',
+                                40,
+                              )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
@@ -2084,8 +2134,10 @@ function SwitcherApp() {
                       if (dupFirst || dupLast) return null;
                       return (
                         <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
-                          <span style={{ color: '#999', fontSize: '11px' }}>
-                            ⌕ #{m.promptIndex + 1}{' '}
+                          <span style={SNIPPET_LINE_STYLE}>
+                            <span style={SNIPPET_MARKER_STYLE}>
+                              match #{m.promptIndex + 1}
+                            </span>{' '}
                             <Highlighter
                               searchWords={words}
                               autoEscape
@@ -2103,7 +2155,10 @@ function SwitcherApp() {
                           ◀ <Highlighter
                             searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                             autoEscape
-                            textToHighlight={assistantResponses[session.sessionId].slice(0, 80)}
+                            textToHighlight={fitToRow(
+                              assistantResponses[session.sessionId],
+                              80,
+                            )}
                             highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                           />
                         </span>

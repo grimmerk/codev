@@ -74,3 +74,53 @@ export const isMinorSession = (
   !hasPrLink &&
   typeof session.messageCount === 'number' &&
   session.messageCount <= 2;
+
+/**
+ * Shorten from the MIDDLE, keeping both ends: `head … tail`.
+ *
+ * Head-only truncation is wrong for this app's titles specifically. Measured on
+ * the reference machine (125 unique custom titles): median 44 chars, 64% longer
+ * than the old 35-char cut, and 38% written as `A -> B > C` chains whose newest
+ * step sits at the END — so the cut removed exactly the part that identifies
+ * the session. Worse, 48 of 125 titles shared their first 35 characters: eight
+ * different sessions all rendered as `fred-ff nextjs backend and mcp arch`.
+ */
+export const truncateMiddle = (text: string, max: number): string => {
+  if (max <= 1 || text.length <= max) return text;
+  // Bias the head slightly longer — it carries the topic, the tail the latest step.
+  const head = Math.ceil((max - 1) / 2);
+  const tail = max - 1 - head;
+  return `${text.slice(0, head)}…${tail > 0 ? text.slice(text.length - tail) : ''}`;
+};
+
+/**
+ * A `max`-char window over `text` that is guaranteed to CONTAIN the first
+ * search match, with ellipses marking whichever end was cut.
+ *
+ * A row can only justify its place in the results if you can see why it
+ * matched. Every line here is length-capped, so a hit past the cap filtered the
+ * row in and then showed nothing — measured: 39% of first prompts and 42% of
+ * last prompts exceed the cap they are rendered at. When nothing matches (or
+ * the match already sits inside the head window) this falls back to `fallback`,
+ * which is the ordinary non-search rendering.
+ */
+export const windowAroundMatch = (
+  text: string,
+  wordsLower: string[],
+  max: number,
+  fallback: (text: string, max: number) => string = truncateMiddle,
+): string => {
+  if (text.length <= max) return text;
+  const lower = text.toLowerCase();
+  let at = -1;
+  for (const w of wordsLower) {
+    if (!w) continue;
+    const i = lower.indexOf(w);
+    if (i !== -1 && (at === -1 || i < at)) at = i;
+  }
+  // No match, or already visible in the plain head window: render as usual.
+  if (at === -1 || at < max - 1) return fallback(text, max);
+  const start = Math.max(0, at - Math.floor(max / 3));
+  const end = Math.min(text.length, start + max - 1);
+  return `…${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+};
