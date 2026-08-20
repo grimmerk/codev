@@ -76,23 +76,28 @@ export const isMinorSession = (
   session.messageCount <= 2;
 
 /**
- * The source index whose lowercased prefix is `lowerIndex` code units long.
+ * Where a match found in `text.toLowerCase()` lives in `text` itself.
  *
- * `toLowerCase()` can change length ('İ' becomes two code units), so an offset
- * found in a lowercased copy does not address the same character in the
- * source. Walking the prefix maps one to the other WITHOUT changing what
- * counts as a match — matching has to stay `toLowerCase`-based because that is
- * what `matchesAllWords` uses to decide the row belongs in the results at all.
- * A regex with the `i` flag folds differently (it will not accept 'İ' for 'i'),
- * so a row could be listed and then show no highlight.
+ * Folding is not length-preserving — 'İ' lowercases to two code units — so an
+ * offset found in the lowercased copy does not address the same character in
+ * the source. Matching still has to be done with `toLowerCase`, because that is
+ * what `matchesAllWords` uses to decide the row belongs in the results at all;
+ * a regex with `/i` folds differently and would list a row that shows no
+ * highlight. So the offset is translated, not re-derived.
+ *
+ * Translating by counting prefix lengths is not enough: a query can begin
+ * INSIDE an expansion (the combining dot of 'İ'), and a prefix count can only
+ * name whole source characters, so it reports the character AFTER the one the
+ * match started in and the span comes back empty. Recording which source
+ * character each folded unit came from answers both ends exactly.
  */
-const sourceIndexOfLowerIndex = (text: string, lowerIndex: number): number => {
-  let lowerLen = 0;
+const foldedOrigins = (text: string): number[] => {
+  const origins: number[] = [];
   for (let i = 0; i < text.length; i++) {
-    if (lowerLen >= lowerIndex) return i;
-    lowerLen += text[i].toLowerCase().length;
+    const folded = text[i].toLowerCase();
+    for (let k = 0; k < folded.length; k++) origins.push(i);
   }
-  return text.length;
+  return origins;
 };
 
 /**
@@ -156,13 +161,22 @@ export const windowAroundMatch = (
       wordLen = w.length;
     }
   }
-  const at = atLower === -1 ? -1 : sourceIndexOfLowerIndex(text, atLower);
-  // The SOURCE span, not the query word: its length in the original text is
-  // what the window has to make room for.
-  const hit =
-    atLower === -1
-      ? ''
-      : text.slice(at, sourceIndexOfLowerIndex(text, atLower + wordLen));
+  let at = -1;
+  let hit = '';
+  if (atLower !== -1) {
+    if (lower.length === text.length) {
+      // Nothing expanded, so the two strings share coordinates.
+      at = atLower;
+      hit = text.slice(at, at + wordLen);
+    } else {
+      const origins = foldedOrigins(text);
+      at = origins[atLower];
+      // Inclusive end: the source character the match's LAST folded unit came
+      // from, so a match that starts or ends inside an expansion still yields
+      // a non-empty span.
+      hit = text.slice(at, origins[atLower + wordLen - 1] + 1);
+    }
+  }
   if (at === -1) return fallback(text, max);
 
   // No useful window exists in one or two characters, and building one would

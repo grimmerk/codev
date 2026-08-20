@@ -246,6 +246,18 @@ describe('windowAroundMatch', () => {
     expect(out).toContain('İ');
   });
 
+  // A query can begin INSIDE a folding expansion: the combining dot is the
+  // second half of what 'İ' lowercases to. A prefix count can only name whole
+  // source characters, so it reported the character AFTER 'İ' and the span came
+  // back EMPTY — and an empty hit makes `plain.includes(hit)` trivially true,
+  // so the fallback was always accepted and the only match could stay hidden.
+  it('resolves a match that starts inside a folding expansion', () => {
+    const text = `${'a'.repeat(200)}İ${'b'.repeat(200)}`;
+    const out = windowAroundMatch(text, ['\u0307'], 60);
+    expect(out).toContain('İ');
+    expect(out.length).toBeLessThanOrEqual(60);
+  });
+
   it('treats a query word as literal text, not a pattern', () => {
     const text = `${'a'.repeat(200)}a+b(c)${'d'.repeat(200)}`;
     expect(windowAroundMatch(text, ['a+b(c)'], 60)).toContain('a+b(c)');
