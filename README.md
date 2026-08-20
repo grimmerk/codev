@@ -24,9 +24,16 @@ CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to op
 
 Search covers **every session and every user prompt you ever typed** (not just the ~100 most recent sessions shown in the list) plus titles, branches, PR links, and last AI replies. When a match sits in the middle of a conversation, the row shows a `⌕ #N …` snippet with the surrounding context. Closed one-shot sessions (≤2 messages, untitled, no PR) fold into an expandable "minor sessions" row to keep the list scannable.
 
-**Pin** the sessions you keep coming back to (hover 📌 on a row, or `⌘D` on the selected row): they **move into** a collapsible **📌 Pinned** zone at the top (no duplicate left in the timeline; search still shows everything) — works even for old sessions found via deep search. **Hide** one-offs you never want in the main flow (hover ⊘, or `⇧⌘D`): they move into the minor-sessions fold, stay searchable, and can be unhidden from inside the fold (they carry a persistent ⊘ marker there). Pins and hides live in `~/.config/codev/session-marks.json`, shared across accounts.
+**Pin** the sessions you keep coming back to (hover 📌 on a row, or `⌘D` on the selected row): they **move into** a **📌 Pinned** zone at the top, ordered by recency like the rest of the list — works even for old sessions found via deep search. **Hide** one-offs you never want in the main flow (hover ⊘, or `⇧⌘D`): they move into the minor-sessions fold, stay searchable, and can be unhidden from inside the fold (they carry a persistent ⊘ marker there). Pins and hides live in `~/.config/codev/session-marks.json`, shared across accounts.
 
-Keyboard semantics worth knowing: the shortcuts act on the **selected row** (the one with the blue left border — hovering selects), and require an explicit selection. `⌘D` = pin/unpin toggle; `⇧⌘D` = hide (on a pinned row this unpins *and* folds in one step — pin and hide are mutually exclusive). Collapsing the zone is a mouse action on the `📌 Pinned (N)` header; when the last pin is removed the zone disappears entirely (that's normal, not a collapse).
+The `📌 Pinned (N)` header carries two independent toggles:
+
+| Click | Effect |
+|---|---|
+| the `▾ 📌 Pinned (N)` label | **Group / ungroup.** Ungrouped (`▸`), pinned sessions drop back into their normal chronological position with a ★ instead of sitting in a block at the top — use it when you want one list purely in time order. Nothing is ever hidden either way. |
+| the `only` chip on the right | **Pinned only.** The list — and the search box — is scoped to pinned sessions. Click again to leave. |
+
+Keyboard semantics worth knowing: the shortcuts act on the **selected row** (the one with the blue left border — hovering selects), and require an explicit selection. `⌘D` = pin/unpin toggle; `⇧⌘D` = hide (on a pinned row this unpins *and* folds in one step — pin and hide are mutually exclusive). When the last pin is removed the header disappears entirely (that's normal, not a collapse). A pinned session is never folded away as a "minor session", whatever its message count.
 
 **Simple rule**: when running multiple sessions in the same project directory at the same time, give each running session a name. Closed sessions don't need names — they won't cause issues.
 

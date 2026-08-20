@@ -5,7 +5,11 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
-import { isMinorSession } from './session-search';
+import {
+  buildSessionListView,
+  ListViewSession,
+  mergeSessionsById,
+} from './session-list-view';
 import TerminalTab from './terminal-tab';
 
 type SwitcherMode = 'projects' | 'sessions' | 'terminal';
@@ -46,12 +50,35 @@ const MINOR_FOLD_BAR_STYLE = {
   flexShrink: 0,
 } as const;
 
-// Header row of the pinned zone at the top of the Sessions list.
+// Header row of the pinned zone at the top of the Sessions list. It carries
+// two independent toggles on one line — the label groups/ungroups the zone,
+// the "only" chip scopes browsing and search to pins — so neither costs
+// vertical space, which is the scarce resource in a menu-bar popup.
 const PINNED_HEADER_STYLE = {
   padding: '6px 10px 2px 24px',
   color: '#c9a227',
   fontSize: '12px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '8px',
+} as const;
+
+const PINNED_ONLY_CHIP_STYLE = {
+  fontSize: '10px',
+  borderRadius: '3px',
+  padding: '1px 6px',
   cursor: 'pointer',
+  border: '1px solid #6b5a1e',
+  color: '#c9a227',
+  backgroundColor: 'transparent',
+} as const;
+
+const PINNED_ONLY_CHIP_ACTIVE_STYLE = {
+  ...PINNED_ONLY_CHIP_STYLE,
+  border: '1px solid #c9a227',
+  color: '#1e1e1e',
+  backgroundColor: '#c9a227',
 } as const;
 
 // Global styles for the switcher UI (moved from index.css)
@@ -296,7 +323,9 @@ const OptionUI = (
 };
 
 /** Format relative time for session display */
-const formatRelativeTime = (timestamp: string): string => {
+// Sessions carry epoch-ms numbers; the old `string` annotation only survived
+// because every caller went through an `any` row. `new Date()` takes both.
+const formatRelativeTime = (timestamp: number | string): string => {
   if (!timestamp) return '';
   const diff = Date.now() - new Date(timestamp).getTime();
   const minutes = Math.floor(diff / 60000);
@@ -388,8 +417,8 @@ function SwitcherApp() {
   );
   const [projectBranches, setProjectBranches] = useState<Record<string, string>>({});
   const [activeIDEFolders, setActiveIDEFolders] = useState<Set<string>>(new Set());
-  const [allSessions, setAllSessions] = useState<any[]>([]);
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [allSessions, setAllSessions] = useState<ListViewSession[]>([]);
+  const [sessions, setSessions] = useState<ListViewSession[]>([]);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(-1);
   const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
@@ -408,6 +437,11 @@ function SwitcherApp() {
     pins: Record<string, { pinnedAt: string; cwd: string; accountLabel?: string }>;
     hidden: string[];
   }>({ pins: {}, hidden: [] });
+  // False until the first getSessionMarks() response lands. Before that an
+  // empty pin set means "not known yet", not "no pins".
+  const [marksLoaded, setMarksLoaded] = useState(false);
+  // Set by the first fs.watch push; makes the initial read's response stale.
+  const marksPushSeenRef = useRef(false);
   const [pinnedCollapsed, setPinnedCollapsed] = useState(() => {
     try {
       return localStorage.getItem('codev-pinned-collapsed') === '1';
@@ -415,20 +449,40 @@ function SwitcherApp() {
       return false;
     }
   });
+  // Browse/search SCOPE: while on, only pinned sessions are listed and the
+  // search box searches inside them. Independent of the collapse toggle, which
+  // only decides whether pins are grouped at the top or left in time order.
+  const [pinnedOnly, setPinnedOnly] = useState(() => {
+    try {
+      return localStorage.getItem('codev-pinned-only') === '1';
+    } catch {
+      return false;
+    }
+  });
   // Pinned sessions living outside the loaded list (fetched by id)
-  const [extraPinnedSessions, setExtraPinnedSessions] = useState<any[]>([]);
+  const [extraPinnedSessions, setExtraPinnedSessions] = useState<
+    ListViewSession[]
+  >([]);
+  // Mirrored into a ref: applySearchFilter runs from a debounced timeout and
+  // from setState updaters, where reading React state gives the value captured
+  // when the callback was created (the stale-closure trap this file has been
+  // bitten by twice — see sessionSearchRef2).
+  const extraPinnedSessionsRef = useRef<ListViewSession[]>([]);
   const extraPinnedKeyRef = useRef('');
   // Keep the selection on the same session after pin/hide reshuffles the list
   const reanchorSelectionRef = useRef<string | null>(null);
   const hoverSuppressTokenRef = useRef(0);
   const modeRef = useRef<SwitcherMode>(initialMode);
   const activeStateRef = useRef<Record<string, number>>({});
-  const allSessionsRef = useRef<any[]>([]);
+  const allSessionsRef = useRef<ListViewSession[]>([]);
   const lastAssistantFetchRef = useRef<Record<string, number>>({});
   const sessionSearchRef2 = useRef(''); // tracks current search value for use in closures
   const deepSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deepSearchSeqRef = useRef(0);
-  const deepMatchesRef = useRef<any[]>([]); // latest main-side full-prompt matches
+  // Bumped when a deep-search response lands, so the single filtering site
+  // (the refresh effect) reruns with current state instead of a stale closure.
+  const [deepSearchRev, setDeepSearchRev] = useState(0);
+  const deepMatchesRef = useRef<ListViewSession[]>([]); // latest main-side full-prompt matches
   // Set true when a session is opened; on the next window show, clear the search so
   // returning to Sessions shows the full list. Toggling away without selecting keeps it.
   const clearSessionSearchOnShowRef = useRef(false);
@@ -465,7 +519,18 @@ function SwitcherApp() {
   // results (issue #131). Deep matches outside the loaded list are appended,
   // then everything re-sorts into the usual recency order.
   const applySearchFilter = (allItems: any[], query: string) => {
-    const base = filterSessionsLocally(allItems, query);
+    // Pins outside the loaded window are only in the by-id fetch, and their
+    // title / branch / PR live in renderer enrichment the main-side prompt
+    // search cannot see — without widening the candidate set here, searching
+    // for such a pin's title finds nothing, and in pinned-only mode that reads
+    // as "no pinned session matches" for a pin that is visible while browsing.
+    // Only while a query is live: this runs on every keystroke including the
+    // one that empties the box, and widening the browse list is not this
+    // function's job.
+    const candidates = query.trim()
+      ? mergeSessionsById(allItems, extraPinnedSessionsRef.current)
+      : allItems;
+    const base = filterSessionsLocally(candidates, query);
     if (!query.trim() || deepMatchesRef.current.length === 0) return base;
     const seen = new Set(base.map((s: any) => s.sessionId));
     const extra = deepMatchesRef.current
@@ -498,7 +563,12 @@ function SwitcherApp() {
       if (seq !== deepSearchSeqRef.current || sessionSearchRef2.current !== query) return;
       deepMatchesRef.current = res?.sessions || [];
       setSearchSnippets(res?.snippets || {});
-      setSessions(applySearchFilter(allSessionsRef.current, query));
+      // Bump a revision instead of filtering here. This callback was created
+      // ~180ms + one IPC round-trip ago and closes over the enrichment maps of
+      // THAT render, so filtering now would overwrite fresher results with a
+      // stale view. The refresh effect below owns the filtering; it runs from
+      // a current render, and this is one of its dependencies.
+      setDeepSearchRev((r) => r + 1);
       // Lazy-enrich deep matches that aren't in the loaded list. Bounded by
       // the deep-search result cap (100), same magnitude as the initial load.
       const loaded = new Set(
@@ -528,82 +598,73 @@ function SwitcherApp() {
     }, 180);
   };
 
-  // C1: fold minor (junk) sessions while browsing; searching shows everything.
-  // Minors keep their recency order but render below the fold row at the end.
-  // A user-hidden session is forced into the fold regardless of its stats.
+  // `sessions` is a materialized filter result, so anything that arrives after
+  // the query was typed is invisible to it: the by-id pin fetch, and the
+  // title / branch / PR / last-reply enrichment those rows are matched on.
+  // Without this, a row that matches only on a late-arriving field stays
+  // missing until the next keystroke — and in pinned-only mode that reads as
+  // "no pinned session matches" for a pin you can see while browsing.
+  useEffect(() => {
+    const search = sessionSearchRef2.current;
+    if (!search.trim()) return;
+    setSessions((prev: any[]) => {
+      const next = applySearchFilter(allSessionsRef.current, search);
+      // Identical rows in identical order → keep the old array. Some of the
+      // deps below are refreshed by polling, and a fresh array every tick
+      // would re-render the list for nothing.
+      if (
+        next.length === prev.length &&
+        next.every((s: any, i: number) => s.sessionId === prev[i].sessionId)
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [
+    deepSearchRev,
+    customTitles,
+    branches,
+    prLinks,
+    assistantResponses,
+    terminalApps,
+    extraPinnedSessions,
+  ]);
+
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
   const hiddenSet = new Set(sessionMarks.hidden);
-  const majorSessions: any[] = [];
-  const minorSessions: any[] = [];
-  for (const s of sessions) {
-    // Pinned sessions live in the zone ONLY (user verdict: the timeline
-    // duplicate was more noise than signal). Search still shows everything.
-    if (!isSearchingSessions && sessionMarks.pins[s.sessionId]) continue;
-    const minor =
-      !isSearchingSessions &&
-      (hiddenSet.has(s.sessionId) ||
-        (activeDetectionReady &&
-          isMinorSession(s, !!customTitles[s.sessionId], !!prLinks[s.sessionId])));
-    (minor ? minorSessions : majorSessions).push(s);
-  }
+  const hasPins = Object.keys(sessionMarks.pins).length > 0;
+  // Which rows appear, in which group, in which order — one pure function so
+  // the browse-state matrix (search x pinned-only x grouped) is testable
+  // without running the app. See src/session-list-view.ts.
+  const {
+    pinnedRows,
+    visiblePinnedRows,
+    minorSessions,
+    displayedSessions,
+    minorFoldHeaderIndex,
+    hiddenMinorCount,
+    pinnedOnlyActive,
+    canGroupPins,
+  } = buildSessionListView({
+    sessions,
+    allSessions,
+    extraPinnedSessions,
+    pins: sessionMarks.pins,
+    hidden: sessionMarks.hidden,
+    activePids: activeStateRef.current,
+    hasCustomTitle: (id: string) => !!customTitles[id],
+    hasPrLink: (id: string) => !!prLinks[id],
+    isSearching: isSearchingSessions,
+    pinnedOnly,
+    pinnedCollapsed,
+    minorsExpanded,
+    activeDetectionReady,
+  });
   // Manually hidden sessions may be titled/long — keep the fold label honest.
-  const hiddenMinorCount = minorSessions.filter((s: any) =>
-    hiddenSet.has(s.sessionId),
-  ).length;
   const minorFoldSuffix =
     hiddenMinorCount > 0
       ? `(≤2 msgs, untitled · ${hiddenMinorCount} hidden)`
       : '(≤2 msgs, untitled)';
-
-  // Pinned zone (PR-2): rows come from the loaded list when available, else
-  // from the by-id fetch. Zone-only model: pinning MOVES the session here
-  // (the timeline keeps no duplicate; search mode still shows everything).
-  const pinnedById = new Map<string, any>();
-  for (const s of allSessions) {
-    if (sessionMarks.pins[s.sessionId]) pinnedById.set(s.sessionId, s);
-  }
-  for (const s of extraPinnedSessions) {
-    if (sessionMarks.pins[s.sessionId] && !pinnedById.has(s.sessionId)) {
-      pinnedById.set(s.sessionId, s);
-    }
-  }
-  // pinnedAt ASC: a new pin APPENDS at the zone bottom instead of reshuffling
-  // the existing zone rows — less layout movement under the cursor.
-  const pinnedRows = Object.entries(sessionMarks.pins)
-    .sort(([, a], [, b]) => (a.pinnedAt || '').localeCompare(b.pinnedAt || ''))
-    .map(([id, info]) => {
-      // Fall back to a placeholder built from the pin record itself: a pin
-      // can be momentarily (VS Code sessions are absent from history.jsonl
-      // until the closed-scan merges them in) or permanently unresolvable —
-      // without this the zone count flaps on every tab switch.
-      const s = pinnedById.get(id) ?? {
-        sessionId: id,
-        project: info.cwd || '',
-        projectName:
-          (info.cwd || '').split('/').filter(Boolean).pop() || id.slice(0, 8),
-        firstUserMessage: '',
-        lastUserMessage: '',
-        lastTimestamp: 0,
-        // undefined, not 0: the row renders '… msgs' instead of a misleading
-        // '0 msgs' while the session is unresolved (or permanently gone)
-        messageCount: undefined,
-        isActive: false,
-        accountLabel: info.accountLabel,
-      };
-      return {
-        ...s,
-        __pinnedRow: true,
-        isActive: s.sessionId in activeStateRef.current || s.isActive,
-        activePid: activeStateRef.current[s.sessionId] ?? s.activePid,
-      };
-    });
-  const showPinnedZone = !isSearchingSessions && pinnedRows.length > 0;
-  const visiblePinnedRows = showPinnedZone && !pinnedCollapsed ? pinnedRows : [];
-
-  const displayedSessions = [
-    ...visiblePinnedRows,
-    ...(minorsExpanded ? [...majorSessions, ...minorSessions] : majorSessions),
-  ];
 
   // Pin/hide moves rows under a STATIONARY cursor; Chromium then re-hit-tests
   // and fires mouseenter on whatever row slid under the mouse, teleporting the
@@ -656,16 +717,52 @@ function SwitcherApp() {
         .catch(() => {});
     }
   };
+  // Persist the two header toggles from effects, never from inside a state
+  // updater: an updater must be pure (React is free to call it more than once),
+  // and one effect owning each key means no second writer can disagree with it
+  // about what is stored — the reset below just sets state and this follows.
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'codev-pinned-collapsed',
+        pinnedCollapsed ? '1' : '0',
+      );
+    } catch {
+      // Best effort: a browsing preference is not worth failing a render over
+      // (localStorage throws when the quota is full or storage is blocked).
+      // The in-memory state stays correct; only the next launch forgets it.
+    }
+  }, [pinnedCollapsed]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('codev-pinned-only', pinnedOnly ? '1' : '0');
+    } catch {
+      // Best effort, same as above.
+    }
+  }, [pinnedOnly]);
   const togglePinnedCollapsed = () => {
-    setPinnedCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('codev-pinned-collapsed', next ? '1' : '0');
-      } catch {}
-      return next;
-    });
+    setPinnedCollapsed((prev) => !prev);
     // The list just changed length — snap the selection back to the top,
     // same as the minors fold collapse does.
+    setSelectedSessionIndex(0);
+  };
+  // Pinned-only needs pins to mean anything, so an empty pin set must clear the
+  // stored preference — otherwise the next pin, possibly weeks later, silently
+  // collapses the list to that one row.
+  //
+  // Gated on the marks having actually loaded, not on having seen pins earlier
+  // in this run: at mount the pin set is empty simply because the IPC load has
+  // not landed, and an ungated `!hasPins` check would wipe a legitimately
+  // stored preference. Watching for a non-empty → empty transition instead
+  // would only cover the case where the last pin is removed while the app is
+  // running, and miss the one where it is already gone at launch (a reset or
+  // hand-edited marks file) — which is the same footgun, one restart later.
+  useEffect(() => {
+    if (!marksLoaded || hasPins || !pinnedOnly) return;
+    setPinnedOnly(false);
+  }, [marksLoaded, hasPins, pinnedOnly]);
+  const togglePinnedOnly = () => {
+    setPinnedOnly((prev) => !prev);
     setSelectedSessionIndex(0);
   };
 
@@ -699,14 +796,44 @@ function SwitcherApp() {
     window.electronAPI
       .getSessionMarks()
       .then((m: any) => {
-        if (m) setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+        if (!m) return;
+        // A watcher push that has already landed is newer than this response by
+        // definition — the store changed after we asked. Applying the in-flight
+        // snapshot on top of it would roll the pin set back, and an emptier
+        // snapshot would then clear and PERSIST pinnedOnly.
+        if (marksPushSeenRef.current) return;
+        // Guard BEFORE touching state: an unknown read carries empty marks,
+        // and applying them would hide valid pins from the UI until something
+        // else re-reads the store.
+        if (m.known === false) return;
+        setSessionMarks({
+          pins: m.pins || {},
+          hidden: m.hidden || [],
+        });
+        // Only an AUTHORITATIVE read makes the pin set trustworthy. A
+        // rejection, a nullish payload, or `known: false` (the store exists
+        // but could not be parsed — main returns empty marks either way) all
+        // leave it UNKNOWN rather than empty, and the pinned-only reset must
+        // never act on unknown: it would wipe a valid stored preference on a
+        // transient filesystem failure, which is the exact damage that reset
+        // exists to prevent. Not clearing is the safe direction; the watcher
+        // below promotes the flag if the store becomes readable later.
+        setMarksLoaded(true);
       })
       .catch(() => {});
     const unsubscribe = window.electronAPI.onSessionMarksUpdated(
       (_event: any, m: any) => {
         if (m) {
+          marksPushSeenRef.current = true;
           suppressHoverSelection();
-          setSessionMarks({ pins: m.pins || {}, hidden: m.hidden || [] });
+          setSessionMarks({
+            pins: m.pins || {},
+            hidden: m.hidden || [],
+          });
+          // A push is a real read: the main-side watcher drops unknown reads
+          // rather than broadcasting them, so arriving here means the store
+          // was parsed successfully.
+          setMarksLoaded(true);
         }
       },
     );
@@ -721,6 +848,7 @@ function SwitcherApp() {
     if (key === extraPinnedKeyRef.current) return;
     extraPinnedKeyRef.current = key;
     if (missing.length === 0) {
+      extraPinnedSessionsRef.current = [];
       setExtraPinnedSessions([]);
       return;
     }
@@ -728,6 +856,7 @@ function SwitcherApp() {
       // Drop stale responses (a newer pin set superseded this request)
       if (extraPinnedKeyRef.current !== key) return;
       const found = result || [];
+      extraPinnedSessionsRef.current = found;
       setExtraPinnedSessions(found);
       if (found.length === 0) return;
       window.electronAPI.loadSessionEnrichment(found).then((enrichment) => {
@@ -1053,7 +1182,12 @@ function SwitcherApp() {
             setSessions((prev: any[]) => {
               const updated = updateSessions(prev);
               const search = sessionSearchRef2.current;
-              return search.trim() ? filterSessionsLocally(updated, search) : updated;
+              // applySearchFilter, not filterSessionsLocally: the list being
+              // re-filtered here already contains deep-search hits, which
+              // matched on middle prompts that the local filter's haystack
+              // does not contain — running the local filter alone drops every
+              // prompt-only match the moment a closed-VS-Code scan lands.
+              return search.trim() ? applySearchFilter(updated, search) : updated;
             });
           });
         }, 300);
@@ -1636,39 +1770,81 @@ function SwitcherApp() {
               }}
             />
             <span style={{ color: THEME.text.secondary, fontSize: '12px', whiteSpace: 'nowrap' }}>
-              {sessions.length} sessions
+              {/* Scoped modes must report what is on screen — an unscoped
+                  count next to a pin-filtered list reads as a bug. */}
+              {pinnedOnlyActive ? displayedSessions.length : sessions.length} sessions
             </span>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
-            {sessions.length === 0 ? (
-              <div style={{ color: THEME.text.secondary, textAlign: 'center', padding: '20px 0' }}>
-                {sessionSearchValue ? '⚠️ No matching sessions found' : '🤖 No Claude Code sessions found'}
-              </div>
-            ) : (<>
-              {showPinnedZone && (
-                <div
+            {pinnedRows.length > 0 && (
+              <div style={PINNED_HEADER_STYLE}>
+                <span
                   role="button"
                   tabIndex={0}
-                  title="Click to collapse/expand · ⌘D pin/unpin · ⇧⌘D hide"
+                  title={
+                    canGroupPins
+                      ? 'Click to group pins at the top / leave them in time order · ⌘D pin/unpin · ⇧⌘D hide'
+                      : 'Grouping applies while browsing every session'
+                  }
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={togglePinnedCollapsed}
+                  onClick={canGroupPins ? togglePinnedCollapsed : undefined}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
+                    if (
+                      canGroupPins &&
+                      (e.key === 'Enter' || e.key === ' ')
+                    ) {
                       e.preventDefault();
                       togglePinnedCollapsed();
                     }
                   }}
-                  style={PINNED_HEADER_STYLE}
+                  style={{ cursor: canGroupPins ? 'pointer' : 'default' }}
                 >
-                  {pinnedCollapsed ? '▸' : '▾'} 📌 Pinned ({pinnedRows.length})
-                </div>
-              )}
+                  {canGroupPins ? (pinnedCollapsed ? '▸ ' : '▾ ') : ''}📌 Pinned ({pinnedRows.length})
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={pinnedOnlyActive}
+                  title={
+                    pinnedOnlyActive
+                      ? 'Show every session again'
+                      : 'Show — and search — pinned sessions only'
+                  }
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={togglePinnedOnly}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      togglePinnedOnly();
+                    }
+                  }}
+                  style={
+                    pinnedOnlyActive
+                      ? PINNED_ONLY_CHIP_ACTIVE_STYLE
+                      : PINNED_ONLY_CHIP_STYLE
+                  }
+                >
+                  only
+                </span>
+              </div>
+            )}
+            {displayedSessions.length === 0 && minorSessions.length === 0 ? (
+              <div style={{ color: THEME.text.secondary, textAlign: 'center', padding: '20px 0' }}>
+                {pinnedOnlyActive
+                  ? '⚠️ No pinned session matches — click "only" above to leave pinned-only'
+                  : sessionSearchValue
+                    ? '⚠️ No matching sessions found'
+                    : '🤖 No Claude Code sessions found'}
+              </div>
+            ) : (<>
               {displayedSessions.map((session, index) => (
                 <Fragment key={`${session.__pinnedRow ? 'pin:' : ''}${session.sessionId}`}>
                 {visiblePinnedRows.length > 0 && index === visiblePinnedRows.length && (
                   <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 2px 3px' }} />
                 )}
-                {minorsExpanded && minorSessions.length > 0 && index === visiblePinnedRows.length + majorSessions.length && (
+                {minorsExpanded &&
+                  minorSessions.length > 0 &&
+                  index === minorFoldHeaderIndex && (
                   <div
                     role="button"
                     tabIndex={0}

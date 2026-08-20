@@ -128,13 +128,77 @@ export const withoutHidden = (
 
 const MARKS_FILENAME = 'session-marks.json';
 
-export const readMarksFile = (filePath: string): SessionMarks => {
+/**
+ * A read plus whether its result is authoritative.
+ *
+ * `known: false` means the pin set is UNKNOWN, not empty. Callers that act on
+ * emptiness — clearing a stored browse preference, broadcasting a change —
+ * must not act on an unknown read, or a transient filesystem failure destroys
+ * user state that is still perfectly intact on disk.
+ */
+export interface MarksRead {
+  marks: SessionMarks;
+  known: boolean;
+}
+
+/** The only store version this build understands. */
+const SUPPORTED_VERSION = 1;
+
+/** Stable JSON — object keys sorted, so key ORDER can never fake a difference. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, val) =>
+    val && typeof val === 'object' && !Array.isArray(val)
+      ? Object.fromEntries(
+          Object.entries(val as Record<string, unknown>).sort(([x], [y]) =>
+            x < y ? -1 : x > y ? 1 : 0,
+          ),
+        )
+      : val,
+  );
+
+/**
+ * Is a parsed value a store we may treat as AUTHORITATIVE?
+ *
+ * `normalizeMarks` is forgiving by design — it coerces anything into valid v1
+ * marks so a partly-corrupt store still renders. That is right for display and
+ * wrong for authority: whatever it changes would be written back for real by
+ * the next read-modify-write, erasing the original.
+ *
+ * So the invariant is simply **normalization must be a no-op**. Earlier
+ * versions of this check enumerated the ways normalization can differ — the
+ * envelope, then dropped entries, then coerced fields, then unknown top-level
+ * keys — and each round of review found one more that the enumeration missed,
+ * because "all the ways a forgiving function can be forgiving" is not a list
+ * anyone can finish. Comparing the whole normalized result against the input
+ * has no narrower case left to miss, and it tracks `normalizeMarks`
+ * automatically instead of restating its rules beside it.
+ *
+ * Deliberately strict: a store this build would rewrite in ANY way — including
+ * one carrying a field a future version added, or a bare `{}` — is refused
+ * rather than silently rewritten. Refusing costs a lost pin action; rewriting
+ * costs the user's data.
+ */
+export const isAuthoritativeRead = (
+  raw: unknown,
+  marks: SessionMarks,
+): boolean => canonical(raw) === canonical(marks);
+
+export const readMarksFileResult = (filePath: string): MarksRead => {
   try {
-    return normalizeMarks(JSON.parse(fs.readFileSync(filePath, 'utf-8')));
-  } catch {
-    return emptyMarks();
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    const marks = normalizeMarks(raw);
+    return { marks, known: isAuthoritativeRead(raw, marks) };
+  } catch (err) {
+    // A missing file IS authoritative: no store yet means no marks yet, which
+    // is simply the first run. Anything else — permissions, IO, malformed
+    // JSON — leaves the real contents unknown.
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    return { marks: emptyMarks(), known: code === 'ENOENT' };
   }
 };
+
+export const readMarksFile = (filePath: string): SessionMarks =>
+  readMarksFileResult(filePath).marks;
 
 export const writeMarksFile = (filePath: string, marks: SessionMarks): void => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -149,6 +213,39 @@ const defaultMarksPath = (): string =>
 
 export const readSessionMarks = (): SessionMarks =>
   readMarksFile(defaultMarksPath());
+
+export const readSessionMarksResult = (): MarksRead =>
+  readMarksFileResult(defaultMarksPath());
+
+/**
+ * Read-modify-write that REFUSES to write when the store could not be read.
+ *
+ * Every mutation here is read-modify-write over the whole file, so a read that
+ * silently degrades to empty marks turns the next pin or hide into a full
+ * overwrite: one keystroke against an unreadable store would erase every other
+ * pin and hidden id on disk. A missing file is still fine — ENOENT is
+ * authoritative (see MarksRead), so the first-ever pin creates the store as
+ * usual.
+ *
+ * Returns the resulting marks with `known: true` when the write happened, or
+ * the unknown read (`known: false`) when it was refused and nothing was
+ * touched. Collapsing the four callers onto this one path is deliberate: four
+ * copies of read-modify-write are four chances to forget the guard.
+ */
+export const mutateMarksFile = (
+  filePath: string,
+  mutate: (marks: SessionMarks) => SessionMarks,
+): MarksRead => {
+  const read = readMarksFileResult(filePath);
+  if (!read.known) return read;
+  const next = mutate(read.marks);
+  writeMarksFile(filePath, next);
+  return { marks: next, known: true };
+};
+
+export const mutateSessionMarks = (
+  mutate: (marks: SessionMarks) => SessionMarks,
+): MarksRead => mutateMarksFile(defaultMarksPath(), mutate);
 
 export const writeSessionMarks = (marks: SessionMarks): void =>
   writeMarksFile(defaultMarksPath(), marks);
@@ -174,7 +271,13 @@ export const watchMarksFile = (
     if (changed && changed !== filename) return;
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      onChange(readMarksFile(filePath));
+      const read = readMarksFileResult(filePath);
+      // Never broadcast an unknown read. Announcing "the marks are now empty"
+      // because the file could not be parsed would push every listener into
+      // acting on state that is still intact on disk; staying silent leaves
+      // them on the last thing actually seen.
+      if (!read.known) return;
+      onChange(read.marks);
     }, 50);
   });
 

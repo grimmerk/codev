@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.85
+
+- Feat: three ways to browse pinned sessions, from the same `📌 Pinned (N)` header
+  - **Pinned zone now sorts by recency** like every other list (it used to sort by when you pinned, which buried the session you touched five minutes ago beneath months-old pins)
+  - **Collapsing the zone now ungroups instead of hiding**: pinned sessions fall back to their normal chronological position, still marked ★ — that gives you a pure "everything in time order" list, and no browsing state can make a pinned session invisible any more
+  - **New `only` toggle** on the right of the header: show — and search — pinned sessions only
+  - A pinned session is never folded away into the "minor sessions" group, and pins older than the loaded list stay visible in every mode
+  - Searching now also matches the title / branch / PR link of pinned sessions older than the loaded list — previously such a pin was visible while browsing but reported as "no match" the moment you searched for its name
+  - The `N sessions` count next to the search box reports the scoped total while `only` is on, instead of the unfiltered one
+
 ## 1.0.84
 
 - Feat: session pins & manual hide — session-finding Batch 1 PR-2 (plan: `docs/session-finding-plan.md` §4.4)
