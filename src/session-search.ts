@@ -75,6 +75,10 @@ export const isMinorSession = (
   typeof session.messageCount === 'number' &&
   session.messageCount <= 2;
 
+/** Escape a user-typed word so it can be matched as a literal. */
+const escapeForRegExp = (word: string): string =>
+  word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Shorten from the MIDDLE, keeping both ends: `head … tail`.
  *
@@ -122,18 +126,28 @@ export const windowAroundMatch = (
 ): string => {
   if (text.length <= max) return text;
 
-  const lower = text.toLowerCase();
+  // Search the ORIGINAL string case-insensitively rather than lowercasing it
+  // first: `toLowerCase()` can change length (U+0130 'İ' becomes two code
+  // units), so an index taken in the lowercased copy does not address the same
+  // character in the source, and slicing by it can shear the first matched
+  // character off the window.
   let at = -1;
   let hit = '';
   for (const w of wordsLower) {
     if (!w) continue;
-    const i = lower.indexOf(w);
-    if (i !== -1 && (at === -1 || i < at)) {
-      at = i;
-      hit = w;
+    const found = new RegExp(escapeForRegExp(w), 'i').exec(text);
+    if (found && (at === -1 || found.index < at)) {
+      at = found.index;
+      // The source match, not the query word: its length in the original text
+      // is what the window has to make room for.
+      hit = found[0];
     }
   }
   if (at === -1) return fallback(text, max);
+
+  // No useful window exists in one or two characters, and building one would
+  // spend the whole budget on ellipses; the fallback already honours the cap.
+  if (max <= 2) return fallback(text, max);
 
   // ASK the fallback whether the match is already on screen rather than
   // modelling where it keeps characters. An earlier version assumed a head
@@ -141,7 +155,7 @@ export const windowAroundMatch = (
   // match at index 40 of a 60-char budget was declared visible and then landed
   // in the elided middle — the one thing this helper promises cannot happen.
   const plain = fallback(text, max);
-  if (plain.toLowerCase().includes(hit)) return plain;
+  if (plain.toLowerCase().includes(hit.toLowerCase())) return plain;
 
   // Every ellipsis rendered counts against `max`, or a "capped" line silently
   // overruns the space the row reserved for it.

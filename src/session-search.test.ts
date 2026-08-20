@@ -224,6 +224,29 @@ describe('windowAroundMatch', () => {
     // match begins, which is the part that tells you why the row is here.
     expect(out.replace(/…/g, '').startsWith('w')).toBe(true);
   });
+  // toLowerCase() can CHANGE LENGTH — 'İ' becomes two code units — so an index
+  // taken in a lowercased copy does not address the same character in the
+  // source. Slicing by it shears the first matched character off the window.
+  it('keeps source offsets when case folding changes length', () => {
+    const text = `${'İ'.repeat(40)}${'a'.repeat(120)}NEEDLE${'b'.repeat(120)}`;
+    const out = windowAroundMatch(text, ['needle'], 60);
+    expect(out).toContain('NEEDLE');
+    expect(out.length).toBeLessThanOrEqual(60);
+  });
+
+  it('treats a query word as literal text, not a pattern', () => {
+    const text = `${'a'.repeat(200)}a+b(c)${'d'.repeat(200)}`;
+    expect(windowAroundMatch(text, ['a+b(c)'], 60)).toContain('a+b(c)');
+  });
+
+  it('honours a budget too small for any window', () => {
+    const text = `${'a'.repeat(200)}NEEDLE${'b'.repeat(200)}`;
+    for (const max of [0, 1, 2]) {
+      expect(
+        windowAroundMatch(text, ['needle'], max).length,
+      ).toBeLessThanOrEqual(max);
+    }
+  });
 });
 
 describe('truncateMiddle lower boundary', () => {
