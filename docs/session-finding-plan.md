@@ -10,7 +10,11 @@
 > measurements that justify each.
 > **2026-09-05**: a live experiment on `/branch` (§4.7, issue #142) falsified two claims in
 > this document — §4.4's "forking is an edge case" and §6's "C3 chain collapse is defunct".
-> Both are corrected in place. Open roadmap and grouping: the tracking issue linked from #142.
+> Both are corrected in place.
+> **Order, priority and "is this done" live in tracking issue #144, not in this file** — a
+> committed document cannot be corrected without a PR, so status written here goes stale
+> and has done so before. This file holds the reasoning: why A precedes B, how a mechanism
+> works, why an option was rejected.
 > This document is the cross-session / cross-model implementation reference: every "decision"
 > below was confirmed point-by-point with the user — do not re-open decided options;
 > implementation details (§4–§6) may adapt to what you find.
