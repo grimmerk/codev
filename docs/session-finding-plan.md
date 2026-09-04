@@ -4,9 +4,17 @@
 > PR-1 "search & noise" (§4.1–§4.3: B2 highlight + A1/B1 full search + C1 folding) = **PR #132 (merged)**;
 > PR-2 "pins" (§4.4 D1, incl. C1's manual hide) = **PR #136 (merged)**, plus a browse-modes
 > follow-up (§4.4: recency ordering · ungroup · pinned-only scope).
+> Row readability (§4.5) = **PR #139 (merged)**.
 > **Live review 2026-08-20** re-measured the remaining pain and produced a follow-up queue —
-> row readability (§4.5), PR-reference canonicalization (§4.6), a frecency list (§6) — recorded
-> below with the measurements that justify each.
+> PR-reference canonicalization (§4.6), a frecency list (§6) — recorded below with the
+> measurements that justify each.
+> **2026-09-05**: a live experiment on `/branch` (§4.7, issue #142) falsified two claims in
+> this document — §4.4's "forking is an edge case" and §6's "C3 chain collapse is defunct".
+> Both are corrected in place.
+> **Order, priority and "is this done" live in tracking issue #144, not in this file** — a
+> committed document cannot be corrected without a PR, so status written here goes stale
+> and has done so before. This file holds the reasoning: why A precedes B, how a mechanism
+> works, why an option was rejected.
 > This document is the cross-session / cross-model implementation reference: every "decision"
 > below was confirmed point-by-point with the user — do not re-open decided options;
 > implementation details (§4–§6) may adapt to what you find.
@@ -171,8 +179,12 @@ proposal, which is kept below as the rejected-options record):
   (help text: "When resuming, create a new session ID **instead of reusing the original**").
   Matches the user's daily observation (msgs count accumulating on one row across resumes).
 - ⇒ **Keying pins by sessionId is enough**; normal resumes need no migration machinery.
-- Edge cases (v1 ignores them; re-pin manually if hit): explicit `--fork-session`,
-  cross-account copy-fork (issue #128).
+- ⚠️ **This next line was wrong and is kept only to mark the correction.** It read:
+  *"Edge cases (v1 ignores them; re-pin manually if hit): explicit `--fork-session`,
+  cross-account copy-fork."* The premise — that forking is rare — is false: `/branch`
+  produces a new sessionId on every use and accounts for 23.9% of transcripts. Pins
+  therefore drift routinely, which was confirmed against the live marks file. See §4.7
+  and issue #142; cross-account copy-fork remains issue #128.
 
 ### 4.5 Row readability: a matched row must show *why* it matched (2026-08-20 review)
 
@@ -268,6 +280,52 @@ in the PR.
 Free follow-on: the same parser gives the §6 `B4` filters (`is:pinned`, `has:pr`, `pr:1598`,
 `project:`, `branch:`, `after:`).
 
+### 4.7 `/branch` creates generation chains (measured 2026-09-05)
+
+Full evidence and task breakdown: **issue #142**. Recorded here because two claims in
+this document were built on the opposite assumption (§4.4 and §6's C3 row, both now
+corrected).
+
+**What `/branch` does.** It copies the transcript to a **new sessionId** and lets the
+**same process** keep writing to the new file — verified end to end: pid unchanged,
+`sessions/<pid>.json` updated in place, parent transcript left intact and resumable.
+Claude Code records the link itself on every copied line:
+
+```json
+"forkedFrom": { "sessionId": "<parent>", "messageUuid": "<branch point>" }
+```
+
+A root transcript has zero such lines, so a single extra grep pattern in the enrichment
+scan yields an exact child → parent map. No heuristics.
+
+**The part that breaks CodeV: the transcript is copied, `history.jsonl` is not.** The
+child's pre-branch prompts exist only in the transcript, while the session list is built
+from `history.jsonl`. Four consequences:
+
+1. **Deep search cannot see them** — searching for anything said before the branch finds
+   the *parent*, never the child.
+2. **`messageCount` is wrong** — a child carrying a whole conversation renders as "1 msgs".
+3. **Pins do not follow** — confirmed in the live `session-marks.json`.
+4. **Ordering** — resuming a parent lifts it above the child that continues the work.
+
+**The sharper problem is identity, not the chain.** `/branch` moves you *into* the new
+session, so the new name lands on the work you are continuing — the wrong way round. The
+workaround in daily use is a three-step rename swap, done because `/branch` carries
+in-flight subagents into the child, so the unfinished task genuinely continues there and
+the name follows the work. Names are therefore **deliberately reused across generations**;
+three live sessions with byte-identical names were observed at once. That also breaks
+iTerm2 switching, which matches on tab title — all three rows switch to the same terminal.
+
+⇒ The missing abstraction is **stable task identity across sessionIds**. The rename dance
+is a manual substitute for it, and pin drift, search pointing at ancestors, and
+indistinguishable rows are all the same gap surfacing in different places. Design that
+before building the individual fixes.
+
+**Method note.** `~/cc-session-snap.sh` captures sessionId / pid registration / transcript
+listing / `history.jsonl` tail; run it either side of an action and diff. It is what turned
+"resume sometimes seems confused" into the numbers above, and it applies to any future
+question about session identity (`/fork` is the open one — see #142's comment).
+
 ## 5. Batch 2 — structural investments
 
 ### 5.1 C4: preview / detail (v1 card → v2 pane)
@@ -322,7 +380,7 @@ Free follow-on: the same parser gives the §6 `B4` filters (`is:pinned`, `has:pr
 | B4 filters | `project:` `branch:` `account:` `has:pr` `msgs:>10` `after:` `is:pinned` chips | **Promoted** (2026-08-20): the §4.6 term parser does most of the work, and `is:pinned` overlaps the pinned-only scope |
 | D4 "Frequent" list | A frecency scope (`distinct active days × log(1+prompts) × exp(-age/14d)`) alongside the pinned scope. **Derive it from `history.jsonl`, which is already loaded** — no click instrumentation, so no weeks-long cold start | **Measured 2026-08-20, and the numbers argue for modest expectations**: only 3 of the frecency top-10 are outside the recency top-20, so most of it is a re-ordering of rows you can already see. It does **not** subsume pins — of the user's 7 real pins, 3 rank in the frecency top-10 but three others rank #26/#63/#72, because a pin is often exactly the *low*-activity session you refuse to lose. The two intents are complementary: frecency = "I keep coming back", pin = "I decided this matters" |
 | A4-lite | "Generate title" button in the preview (haiku, writes a custom title) | No batch auto-summarizing |
-| C3 chain collapse | **Essentially defunct** (2026-07-12): normal resumes reuse the sessionId (§4.4) — no generation chains exist; only meaningful if `--fork-session` / copy-fork become common | Kept for the record |
+| C3 chain collapse | **Live, not defunct — this entry was wrong.** It said generation chains do not exist because normal resumes reuse the sessionId. `/branch` also creates one, and it is a daily action: **21 of 88 transcripts on disk (23.9%) carry `forkedFrom`** (measured 2026-09-05, §4.7). | Tracked in issue #142 |
 
 ## 7. Key technical facts (gotchas — read before implementing)
 
