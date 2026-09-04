@@ -89,6 +89,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getSessionsByIds: (ids: string[]) => ipcRenderer.invoke('get-sessions-by-ids', ids),
 
+  // Saved session lists (issue #145) + live processes (issue #94)
+  getSessionLists: () => ipcRenderer.invoke('get-session-lists'),
+  saveSessionList: (name: string, members: any[]) =>
+    ipcRenderer.invoke('save-session-list', name, members),
+  deleteSessionList: (id: string) => ipcRenderer.invoke('delete-session-list', id),
+  renameSessionList: (id: string, name: string) =>
+    ipcRenderer.invoke('rename-session-list', id, name),
+  onSessionListsUpdated: (callback: any) => {
+    ipcRenderer.on('session-lists-updated', callback);
+    return () => ipcRenderer.removeListener('session-lists-updated', callback);
+  },
+  getLiveSessions: () => ipcRenderer.invoke('get-live-sessions'),
+
   // Claude Code session APIs
   getClaudeSessions: (limit?: number) => ipcRenderer.invoke('get-claude-sessions', limit),
   searchClaudeSessions: (query: string) => ipcRenderer.invoke('search-claude-sessions', query),

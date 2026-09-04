@@ -326,6 +326,64 @@ listing / `history.jsonl` tail; run it either side of an action and diff. It is 
 "resume sometimes seems confused" into the numbers above, and it applies to any future
 question about session identity (`/fork` is the open one — see #142's comment).
 
+### 4.8 Saved session lists + the live view (issues #145, #94)
+
+Status and open questions live in **#144**; the reasoning is here.
+
+**The model is Session Buddy, not favourites.** Pins (§4.4) are "this matters long-term";
+a saved list is "this is what I had open on Tuesday" — a named snapshot of the running
+set, put down so the windows can be closed and picked up later. The two are different
+things and both stay.
+
+**Why the live view is a prerequisite, not a nicety.** "Save what is open" needs a correct
+answer to "what is open", and `~/.claude/sessions/<pid>.json` alone does not give one:
+measured 2026-09-05 across 33 real sessions, one was running with no registration and
+one was registered with a dead process. Saving from the registrations would omit a
+session and store a ghost. So the live report joins `ps` (ground truth for "running";
+knows nothing about sessions) against the registrations (knows the session; can be stale
+or missing), and a process with no registration is shown as its own row marked
+`⚠ unregistered`. The join is what makes the count trustworthy; the same measurement also
+showed that four of five "unregistered claude processes" were the daemon and its pty
+helpers, which is why the filter is "session process **and** (registered **or** attached to
+a tty)" rather than "any `claude` binary".
+
+**Why it lives in the Sessions tab as scopes, not as a new tab.** Row rendering, search,
+pins, status dots and resume-on-click all already live there; a separate screen would
+either duplicate them or force a refactor of the biggest file in the app. Vertical space
+is the scarce resource, so the two new entry points are chips in the search row (which has
+spare width), and a scope replaces the list rather than adding to it. Scopes rank: a list
+being viewed beats live, live beats pinned-only — encoded in `session-list-view.ts` so a
+stale flag can never blank the list.
+
+**What a member stores is the feature.** A list of bare sessionIds is useless for recall.
+Each member captures title, branch, pin state (a snapshot — never updated later), the last
+user and assistant messages, and the **recap** Claude Code writes into the transcript
+(`"type":"system","subtype":"away_summary"`), every text field capped so a 30-session list
+is a few tens of KB. The recap is preferred over the last assistant turn because it is
+written to answer exactly the question a snapshot answers, and it is reliable enough to
+lead with: 65 of 66 non-trivial sessions carry one (the misses are ≤29-line stubs that never
+reached the three turns it needs). It is not unconditional — it can be switched off in
+`/config`, needs the terminal to have been unfocused, and **never repeats back-to-back, so it
+can predate the session's last turn** — which is why the row shows the last message as a
+fallback and marks a recap `⏱` when it is more than 30 minutes older than the session's last
+activity: its final sentence is usually "next: …", and acting on a stale one is the failure
+mode.
+
+**Deliberately absent: "open all".** In a browser, restoring 22 tabs is cheap. Here, 22
+sessions is ~3GB of processes — the very problem the feature exists to relieve. Restore is
+per-row (the existing click-to-resume), and a whole-set restore, if it ever comes, has to
+show the projected cost first.
+
+**Drift across `/branch` is shared with pins.** A list stores sessionIds, so §4.7 applies
+unchanged: after a branch, the member points at the ancestor. That is one more consumer of
+the stable-task-identity decision in #142 (C1), and an argument for making it rather than
+routing around it.
+
+**Store.** `~/.config/codev/session-lists.json`, beside the marks store, on the same
+authoritative-read / atomic-write / directory-watch machinery — extracted into
+`src/atomic-json-store.ts` so the read-authority invariant PR #137 spent four rounds on has
+exactly one implementation.
+
 ## 5. Batch 2 — structural investments
 
 ### 5.1 C4: preview / detail (v1 card → v2 pane)
@@ -367,8 +425,11 @@ question about session identity (`/fork` is the open one — see #142's comment)
 - Multi-account: one DB with an `account` column; scan sources via the existing
   `getScannableAccounts()`.
 - Duplicate-content note: normal resumes append to the same file (§4.4) — no cross-file
-  duplication; only explicit `--fork-session` creates ancestor/descendant double-matches —
-  rare, v1 ignores.
+  duplication. **But `/branch` copies the transcript into a new file on every use, and it is
+  a daily action (23.9% of transcripts, §4.7)** — so ancestor/descendant double-matches are
+  common, not rare, and an index must dedupe them. The copied lines carry `forkedFrom`, so
+  "skip lines whose `forkedFrom.sessionId` is already indexed" is exact. (This note used to
+  say only `--fork-session` creates duplicates; that was wrong.)
 - Expired sessions (transcript already cleaned up): the index keeps the text → results get an
   "expired" badge (readable, not resumable).
 
@@ -397,10 +458,12 @@ question about session identity (`/fork` is the open one — see #142's comment)
    the same file (fact 4) → titles persist naturally; pins keyed by sessionId persist the
    same way.
 4. **Resume semantics (verified on 2.1.207 via `--help`)**: `--resume` / `--continue`
-   **reuse the sessionId and continue the same file by default**; only `--fork-session`
-   creates a new id/file. ⚠️ Old Claude Code versions forked by default — stale web posts and
-   old experience still claim that; don't trust them (this plan's first draft got it wrong
-   until the user challenged it).
+   **reuse the sessionId and continue the same file by default**; `--fork-session` creates a
+   new id/file, **and so does `/branch`** — the same process keeps writing to a copied
+   transcript under a new id (§4.7, measured on 2.1.260). ⚠️ Old Claude Code versions forked
+   by default — stale web posts and old experience still claim that; don't trust them (this
+   plan's first draft got it wrong until the user challenged it). Anything about `/fork` must
+   carry a version: its meaning changed at 2.1.161 and again at 2.1.212 (issue #142).
 5. **history.jsonl: one line = one complete user prompt** (`display` untruncated, longest
    measured 9,224 chars); a session spans many lines; the accumulator keeps first/last and,
    since PR #132, all prompts in a main-side map.

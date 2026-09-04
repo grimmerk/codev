@@ -13,6 +13,28 @@ interface CodevAccountInfo {
   loggedIn?: boolean;
 }
 
+/** One captured member of a saved session list (see src/session-lists.ts). */
+interface SessionListMemberRecord {
+  sessionId: string;
+  project: string;
+  projectName: string;
+  accountLabel?: string;
+  title?: string;
+  branch?: string;
+  pinned: boolean;
+  lastTimestamp: number;
+  recap?: { text: string; at: string };
+  lastUserMessage?: string;
+  lastAssistantMessage?: string;
+}
+
+interface SessionListRecord {
+  id: string;
+  name: string;
+  createdAt: string;
+  members: SessionListMemberRecord[];
+}
+
 interface IElectronAPI {
   // App actions
   getHomeDir: () => Promise<string>;
@@ -149,6 +171,42 @@ interface IElectronAPI {
   onSessionMarksUpdated: (callback: IpcCallback) => () => void;
   getSessionsByIds: (ids: string[]) => Promise<any[]>;
 
+  // Saved session lists (issue #145)
+  getSessionLists: () => Promise<{
+    version: number;
+    lists: SessionListRecord[];
+    /** False when the store exists but could not be read — the lists are unknown, not empty. */
+    known: boolean;
+  }>;
+  saveSessionList: (
+    name: string,
+    members: SessionListMemberRecord[],
+  ) => Promise<{ ok: boolean; error?: string; lists?: { lists: SessionListRecord[] }; list?: SessionListRecord }>;
+  deleteSessionList: (id: string) => Promise<{ ok: boolean; error?: string; lists?: { lists: SessionListRecord[] } }>;
+  renameSessionList: (
+    id: string,
+    name: string,
+  ) => Promise<{ ok: boolean; error?: string; lists?: { lists: SessionListRecord[] } }>;
+  onSessionListsUpdated: (callback: IpcCallback) => () => void;
+
+  // Live claude processes (issue #94)
+  getLiveSessions: () => Promise<{
+    live: {
+      pid: number;
+      sessionId: string | null;
+      cwd: string | null;
+      rssKb: number;
+      tty: string | null;
+      uptimeSec: number;
+      registered: boolean;
+      entrypoint?: string;
+      accountLabel?: string;
+    }[];
+    staleRegistrations: { pid: number; sessionId: string; cwd: string }[];
+    totalRssKb: number;
+    measuredAt: number;
+  }>;
+
   // Claude Code sessions
   getClaudeSessions: (limit?: number) => Promise<any>;
   searchClaudeSessions: (query: string) => Promise<{
@@ -170,7 +228,13 @@ interface IElectronAPI {
   launchNewClaudeSession: (projectPath: string, accountLabel?: string) => void;
   launchNewClaudeSessionInCodev: (projectPath: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;
-  loadSessionEnrichment: (sessions: any[]) => Promise<{ titles: Record<string, string>; branches: Record<string, string>; prLinks: Record<string, { prNumber: number; prUrl: string }> }>;
+  loadSessionEnrichment: (sessions: any[]) => Promise<{
+    titles: Record<string, string>;
+    branches: Record<string, string>;
+    prLinks: Record<string, { prNumber: number; prUrl: string }>;
+    /** The transcript's `away_summary` recap line, when the session has one. */
+    recaps: Record<string, { text: string; at: string }>;
+  }>;
   loadLastAssistantResponses: (sessions: any[]) => Promise<Record<string, string>>;
   loadProjectBranches: (paths: string[]) => Promise<Record<string, string>>;
   detectActiveIDEProjects: () => Promise<string[]>;

@@ -8,18 +8,27 @@
  * it is exactly where the bugs have been (PR #136 needed five rounds of live
  * testing, all of them list/index interactions).
  *
- * The three browse states are independent, which is what makes the matrix
- * worth testing rather than eyeballing:
+ * The browse states are independent, which is what makes the matrix worth
+ * testing rather than eyeballing:
  *
  * - `isSearching`  — search shows everything, ungrouped.
  * - `pinnedOnly`   — scope: non-pinned rows drop out, search included.
  * - `pinnedCollapsed` — grouping: collapsed UNGROUPS (pins fall back to their
  *   chronological slot with a ★) rather than hiding, so no combination of
  *   states can make a pinned session invisible.
+ * - `liveOnly`     — scope: only sessions with a running process (issue #94),
+ *   plus rows for running processes no session explains.
+ * - `viewingList`  — scope: the members of one saved list (issue #145), in the
+ *   order they were captured, resolved to live rows where possible.
+ *
+ * Scopes are exclusive and ranked: a saved list beats live, live beats pins.
+ * The renderer turns the others off when it turns one on; ranking here is
+ * what keeps a stale flag from ever blanking the list.
  *
  * Used by: `switcher-ui.tsx`.
  */
 
+import type { SessionList, SessionListMember } from './session-lists';
 import { isMinorSession } from './session-search';
 
 /**
@@ -44,6 +53,10 @@ export interface ListViewSession {
   /** Set on rows lifted out of the pin store (zone rows and placeholders). */
   __pinnedRow?: boolean;
   __pinnedAt?: string;
+  /** Set on rows lifted out of a saved list: what was captured about them. */
+  __listMember?: SessionListMember;
+  /** A running `claude` process that no session row explains (live scope only). */
+  __liveOrphan?: boolean;
   [key: string]: unknown;
 }
 
@@ -51,6 +64,15 @@ export interface PinRecord {
   pinnedAt?: string;
   cwd?: string;
   accountLabel?: string;
+}
+
+/** Process facts for one running session, keyed by sessionId in the renderer. */
+export interface LiveRowInfo {
+  pid: number;
+  rssKb: number;
+  tty: string | null;
+  uptimeSec: number;
+  registered: boolean;
 }
 
 export interface BuildListViewArgs {
@@ -73,6 +95,16 @@ export interface BuildListViewArgs {
   minorsExpanded: boolean;
   /** Folding waits for the first active-session detection (never fold a just-started session). */
   activeDetectionReady: boolean;
+  /** Live scope (issue #94). Optional so existing callers and tests need no change. */
+  liveOnly?: boolean;
+  /** sessionId -> process facts, from the live-sessions report. */
+  liveBySession?: Record<string, LiveRowInfo>;
+  /** Rows synthesized for running processes with no session (`__liveOrphan`). */
+  liveOrphans?: ListViewSession[];
+  /** Saved-list scope (issue #145). */
+  viewingList?: SessionList | null;
+  /** List members resolved by id because they fall outside `allSessions`. */
+  extraListSessions?: ListViewSession[];
 }
 
 export interface ListView {
@@ -89,8 +121,10 @@ export interface ListView {
   /** How many folded rows got there by an explicit hide rather than the junk predicate. */
   hiddenMinorCount: number;
   pinnedOnlyActive: boolean;
+  liveOnlyActive: boolean;
+  listViewActive: boolean;
   groupPinned: boolean;
-  /** Grouping is meaningless while searching or scoped to pins — the header hides its arrow. */
+  /** Grouping is meaningless while searching or inside any scope — the header hides its arrow. */
   canGroupPins: boolean;
 }
 
@@ -148,6 +182,36 @@ const resolvePinnedRow = (
   };
 };
 
+/**
+ * Resolve one saved-list member to a real row, or synthesize one from what
+ * was captured. Unlike a pin placeholder this one is rich: the list stored
+ * the project, the last messages and the recap precisely so a member whose
+ * transcript is gone still reads as the session it was.
+ */
+const resolveMemberRow = (
+  member: SessionListMember,
+  byId: Map<string, ListViewSession>,
+  activePids: Record<string, number>,
+): ListViewSession => {
+  const s = byId.get(member.sessionId) ?? {
+    sessionId: member.sessionId,
+    project: member.project,
+    projectName: member.projectName,
+    firstUserMessage: '',
+    lastUserMessage: member.lastUserMessage || '',
+    lastTimestamp: member.lastTimestamp,
+    messageCount: undefined,
+    isActive: false,
+    accountLabel: member.accountLabel,
+  };
+  return {
+    ...s,
+    __listMember: member,
+    isActive: s.sessionId in activePids || s.isActive,
+    activePid: activePids[s.sessionId] ?? s.activePid,
+  };
+};
+
 export const buildSessionListView = ({
   sessions,
   allSessions,
@@ -162,12 +226,23 @@ export const buildSessionListView = ({
   pinnedCollapsed,
   minorsExpanded,
   activeDetectionReady,
+  liveOnly = false,
+  liveBySession = {},
+  liveOrphans = [],
+  viewingList = null,
+  extraListSessions = [],
 }: BuildListViewArgs): ListView => {
   const hiddenSet = new Set(hidden);
   const hasPins = Object.keys(pins).length > 0;
-  const pinnedOnlyActive = pinnedOnly && hasPins;
-  const groupPinned = !isSearching && !pinnedOnlyActive && !pinnedCollapsed;
-  const canGroupPins = !isSearching && !pinnedOnlyActive;
+  const listViewActive = !!viewingList;
+  const liveOnlyActive = !listViewActive && liveOnly;
+  const pinnedOnlyActive =
+    !listViewActive && !liveOnlyActive && pinnedOnly && hasPins;
+  const inScope = listViewActive || liveOnlyActive || pinnedOnlyActive;
+  const groupPinned = !isSearching && !inScope && !pinnedCollapsed;
+  const canGroupPins = !isSearching && !inScope;
+  const isLive = (s: ListViewSession) =>
+    !!s.isActive || s.sessionId in activePids || s.sessionId in liveBySession;
 
   // C1: fold minor (junk) sessions while browsing; searching shows everything.
   // Minors keep their recency order but render below the fold row at the end.
@@ -177,11 +252,15 @@ export const buildSessionListView = ({
   for (const s of sessions) {
     const isPinned = !!pins[s.sessionId];
     if (pinnedOnlyActive && !isPinned) continue;
+    if (liveOnlyActive && !isLive(s)) continue;
     // Lifted into the zone — no second copy in the timeline (user verdict:
     // the duplicate was more noise than signal).
     if (groupPinned && isPinned) continue;
     const minor =
       !isSearching &&
+      // A running session is never junk, whatever its stats say — and a
+      // scope that asked for running sessions must show every one of them.
+      !liveOnlyActive &&
       // An ungrouped pin must never fold into the minor group: pinning is an
       // explicit "keep this", and a pinned session can still be a short
       // untitled one that the junk predicate would happily fold away.
@@ -238,22 +317,44 @@ export const buildSessionListView = ({
   for (const s of majorSessions) timelineIds.add(s.sessionId);
   for (const s of minorSessions) timelineIds.add(s.sessionId);
   const ungroupedPins =
-    !groupPinned && !pinnedOnlyActive && !isSearching
+    !groupPinned && !inScope && !isSearching
       ? pinnedRows.filter((s) => !timelineIds.has(s.sessionId))
       : [];
   const timelineRows = [...majorSessions, ...ungroupedPins];
 
-  const displayedSessions =
-    pinnedOnlyActive && !isSearching
-      ? // Same reason: scope to the resolved pin set rather than filtering
-        // `sessions`, which would silently drop the out-of-window ones.
-        pinnedRows
-      : [
-          ...visiblePinnedRows,
-          ...(minorsExpanded
-            ? [...timelineRows, ...minorSessions]
-            : timelineRows),
-        ];
+  let displayedSessions: ListViewSession[];
+  if (listViewActive && viewingList) {
+    // Captured order, not recency: a list is a snapshot, and reshuffling it
+    // by activity would hide what it was a snapshot OF. Searching narrows to
+    // the members the query matched (the renderer widens its candidates with
+    // the by-id rows, same as pins) but keeps the captured order.
+    const byId = new Map<string, ListViewSession>();
+    for (const s of allSessions) byId.set(s.sessionId, s);
+    for (const s of extraListSessions) {
+      if (!byId.has(s.sessionId)) byId.set(s.sessionId, s);
+    }
+    const matched = isSearching
+      ? new Set(sessions.map((s) => s.sessionId))
+      : null;
+    displayedSessions = viewingList.members
+      .filter((m) => !matched || matched.has(m.sessionId))
+      .map((m) => resolveMemberRow(m, byId, activePids));
+  } else if (liveOnlyActive) {
+    // Orphans have nothing a query could match, so they step aside while
+    // searching rather than sitting under every result as noise.
+    displayedSessions = isSearching
+      ? majorSessions
+      : [...majorSessions, ...liveOrphans];
+  } else if (pinnedOnlyActive && !isSearching) {
+    // Same reason: scope to the resolved pin set rather than filtering
+    // `sessions`, which would silently drop the out-of-window ones.
+    displayedSessions = pinnedRows;
+  } else {
+    displayedSessions = [
+      ...visiblePinnedRows,
+      ...(minorsExpanded ? [...timelineRows, ...minorSessions] : timelineRows),
+    ];
+  }
 
   return {
     pinnedRows,
@@ -264,6 +365,8 @@ export const buildSessionListView = ({
     minorFoldHeaderIndex: visiblePinnedRows.length + timelineRows.length,
     hiddenMinorCount,
     pinnedOnlyActive,
+    liveOnlyActive,
+    listViewActive,
     groupPinned,
     canGroupPins,
   };

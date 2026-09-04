@@ -96,6 +96,7 @@ export const invalidateSessionCache = () => {
   cachedCustomTitles = null;
   cachedBranches = null;
   cachedPRLinks = null;
+  cachedRecaps = null;
   enrichedFileState.clear();
 };
 
@@ -1709,15 +1710,31 @@ export interface PRLinkInfo {
   prUrl: string;
 }
 
+/**
+ * The one-line "where we are, what's next" recap Claude Code writes into the
+ * transcript (`"type":"system","subtype":"away_summary"`) when you come back
+ * to an unfocused terminal. Measured 2026-09-05: 65 of 66 non-trivial
+ * sessions carry one; the misses are ≤29-line stubs that never reached the
+ * three turns it needs. It can be switched off in /config, so it is a
+ * primary source with a fallback, never the only one.
+ */
+export interface RecapInfo {
+  text: string;
+  /** ISO time it was written — a recap never repeats back-to-back, so it can lag the session's last turn. */
+  at: string;
+}
+
 export interface SessionEnrichment {
   titles: Map<string, string>;
   branches: Map<string, string>;
   prLinks: Map<string, PRLinkInfo>;
+  recaps: Map<string, RecapInfo>;
 }
 
-// Cache for branches and PR links
+// Cache for branches, PR links and recaps
 let cachedBranches: Map<string, string> | null = null;
 let cachedPRLinks: Map<string, PRLinkInfo> | null = null;
+let cachedRecaps: Map<string, RecapInfo> | null = null;
 
 // Per-file enrichment scan state: a transcript unchanged since its last scan
 // (same mtime+size) is never re-grepped — the stat check IS the freshness
@@ -1772,6 +1789,7 @@ export const loadSessionEnrichment = async (
   const titles = (cachedCustomTitles ??= new Map());
   const branches = (cachedBranches ??= new Map());
   const prLinks = (cachedPRLinks ??= new Map());
+  const recaps = (cachedRecaps ??= new Map());
 
   const { execFile } = require('child_process');
   // Shell-free (no interpolated paths anywhere near a shell). Resolves null
@@ -1838,11 +1856,12 @@ export const loadSessionEnrichment = async (
         // from an in-process tail read (~256KB reaches far beyond the old
         // 50-line window — an active session's tail is often tool output with
         // no gitBranch field: measured tail -5 hit 0, tail -20 hit 12).
-        const [titleOutput, aiTitleOutput, prLinkOutput, tailOutput] =
+        const [titleOutput, aiTitleOutput, prLinkOutput, recapOutput, tailOutput] =
           await Promise.all([
             grepFileP('"type":"custom-title"', jsonlPath),
             grepFileP('"type":"ai-title"', jsonlPath),
             grepFileP('"type":"pr-link"', jsonlPath),
+            grepFileP('"subtype":"away_summary"', jsonlPath),
             readTailUtf8(jsonlPath, 256 * 1024),
           ]);
 
@@ -1893,12 +1912,29 @@ export const loadSessionEnrichment = async (
           } catch {}
         }
 
+        if (recapOutput) {
+          try {
+            const parsed = JSON.parse(lastLine(recapOutput));
+            // The line ends with a UI hint that is not part of the summary.
+            const text = String(parsed.content || '')
+              .replace(/\s*\(disable recaps in \/config\)\s*$/, '')
+              .trim();
+            if (text) {
+              recaps.set(session.sessionId, {
+                text,
+                at: typeof parsed.timestamp === 'string' ? parsed.timestamp : '',
+              });
+            }
+          } catch {}
+        }
+
         // Mark fresh ONLY when every read succeeded — a timed-out or failed
         // pass stays unrecorded so the next call retries it.
         if (
           titleOutput !== null &&
           aiTitleOutput !== null &&
           prLinkOutput !== null &&
+          recapOutput !== null &&
           tailOutput !== null
         ) {
           enrichedFileState.set(session.sessionId, { mtimeMs, size });
@@ -1909,7 +1945,7 @@ export const loadSessionEnrichment = async (
 
   enrichmentQueue = enrichmentQueue.then(scan, scan);
   await enrichmentQueue;
-  return { titles, branches, prLinks };
+  return { titles, branches, prLinks, recaps };
 };
 
 /**

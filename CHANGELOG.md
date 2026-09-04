@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.87
+
+- Feat: saved session lists and a live-process view, on the Session Buddy model ([#145](https://github.com/grimmerk/codev/issues/145), [#94](https://github.com/grimmerk/codev/issues/94))
+  - **`● N live` chip** next to the search box scopes the list to sessions with a running process and shows each one's **memory, uptime and terminal** — the question "what is actually running and what is it costing" now has an answer in the app. Measured while building it: 36 `claude` processes held 4.66GB while the terminal app itself held 368MB
+  - The live view is built by joining `ps` against `~/.claude/sessions/`, not by trusting the registration files: a session that is running but never registered shows up marked **`⚠ unregistered`** (invisible to every other view), and a registration whose process is gone is counted as stale in the chip's tooltip instead of being shown as a ghost
+  - **`save list…`** captures what is on screen — the live set, the pinned set, or a search result — as a named list, stored in `~/.config/codev/session-lists.json`
+  - **`🗂 N` chip** shows the saved lists; click one to view its members in the order they were captured and resume any of them. A member whose transcript is gone still reads as the session it was, because the list stored its title, branch and last messages
+  - Each member carries the **recap line** Claude Code writes into the transcript (`away_summary` — "where we are, what's next"), shown on the row in place of the last reply. Measured: 65 of 66 non-trivial sessions have one. A recap that predates the session's last activity by more than 30 minutes is marked `⏱`, because its "next step" may already be done
+  - Deliberately absent: an "open all" button. Reopening 22 browser tabs is cheap; resuming 22 sessions is ~3GB of processes, which is the problem this feature exists to relieve
+  - Under the hood: the marks store and the new lists store share one atomic-JSON-store module (`src/atomic-json-store.ts`) — the read-authority invariant PR #137 spent four review rounds on now has exactly one implementation. 39 new unit tests (lists normalize / transitions / file roundtrip, `ps` parsing and the live join, list-view scopes) — 124 total
+
 ## 1.0.86
 
 - Feat: session rows are readable again when titles are long

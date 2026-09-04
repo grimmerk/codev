@@ -168,6 +168,132 @@ describe('buildSessionListView — invariants across the whole matrix', () => {
   });
 });
 
+describe('buildSessionListView — live scope', () => {
+  const active = {
+    sessionId: 'active',
+    lastTimestamp: 400,
+    messageCount: 3,
+    isActive: true,
+  };
+  const orphan = {
+    sessionId: 'pid:4242',
+    projectName: 'orphan',
+    lastTimestamp: 0,
+    __liveOrphan: true,
+  };
+
+  it('keeps only running sessions, appends orphans, and never folds a running one', () => {
+    const v = build({
+      // `junk` has 1 msg and no title — it would fold while browsing.
+      sessions: [recent, active, junk],
+      activePids: { junk: 77 },
+      liveOnly: true,
+      liveOrphans: [orphan],
+    });
+    expect(v.liveOnlyActive).toBe(true);
+    expect(ids(v.displayedSessions)).toEqual(['active', 'junk', 'pid:4242']);
+    expect(v.minorSessions).toEqual([]);
+    expect(v.canGroupPins).toBe(false);
+  });
+
+  it('recognises liveness from the live report, not only from the active map', () => {
+    const v = build({
+      sessions: [recent, middle],
+      liveOnly: true,
+      liveBySession: {
+        middle: {
+          pid: 1,
+          rssKb: 1,
+          tty: 'ttys001',
+          uptimeSec: 1,
+          registered: false,
+        },
+      },
+    });
+    expect(ids(v.displayedSessions)).toEqual(['middle']);
+  });
+
+  it('drops orphans while searching and outranks the pinned scope', () => {
+    const v = build({
+      sessions: [active, middle],
+      pins: { middle: at('2026-01-01T00:00:00Z') },
+      pinnedOnly: true,
+      liveOnly: true,
+      liveOrphans: [orphan],
+      isSearching: true,
+    });
+    expect(v.pinnedOnlyActive).toBe(false);
+    expect(ids(v.displayedSessions)).toEqual(['active']);
+  });
+});
+
+describe('buildSessionListView — saved-list scope', () => {
+  const memberOf = (sessionId: string, over: Record<string, unknown> = {}) => ({
+    sessionId,
+    project: '/p/' + sessionId,
+    projectName: sessionId + '-proj',
+    pinned: false,
+    lastTimestamp: 1,
+    ...over,
+  });
+  const list = {
+    id: 'L1',
+    name: 'tuesday',
+    createdAt: '2026-09-05T00:00:00Z',
+    // Captured order is deliberately NOT recency order.
+    members: [
+      memberOf('middle'),
+      memberOf('gone', { lastUserMessage: 'last words' }),
+      memberOf('old'),
+    ],
+  };
+
+  it('renders members in captured order, resolving rows from the list, the by-id fetch, or the capture itself', () => {
+    const v = build({
+      viewingList: list,
+      extraListSessions: [outOfWindowPin],
+    });
+    expect(v.listViewActive).toBe(true);
+    expect(ids(v.displayedSessions)).toEqual(['middle', 'gone', 'old']);
+    const [m, g, o] = v.displayedSessions;
+    expect(m.messageCount).toBe(20); // the loaded row
+    expect(o.messageCount).toBe(90); // the by-id row
+    // The placeholder carries what was captured, with no fake message count.
+    expect(g.messageCount).toBeUndefined();
+    expect(g.projectName).toBe('gone-proj');
+    expect(g.lastUserMessage).toBe('last words');
+    expect(g.__listMember?.sessionId).toBe('gone');
+  });
+
+  it('narrows to the matched members while searching but keeps captured order', () => {
+    const v = build({
+      viewingList: list,
+      sessions: [outOfWindowPin, middle], // as if the query matched these two
+      isSearching: true,
+    });
+    expect(ids(v.displayedSessions)).toEqual(['middle', 'old']);
+  });
+
+  it('outranks both the live and the pinned scope', () => {
+    const v = build({
+      viewingList: list,
+      liveOnly: true,
+      pinnedOnly: true,
+      pins: { recent: at('2026-01-01T00:00:00Z') },
+    });
+    expect(v.liveOnlyActive).toBe(false);
+    expect(v.pinnedOnlyActive).toBe(false);
+    expect(ids(v.displayedSessions)).toEqual(['middle', 'gone', 'old']);
+  });
+
+  it('marks a member as active from the active map even for a placeholder', () => {
+    const v = build({ viewingList: list, activePids: { gone: 99 } });
+    const g = v.displayedSessions.find((s) => s.sessionId === 'gone');
+    expect(g?.isActive).toBe(true);
+    expect(g?.activePid).toBe(99);
+  });
+});
+
 describe('mergeSessionsById', () => {
   it('appends only rows the primary list does not already have', () => {
     const merged = mergeSessionsById(

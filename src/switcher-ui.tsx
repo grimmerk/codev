@@ -5,11 +5,15 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
+import type { LiveRowInfo } from './session-list-view';
+import type { SessionList, SessionListMember } from './session-lists';
 import {
   buildSessionListView,
   ListViewSession,
   mergeSessionsById,
 } from './session-list-view';
+
+type LiveReport = Awaited<ReturnType<Window['electronAPI']['getLiveSessions']>>;
 import { truncateMiddle, windowAroundMatch } from './session-search';
 import TerminalTab from './terminal-tab';
 
@@ -74,6 +78,10 @@ const MINOR_FOLD_BAR_STYLE = {
   flexShrink: 0,
 } as const;
 
+// Referenced by style constants declared above THEME (which is defined later
+// in this file); the value is THEME.text.primary.
+const THEME_TEXT_PRIMARY = '#E9E9E9';
+
 // Header row of the pinned zone at the top of the Sessions list. It carries
 // two independent toggles on one line — the label groups/ungroups the zone,
 // the "only" chip scopes browsing and search to pins — so neither costs
@@ -103,6 +111,88 @@ const PINNED_ONLY_CHIP_ACTIVE_STYLE = {
   border: '1px solid #c9a227',
   color: '#1e1e1e',
   backgroundColor: '#c9a227',
+} as const;
+
+// Scope chips in the search row (issues #94 / #145). They sit beside the
+// session count because that row has spare width and the list has none —
+// every scope is one click away without costing a line.
+const SCOPE_CHIP_STYLE = {
+  fontSize: '10px',
+  borderRadius: '3px',
+  padding: '1px 6px',
+  cursor: 'pointer',
+  border: '1px solid #3f5f4a',
+  color: '#7ec87e',
+  backgroundColor: 'transparent',
+  whiteSpace: 'nowrap',
+} as const;
+
+const SCOPE_CHIP_ACTIVE_STYLE = {
+  ...SCOPE_CHIP_STYLE,
+  border: '1px solid #7ec87e',
+  color: '#1e1e1e',
+  backgroundColor: '#7ec87e',
+} as const;
+
+const LISTS_CHIP_STYLE = {
+  ...SCOPE_CHIP_STYLE,
+  border: '1px solid #4a6a8a',
+  color: '#9DC8E0',
+} as const;
+
+const LISTS_CHIP_ACTIVE_STYLE = {
+  ...LISTS_CHIP_STYLE,
+  border: '1px solid #9DC8E0',
+  color: '#1e1e1e',
+  backgroundColor: '#9DC8E0',
+} as const;
+
+// Header of the saved-lists zone and of a list being viewed. Same geometry as
+// the pinned header so the two zones read as siblings.
+const LISTS_HEADER_STYLE = {
+  ...PINNED_HEADER_STYLE,
+  color: '#9DC8E0',
+} as const;
+
+const LIST_ROW_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  padding: '4px 10px 4px 24px',
+  margin: '1px 0',
+  borderRadius: '3px',
+  cursor: 'pointer',
+  fontSize: '12px',
+  color: THEME_TEXT_PRIMARY,
+} as const;
+
+// Per-row process facts in the live scope: memory, uptime, terminal. Muted —
+// the row is still a session row first.
+const LIVE_INFO_STYLE = {
+  fontSize: '10px',
+  color: '#8fbc8f',
+  border: '1px solid #3f5f4a',
+  borderRadius: '3px',
+  padding: '1px 5px',
+  whiteSpace: 'nowrap',
+} as const;
+
+const LIVE_WARN_STYLE = {
+  ...LIVE_INFO_STYLE,
+  color: '#e0b060',
+  border: '1px solid #8a6a2a',
+} as const;
+
+// The recap line on a saved-list member. Its own marker, its own colour
+// family (the list blue), so it is never mistaken for the amber search
+// snippet or the grey message lines.
+const RECAP_MARKER_STYLE = {
+  color: '#1e1e1e',
+  backgroundColor: '#9DC8E0',
+  borderRadius: '2px',
+  padding: '0 4px',
+  fontSize: '10px',
+  fontWeight: 600,
 } as const;
 
 // Global styles for the switcher UI (moved from index.css)
@@ -361,6 +451,28 @@ const formatRelativeTime = (timestamp: number | string): string => {
   return `${days}d ago`;
 };
 
+/** `17d` / `2d13h` / `3h05m` / `12m` — how long a process has been up. */
+const formatUptime = (sec: number): string => {
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d >= 3) return `${d}d`;
+  if (d > 0) return `${d}d${h}h`;
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`;
+  return `${m}m`;
+};
+
+const formatMb = (kb: number): string => {
+  const mb = kb / 1024;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)}GB` : `${Math.round(mb)}MB`;
+};
+
+/** Default name for a saved list: the date, the way the user names them. */
+const defaultListName = (): string => {
+  const d = new Date();
+  return `${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+};
+
 /** Caution it will be invoked twice due to <React.StrictMode> !! */
 let loadTimes = 0;
 function SwitcherApp() {
@@ -493,6 +605,32 @@ function SwitcherApp() {
   // bitten by twice — see sessionSearchRef2).
   const extraPinnedSessionsRef = useRef<ListViewSession[]>([]);
   const extraPinnedKeyRef = useRef('');
+  // The transcript's recap line per session (enrichment), captured into lists.
+  const [recaps, setRecaps] = useState<Record<string, { text: string; at: string }>>({});
+  // Live scope (issue #94): only running sessions, with process facts. Not
+  // persisted — it describes this moment, not a preference.
+  const [liveOnly, setLiveOnly] = useState(false);
+  const liveOnlyRef = useRef(false);
+  const [liveReport, setLiveReport] = useState<LiveReport | null>(null);
+  // Saved session lists (issue #145), pushed from main via fs.watch.
+  const [sessionLists, setSessionLists] = useState<SessionList[]>([]);
+  const [listsLoaded, setListsLoaded] = useState(false);
+  const listsPushSeenRef = useRef(false);
+  const [listsExpanded, setListsExpanded] = useState(() => {
+    try {
+      return localStorage.getItem('codev-lists-expanded') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [viewingListId, setViewingListId] = useState<string | null>(null);
+  const [confirmDeleteListId, setConfirmDeleteListId] = useState<string | null>(null);
+  const [saveListPrompt, setSaveListPrompt] = useState<{ name: string; count: number } | null>(null);
+  // Rows a scope needs that are outside the loaded list (list members, live
+  // sessions older than the window), fetched by id — same mechanism as pins.
+  const [extraScopeSessions, setExtraScopeSessions] = useState<ListViewSession[]>([]);
+  const extraScopeSessionsRef = useRef<ListViewSession[]>([]);
+  const extraScopeKeyRef = useRef('');
   // Keep the selection on the same session after pin/hide reshuffles the list
   const reanchorSelectionRef = useRef<string | null>(null);
   const hoverSuppressTokenRef = useRef(0);
@@ -552,7 +690,10 @@ function SwitcherApp() {
     // one that empties the box, and widening the browse list is not this
     // function's job.
     const candidates = query.trim()
-      ? mergeSessionsById(allItems, extraPinnedSessionsRef.current)
+      ? mergeSessionsById(
+          mergeSessionsById(allItems, extraPinnedSessionsRef.current),
+          extraScopeSessionsRef.current,
+        )
       : allItems;
     const base = filterSessionsLocally(candidates, query);
     if (!query.trim() || deepMatchesRef.current.length === 0) return base;
@@ -570,6 +711,29 @@ function SwitcherApp() {
       (a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0),
     );
     return merged;
+  };
+
+  // Every enrichment response lands the same way; one function so a field
+  // added to the response (recaps) cannot be picked up at three call sites
+  // and forgotten at the fourth.
+  const applyEnrichment = (enrichment: {
+    titles?: Record<string, string>;
+    branches?: Record<string, string>;
+    prLinks?: Record<string, { prNumber: number; prUrl: string }>;
+    recaps?: Record<string, { text: string; at: string }>;
+  }) => {
+    if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
+      setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
+    }
+    if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
+      setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
+    }
+    if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
+      setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
+    }
+    if (enrichment.recaps && Object.keys(enrichment.recaps).length > 0) {
+      setRecaps((prev) => ({ ...prev, ...enrichment.recaps }));
+    }
   };
 
   // Debounced main-side search over ALL sessions × ALL user prompts.
@@ -602,17 +766,7 @@ function SwitcherApp() {
         (s: any) => !loaded.has(s.sessionId),
       );
       if (appended.length > 0) {
-        window.electronAPI.loadSessionEnrichment(appended).then((enrichment) => {
-          if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
-            setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
-          }
-          if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
-            setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
-          }
-          if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
-            setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
-          }
-        });
+        window.electronAPI.loadSessionEnrichment(appended).then(applyEnrichment);
         window.electronAPI.loadLastAssistantResponses(appended).then((responses: Record<string, string>) => {
           if (responses && Object.keys(responses).length > 0) {
             setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
@@ -652,6 +806,7 @@ function SwitcherApp() {
     assistantResponses,
     terminalApps,
     extraPinnedSessions,
+    extraScopeSessions,
   ]);
 
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
@@ -668,9 +823,48 @@ function SwitcherApp() {
       : truncateMiddle(text, max);
   const hiddenSet = new Set(sessionMarks.hidden);
   const hasPins = Object.keys(sessionMarks.pins).length > 0;
+  const viewingList =
+    viewingListId ? sessionLists.find((l) => l.id === viewingListId) ?? null : null;
+  // Process facts by session, plus a synthetic row per running process that
+  // no session explains — the "unregistered" case the live view exists for.
+  const liveBySession: Record<string, LiveRowInfo> = {};
+  const liveOrphans: ListViewSession[] = [];
+  for (const p of liveReport?.live ?? []) {
+    const info: LiveRowInfo = {
+      pid: p.pid,
+      rssKb: p.rssKb,
+      tty: p.tty,
+      uptimeSec: p.uptimeSec,
+      registered: p.registered,
+    };
+    if (p.sessionId) {
+      liveBySession[p.sessionId] = info;
+    } else {
+      liveOrphans.push({
+        sessionId: `pid:${p.pid}`,
+        project: p.cwd || '',
+        projectName: (p.cwd || '').split('/').filter(Boolean).pop() || `pid ${p.pid}`,
+        firstUserMessage: '',
+        lastUserMessage: '',
+        lastTimestamp: 0,
+        messageCount: undefined,
+        isActive: true,
+        activePid: p.pid,
+        __liveOrphan: true,
+        __live: info,
+      });
+    }
+  }
+  // A live session older than the loaded window is only in the by-id fetch;
+  // widen the browse list so the live scope can see it (search widens its
+  // own candidates the same way).
+  const scopedSessions =
+    liveOnly && !viewingList && !isSearchingSessions
+      ? mergeSessionsById(sessions, extraScopeSessions)
+      : sessions;
   // Which rows appear, in which group, in which order — one pure function so
-  // the browse-state matrix (search x pinned-only x grouped) is testable
-  // without running the app. See src/session-list-view.ts.
+  // the browse-state matrix (search x scopes x grouped) is testable without
+  // running the app. See src/session-list-view.ts.
   const {
     pinnedRows,
     visiblePinnedRows,
@@ -679,9 +873,11 @@ function SwitcherApp() {
     minorFoldHeaderIndex,
     hiddenMinorCount,
     pinnedOnlyActive,
+    liveOnlyActive,
+    listViewActive,
     canGroupPins,
   } = buildSessionListView({
-    sessions,
+    sessions: scopedSessions,
     allSessions,
     extraPinnedSessions,
     pins: sessionMarks.pins,
@@ -694,7 +890,16 @@ function SwitcherApp() {
     pinnedCollapsed,
     minorsExpanded,
     activeDetectionReady,
+    liveOnly,
+    liveBySession,
+    liveOrphans,
+    viewingList,
+    extraListSessions: extraScopeSessions,
   });
+  const liveCount = liveReport
+    ? liveReport.live.length
+    : Object.keys(activeStateRef.current).length;
+  const staleCount = liveReport?.staleRegistrations.length ?? 0;
   // Manually hidden sessions may be titled/long — keep the fold label honest.
   const minorFoldSuffix =
     hiddenMinorCount > 0
@@ -801,6 +1006,167 @@ function SwitcherApp() {
     setSelectedSessionIndex(0);
   };
 
+  // --- Live scope (issue #94) ---
+  const refreshLiveReport = () => {
+    window.electronAPI
+      .getLiveSessions()
+      .then((r) => {
+        if (r) setLiveReport(r);
+      })
+      .catch(() => {});
+  };
+  const toggleLiveOnly = () => {
+    const next = !liveOnly;
+    liveOnlyRef.current = next;
+    setLiveOnly(next);
+    // Scopes are exclusive: entering one leaves the other.
+    if (next) setViewingListId(null);
+    setSelectedSessionIndex(0);
+    if (next) refreshLiveReport();
+  };
+
+  // --- Saved lists (issue #145) ---
+  useEffect(() => {
+    try {
+      localStorage.setItem('codev-lists-expanded', listsExpanded ? '1' : '0');
+    } catch {
+      // Best effort, same as the pinned toggles.
+    }
+  }, [listsExpanded]);
+  const applyListsResult = (r: any) => {
+    if (r?.ok && r.lists) {
+      setSessionLists(r.lists.lists || []);
+      setListsLoaded(true);
+    }
+  };
+  const openList = (id: string) => {
+    liveOnlyRef.current = false;
+    setLiveOnly(false);
+    setViewingListId(id);
+    setConfirmDeleteListId(null);
+    setSelectedSessionIndex(0);
+  };
+  const closeList = () => {
+    setViewingListId(null);
+    setSelectedSessionIndex(0);
+  };
+  const deleteList = (id: string) => {
+    window.electronAPI
+      .deleteSessionList(id)
+      .then((r) => {
+        applyListsResult(r);
+        setConfirmDeleteListId(null);
+        if (viewingListId === id) setViewingListId(null);
+      })
+      .catch(() => {});
+  };
+  // What gets saved is exactly what is on screen, minus rows that are not
+  // sessions (orphan processes have no id to resume). Every field is what the
+  // renderer already holds for the row; nothing is re-read from disk.
+  const captureDisplayedSessions = (): SessionListMember[] =>
+    displayedSessions
+      .filter((s) => !s.__liveOrphan)
+      .map((s) => ({
+        sessionId: s.sessionId,
+        project: s.project || '',
+        projectName: s.projectName || '',
+        accountLabel: s.accountLabel,
+        title: customTitles[s.sessionId] || s.__listMember?.title,
+        branch: branches[s.sessionId] || s.__listMember?.branch,
+        pinned: !!sessionMarks.pins[s.sessionId],
+        lastTimestamp: s.lastTimestamp || 0,
+        recap: recaps[s.sessionId] || s.__listMember?.recap,
+        lastUserMessage: s.lastUserMessage || undefined,
+        lastAssistantMessage:
+          assistantResponses[s.sessionId] || s.__listMember?.lastAssistantMessage,
+      }));
+  const openSaveListPrompt = () => {
+    const count = displayedSessions.filter((s) => !s.__liveOrphan).length;
+    if (count === 0) return;
+    setSaveListPrompt({ name: defaultListName(), count });
+  };
+  const saveList = () => {
+    if (!saveListPrompt) return;
+    const members = captureDisplayedSessions();
+    const name = saveListPrompt.name.trim() || defaultListName();
+    setSaveListPrompt(null);
+    window.electronAPI
+      .saveSessionList(name, members)
+      .then((r) => {
+        applyListsResult(r);
+        if (r?.ok) setListsExpanded(true);
+      })
+      .catch(() => {});
+  };
+
+  // Load lists once + subscribe to main-side pushes — the same shape, and the
+  // same two guards, as the marks effect below: a push that already landed
+  // outranks the in-flight snapshot, and an unknown read is never applied.
+  useEffect(() => {
+    window.electronAPI
+      .getSessionLists()
+      .then((r: any) => {
+        if (!r || listsPushSeenRef.current || r.known === false) return;
+        setSessionLists(r.lists || []);
+        setListsLoaded(true);
+      })
+      .catch(() => {});
+    const unsubscribe = window.electronAPI.onSessionListsUpdated(
+      (_event: any, r: any) => {
+        if (!r) return;
+        listsPushSeenRef.current = true;
+        setSessionLists(r.lists || []);
+        setListsLoaded(true);
+      },
+    );
+    return unsubscribe;
+  }, []);
+
+  // A list that was deleted (here or by hand) cannot stay open.
+  useEffect(() => {
+    if (!listsLoaded || !viewingListId) return;
+    if (!sessionLists.some((l) => l.id === viewingListId)) setViewingListId(null);
+  }, [listsLoaded, sessionLists, viewingListId]);
+
+  // Fetch by id the rows a scope needs that the loaded list does not have:
+  // the members of the list being viewed, and live sessions older than the
+  // window. Same key-compare as the pins fetch, so a re-render is free.
+  useEffect(() => {
+    const loaded = new Set(allSessions.map((s: any) => s.sessionId));
+    const wanted = new Set<string>();
+    for (const m of viewingList?.members ?? []) wanted.add(m.sessionId);
+    for (const p of liveReport?.live ?? []) {
+      if (p.sessionId) wanted.add(p.sessionId);
+    }
+    const missing = [...wanted].filter((id) => !loaded.has(id));
+    const key = missing.sort().join(',');
+    if (key === extraScopeKeyRef.current) return;
+    extraScopeKeyRef.current = key;
+    if (missing.length === 0) {
+      extraScopeSessionsRef.current = [];
+      setExtraScopeSessions([]);
+      return;
+    }
+    window.electronAPI
+      .getSessionsByIds(missing)
+      .then((result: any[]) => {
+        if (extraScopeKeyRef.current !== key) return;
+        const found = result || [];
+        extraScopeSessionsRef.current = found;
+        setExtraScopeSessions(found);
+        if (found.length === 0) return;
+        window.electronAPI.loadSessionEnrichment(found).then(applyEnrichment);
+        window.electronAPI
+          .loadLastAssistantResponses(found)
+          .then((responses: Record<string, string>) => {
+            if (responses && Object.keys(responses).length > 0) {
+              setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
+            }
+          });
+      })
+      .catch(() => {});
+  }, [viewingList, liveReport, allSessions]);
+
   // Pinning/hiding inserts or removes rows above the selection, shifting every
   // index — without re-anchoring, the next ⌘D would act on an unintended row.
   // Re-anchor to the same session's LAST occurrence (the timeline copy).
@@ -894,17 +1260,7 @@ function SwitcherApp() {
       extraPinnedSessionsRef.current = found;
       setExtraPinnedSessions(found);
       if (found.length === 0) return;
-      window.electronAPI.loadSessionEnrichment(found).then((enrichment) => {
-        if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
-          setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
-        }
-        if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
-          setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
-        }
-        if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
-          setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
-        }
-      });
+      window.electronAPI.loadSessionEnrichment(found).then(applyEnrichment);
       window.electronAPI.loadLastAssistantResponses(found).then((responses: Record<string, string>) => {
         if (responses && Object.keys(responses).length > 0) {
           setAssistantResponses((prev: Record<string, string>) => ({ ...prev, ...responses }));
@@ -1027,35 +1383,18 @@ function SwitcherApp() {
         }
         // Load enrichment for ALL VS Code sessions (active + closed) in one call
         if (allVSCode.length > 0) {
-          window.electronAPI.loadSessionEnrichment(allVSCode).then((enrichment) => {
-            if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
-              setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
-            }
-            if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
-              setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
-            }
-            if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
-              setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
-            }
-          });
+          window.electronAPI.loadSessionEnrichment(allVSCode).then(applyEnrichment);
         }
       });
     });
 
     // Step 4: Load custom titles + branches in background
     if (result && result.length > 0) {
-      window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then((enrichment) => {
-        if (enrichment.titles && Object.keys(enrichment.titles).length > 0) {
-          setCustomTitles((prev: Record<string, string>) => ({ ...prev, ...enrichment.titles }));
-        }
-        if (enrichment.branches && Object.keys(enrichment.branches).length > 0) {
-          setBranches((prev: Record<string, string>) => ({ ...prev, ...enrichment.branches }));
-        }
-        if (enrichment.prLinks && Object.keys(enrichment.prLinks).length > 0) {
-          setPrLinks((prev) => ({ ...prev, ...enrichment.prLinks }));
-        }
-      });
+      window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then(applyEnrichment);
     }
+    // The live report describes processes, which change independently of
+    // history.jsonl — refresh it with every session refetch while in scope.
+    if (liveOnlyRef.current) refreshLiveReport();
   };
 
   const fetchWorkingFolderAndUpdate = async () => {
@@ -1309,6 +1648,11 @@ function SwitcherApp() {
           // Drop the stale filtered list immediately so the empty input and the
           // visible list agree before fetchClaudeSessions() resolves.
           setSessions(allSessionsRef.current);
+          // A scope is a way of finding one session; once it is opened, the
+          // next show starts from the full list, like the search does.
+          setViewingListId(null);
+          liveOnlyRef.current = false;
+          setLiveOnly(false);
         }
         fetchClaudeSessions();
       }
@@ -1767,7 +2111,7 @@ function SwitcherApp() {
               } else if (e.key === 'Enter') {
                 const idx = selectedSessionIndex >= 0 ? selectedSessionIndex : 0;
                 const s = displayedSessions[idx];
-                if (s) {
+                if (s && !s.__liveOrphan) {
                   // Arm before opening, in case the bridge triggers the focus cycle synchronously.
                   clearSessionSearchOnShowRef.current = true;
                   window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
@@ -1804,14 +2148,171 @@ function SwitcherApp() {
                 outline: 'none',
               }}
             />
+            {/* Scope chips: live processes (issue #94) and saved lists
+                (issue #145). Here, not in the list, because this row has
+                spare width and the list has no spare height. */}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-pressed={liveOnlyActive}
+              title={
+                liveOnlyActive
+                  ? 'Show every session again'
+                  : `Show only sessions with a running process, with memory and uptime${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}`
+              }
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={toggleLiveOnly}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleLiveOnly();
+                }
+              }}
+              style={liveOnlyActive ? SCOPE_CHIP_ACTIVE_STYLE : SCOPE_CHIP_STYLE}
+            >
+              ● {liveCount} live{staleCount > 0 ? ` ⚠${staleCount}` : ''}
+            </span>
+            {(liveOnlyActive || pinnedOnlyActive || isSearchingSessions) && !listViewActive && (
+              <span
+                role="button"
+                tabIndex={0}
+                title="Save the sessions shown as a named list"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={openSaveListPrompt}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openSaveListPrompt();
+                  }
+                }}
+                style={LISTS_CHIP_STYLE}
+              >
+                save list…
+              </span>
+            )}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-pressed={listsExpanded}
+              title={
+                sessionLists.length === 0
+                  ? 'No saved lists yet — scope the list (live / only / search) and click "save list…"'
+                  : listsExpanded
+                    ? 'Hide saved lists'
+                    : 'Show saved lists'
+              }
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setListsExpanded((v) => !v);
+                setConfirmDeleteListId(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setListsExpanded((v) => !v);
+                }
+              }}
+              style={listsExpanded && sessionLists.length > 0 ? LISTS_CHIP_ACTIVE_STYLE : LISTS_CHIP_STYLE}
+            >
+              🗂 {sessionLists.length}
+            </span>
             <span style={{ color: THEME.text.secondary, fontSize: '12px', whiteSpace: 'nowrap' }}>
               {/* Scoped modes must report what is on screen — an unscoped
-                  count next to a pin-filtered list reads as a bug. */}
-              {pinnedOnlyActive ? displayedSessions.length : sessions.length} sessions
+                  count next to a filtered list reads as a bug. */}
+              {listViewActive && viewingList
+                ? `${displayedSessions.length} of ${viewingList.members.length} in list`
+                : liveOnlyActive
+                  ? `${displayedSessions.length} live${liveReport ? ` · ${formatMb(liveReport.totalRssKb)}` : ''}`
+                  : `${pinnedOnlyActive ? displayedSessions.length : sessions.length} sessions`}
             </span>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
-            {pinnedRows.length > 0 && (
+            {/* A list being viewed: its header replaces every other zone. */}
+            {listViewActive && viewingList && (
+              <div style={LISTS_HEADER_STYLE}>
+                <span title={`Saved ${new Date(viewingList.createdAt).toLocaleString()}`}>
+                  🗂 {viewingList.name} ({viewingList.members.length}) · saved {formatRelativeTime(viewingList.createdAt)}
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Back to every session"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={closeList}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      closeList();
+                    }
+                  }}
+                  style={LISTS_CHIP_STYLE}
+                >
+                  ✕ close
+                </span>
+              </div>
+            )}
+            {/* Saved lists zone: one row per list; click to view it. */}
+            {!listViewActive && listsExpanded && sessionLists.length > 0 && (
+              <>
+                <div style={LISTS_HEADER_STYLE}>
+                  <span>🗂 Lists ({sessionLists.length})</span>
+                </div>
+                {sessionLists.map((l) => (
+                  <div
+                    key={l.id}
+                    role="button"
+                    tabIndex={0}
+                    title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click to view`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => openList(l.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openList(l.id);
+                      }
+                    }}
+                    style={LIST_ROW_STYLE}
+                  >
+                    <span style={{ color: '#9DC8E0', fontWeight: 500, flexShrink: 0 }}>{l.name}</span>
+                    <span style={{ color: THEME.text.secondary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {l.members.length} sessions · {formatRelativeTime(l.createdAt)}
+                      {' · '}
+                      {l.members.slice(0, 4).map((m) => m.title || m.projectName).join(' · ')}
+                      {l.members.length > 4 ? ' …' : ''}
+                    </span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title={confirmDeleteListId === l.id ? 'Click again to delete this list' : 'Delete this list'}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirmDeleteListId === l.id) deleteList(l.id);
+                        else setConfirmDeleteListId(l.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (confirmDeleteListId === l.id) deleteList(l.id);
+                          else setConfirmDeleteListId(l.id);
+                        }
+                      }}
+                      style={{
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        flexShrink: 0,
+                        color: confirmDeleteListId === l.id ? '#e07a5f' : '#666',
+                      }}
+                    >
+                      {confirmDeleteListId === l.id ? 'delete?' : '✕'}
+                    </span>
+                  </div>
+                ))}
+                <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 2px 3px' }} />
+              </>
+            )}
+            {pinnedRows.length > 0 && !liveOnlyActive && !listViewActive && (
               <div style={PINNED_HEADER_STYLE}>
                 <span
                   role="button"
@@ -1865,11 +2366,21 @@ function SwitcherApp() {
             )}
             {displayedSessions.length === 0 && minorSessions.length === 0 ? (
               <div style={{ color: THEME.text.secondary, textAlign: 'center', padding: '20px 0' }}>
-                {pinnedOnlyActive
-                  ? '⚠️ No pinned session matches — click "only" above to leave pinned-only'
-                  : sessionSearchValue
-                    ? '⚠️ No matching sessions found'
-                    : '🤖 No Claude Code sessions found'}
+                {listViewActive
+                  ? sessionSearchValue
+                    ? '⚠️ No session in this list matches'
+                    : '🗂 This list is empty'
+                  : liveOnlyActive
+                    ? liveReport
+                      ? sessionSearchValue
+                        ? '⚠️ No running session matches'
+                        : '● No running Claude Code session'
+                      : '● Looking for running sessions…'
+                    : pinnedOnlyActive
+                      ? '⚠️ No pinned session matches — click "only" above to leave pinned-only'
+                      : sessionSearchValue
+                        ? '⚠️ No matching sessions found'
+                        : '🤖 No Claude Code sessions found'}
               </div>
             ) : (<>
               {displayedSessions.map((session, index) => (
@@ -1900,6 +2411,8 @@ function SwitcherApp() {
                 <div
                   data-session-index={index}
                   onClick={() => {
+                    // A running process with no session id has nothing to resume.
+                    if (session.__liveOrphan) return;
                     clearSessionSearchOnShowRef.current = true;
                     window.electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId]);
                   }}
@@ -1952,9 +2465,12 @@ function SwitcherApp() {
                             highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                           />
                         </span>
-                        {customTitles[session.sessionId] && (
+                        {/* Title and branch fall back to what a saved list
+                            captured, so a member whose transcript is gone
+                            still reads as the session it was. */}
+                        {(customTitles[session.sessionId] || session.__listMember?.title) && (
                           <span
-                            title={customTitles[session.sessionId]}
+                            title={customTitles[session.sessionId] || session.__listMember?.title}
                             style={{
                               color: '#7ec87e',
                               fontSize: '13px',
@@ -1965,20 +2481,20 @@ function SwitcherApp() {
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
                               textToHighlight={fitToRow(
-                                customTitles[session.sessionId],
+                                customTitles[session.sessionId] || session.__listMember?.title || '',
                                 60,
                               )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
                         )}
-                        {branches[session.sessionId] && (
+                        {(branches[session.sessionId] || session.__listMember?.branch) && (
                           <span style={{ color: '#888', fontSize: '11px', fontStyle: 'italic' }}>
                             {' '}[<Highlighter
                               searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
                               autoEscape
                               textToHighlight={fitToRow(
-                                branches[session.sessionId],
+                                branches[session.sessionId] || session.__listMember?.branch || '',
                                 40,
                               )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
@@ -2007,6 +2523,35 @@ function SwitcherApp() {
                             </span>
                           </>
                         )}
+                        {/* Process facts, live scope only: memory · uptime · tty,
+                            and a warning when the process is running but not
+                            registered — the case that hides from every other view. */}
+                        {(() => {
+                          if (!liveOnlyActive) return null;
+                          const live =
+                            liveBySession[session.sessionId] ||
+                            (session.__live as LiveRowInfo | undefined);
+                          if (!live) return null;
+                          return (
+                            <>
+                              <span
+                                style={LIVE_INFO_STYLE}
+                                title={`pid ${live.pid}${live.tty ? ` on ${live.tty}` : ' (no terminal)'} · resident memory · time since the process started`}
+                              >
+                                {formatMb(live.rssKb)} · {formatUptime(live.uptimeSec)}
+                                {live.tty ? ` · ${live.tty}` : ''}
+                              </span>
+                              {!live.registered && (
+                                <span
+                                  style={LIVE_WARN_STYLE}
+                                  title="Running, but not registered in ~/.claude/sessions — invisible to the usual active-session detection"
+                                >
+                                  ⚠ unregistered
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
                         {prLinks[session.sessionId] && (() => {
                           const prInfo = prLinks[session.sessionId];
                           const searchWords = sessionSearchValue.split(/\s+/).filter(Boolean);
@@ -2155,22 +2700,58 @@ function SwitcherApp() {
                         </div>
                       );
                     })()}
-                    {/* Line 3: Last assistant response */}
-                    {assistantResponses[session.sessionId] && (
-                      <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
-                        <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
-                          ◀ <Highlighter
-                            searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
-                            autoEscape
-                            textToHighlight={fitToRow(
-                              assistantResponses[session.sessionId],
-                              80,
-                            )}
-                            highlightStyle={SEARCH_HIGHLIGHT_STYLE}
-                          />
-                        </span>
-                      </div>
-                    )}
+                    {/* Line 3: on a saved-list member, the recap captured
+                        with it — Claude Code's own "where we are, what's
+                        next" line, which is what a snapshot is for. Otherwise
+                        the last assistant response. One line either way. */}
+                    {(() => {
+                      const captured = session.__listMember;
+                      const recap = captured?.recap;
+                      if (recap) {
+                        // A recap never repeats back-to-back, so it can predate
+                        // the session's last turn by a lot; say so when it does,
+                        // because its last sentence is usually "next: …".
+                        const writtenAt = recap.at ? new Date(recap.at).getTime() : 0;
+                        const lagMs = writtenAt ? (captured.lastTimestamp || 0) - writtenAt : 0;
+                        const stale = lagMs > 30 * 60 * 1000;
+                        return (
+                          <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
+                            <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
+                              <span
+                                style={RECAP_MARKER_STYLE}
+                                title={
+                                  writtenAt
+                                    ? `Recap written ${formatRelativeTime(writtenAt)}${stale ? ` — ${formatUptime(lagMs / 1000)} before the session's last activity, so its "next step" may be done` : ''}`
+                                    : 'Recap (time unknown)'
+                                }
+                              >
+                                recap{stale ? ' ⏱' : ''}
+                              </span>{' '}
+                              <Highlighter
+                                searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                                autoEscape
+                                textToHighlight={fitToRow(recap.text, 110)}
+                                highlightStyle={SEARCH_HIGHLIGHT_STYLE}
+                              />
+                            </span>
+                          </div>
+                        );
+                      }
+                      const reply = assistantResponses[session.sessionId] || captured?.lastAssistantMessage;
+                      if (!reply) return null;
+                      return (
+                        <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
+                          <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
+                            ◀ <Highlighter
+                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              autoEscape
+                              textToHighlight={fitToRow(reply, 80)}
+                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
+                            />
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 </Fragment>
@@ -2461,6 +3042,65 @@ function SwitcherApp() {
           }),
         }}
       />
+      {saveListPrompt && (
+        <div
+          data-settings-panel
+          onClick={() => setSaveListPrompt(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.45)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Escape') {
+                setSaveListPrompt(null);
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                saveList();
+              }
+            }}
+            style={{
+              marginTop: '120px',
+              minWidth: '360px',
+              background: '#252526',
+              border: '1px solid #454545',
+              borderRadius: '8px',
+              padding: '10px',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+            }}
+          >
+            <div style={{ fontSize: '11px', color: '#888', padding: '2px 4px 8px' }}>
+              Save {saveListPrompt.count} session{saveListPrompt.count === 1 ? '' : 's'} as a list (Enter · Esc)
+            </div>
+            <input
+              autoFocus
+              value={saveListPrompt.name}
+              onChange={(e) => setSaveListPrompt({ ...saveListPrompt, name: e.target.value })}
+              onFocus={(e) => e.target.select()}
+              placeholder={defaultListName()}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                backgroundColor: '#2d2d2d',
+                border: '1px solid #444',
+                borderRadius: '4px',
+                padding: '8px 10px',
+                color: THEME.text.primary,
+                fontSize: '13px',
+                outline: 'none',
+              }}
+            />
+          </div>
+        </div>
+      )}
       {launchPicker && (
         <div
           data-settings-panel

@@ -42,6 +42,17 @@ import {
   withPin,
 } from './session-marks';
 import {
+  mutateSessionLists,
+  normalizeList,
+  readSessionListsResult,
+  watchSessionLists,
+  withList,
+  withoutList,
+  withRenamedList,
+} from './session-lists';
+import { collectLiveSessions } from './live-sessions';
+import { randomUUID } from 'crypto';
+import {
   installHooks,
   removeHooks,
   isHooksInstalled,
@@ -2346,41 +2357,64 @@ ipcMain.handle('get-sessions-by-ids', (_event, ids: string[]) => {
   );
 });
 
-// Session pin/hide marks (session-finding Batch 1 PR-2)
-let marksWatcherCleanup: (() => void) | null = null;
-let marksWatcherRetries = 0;
-let marksWatcherRetryTimer: ReturnType<typeof setTimeout> | null = null;
-const ensureMarksWatcher = () => {
-  if (marksWatcherCleanup) return;
-  if (marksWatcherRetryTimer) {
-    clearTimeout(marksWatcherRetryTimer);
-    marksWatcherRetryTimer = null;
-  }
-  marksWatcherCleanup = watchSessionMarks(
-    (marks) => {
-      marksWatcherRetries = 0;
-      if (switcherWindow && !switcherWindow.isDestroyed()) {
-        switcherWindow.webContents.send('session-marks-updated', marks);
-      }
-    },
-    (err) => {
-      // Watcher died (dir removed, OS watcher limits) — recreate with a
-      // bounded backoff instead of silently staying deaf until restart.
-      marksWatcherCleanup = null;
-      if (marksWatcherRetries < 5) {
-        marksWatcherRetries += 1;
-        console.error(
-          `[session-marks] watcher died (${err?.message || err}); retry ${marksWatcherRetries}/5 in 2s`,
-        );
-        marksWatcherRetryTimer = setTimeout(ensureMarksWatcher, 2000);
-      } else {
-        console.error(
-          '[session-marks] watcher died and retries exhausted — marks pushes disabled until restart',
-        );
-      }
-    },
-  );
+// A user-level store watched on disk and pushed to the renderer. One factory
+// for the marks store and the saved-lists store: the recreate-with-backoff
+// logic must behave identically for both, and two hand-written copies of it
+// would not stay identical.
+const makeStoreWatcher = <T>(
+  tag: string,
+  channel: string,
+  watch: (onChange: (value: T) => void, onError: (err: Error) => void) => () => void,
+): (() => void) => {
+  let cleanup: (() => void) | null = null;
+  let retries = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const ensure = () => {
+    if (cleanup) return;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    cleanup = watch(
+      (value) => {
+        retries = 0;
+        if (switcherWindow && !switcherWindow.isDestroyed()) {
+          switcherWindow.webContents.send(channel, value);
+        }
+      },
+      (err) => {
+        // Watcher died (dir removed, OS watcher limits) — recreate with a
+        // bounded backoff instead of silently staying deaf until restart.
+        cleanup = null;
+        if (retries < 5) {
+          retries += 1;
+          console.error(
+            `[${tag}] watcher died (${err?.message || err}); retry ${retries}/5 in 2s`,
+          );
+          retryTimer = setTimeout(ensure, 2000);
+        } else {
+          console.error(
+            `[${tag}] watcher died and retries exhausted — pushes disabled until restart`,
+          );
+        }
+      },
+    );
+  };
+  return ensure;
 };
+
+// Session pin/hide marks (session-finding Batch 1 PR-2)
+const ensureMarksWatcher = makeStoreWatcher(
+  'session-marks',
+  'session-marks-updated',
+  watchSessionMarks,
+);
+// Saved session lists (issue #145)
+const ensureListsWatcher = makeStoreWatcher(
+  'session-lists',
+  'session-lists-updated',
+  watchSessionLists,
+);
 
 ipcMain.handle('get-session-marks', () => {
   ensureMarksWatcher();
@@ -2464,6 +2498,71 @@ ipcMain.handle('unhide-session', (_event, sessionId: string) => {
   return { ok: true, marks };
 });
 
+// --- Saved session lists (issue #145) ---
+
+ipcMain.handle('get-session-lists', () => {
+  ensureListsWatcher();
+  const read = readSessionListsResult();
+  return { ...read.value, known: read.known };
+});
+
+ipcMain.handle('save-session-list', (_event, name: unknown, members: unknown) => {
+  // One coercion definition: build the record, then run it through the
+  // store's own normalizer, so what gets written is exactly what a later
+  // read will accept as authoritative.
+  const list = normalizeList({
+    id: randomUUID(),
+    name,
+    createdAt: new Date().toISOString(),
+    members: Array.isArray(members) ? members : [],
+  });
+  if (!list || list.members.length === 0) {
+    return { ok: false, error: 'nothing to save' };
+  }
+  const res = mutateSessionLists((prev) => withList(prev, list));
+  if (!res.known) {
+    // Same guard as the marks store: writing over an unreadable file would
+    // replace every other saved list with this one.
+    console.warn('[session-lists] save refused: store unreadable', list.name);
+    return { ok: false, error: 'lists store unreadable' };
+  }
+  console.log('[session-lists] save', list.id, JSON.stringify(list.name), 'members:', list.members.length);
+  return { ok: true, lists: res.value, list };
+});
+
+ipcMain.handle('delete-session-list', (_event, id: string) => {
+  if (!id || typeof id !== 'string') return { ok: false, error: 'invalid id' };
+  const res = mutateSessionLists((prev) => withoutList(prev, id));
+  if (!res.known) {
+    console.warn('[session-lists] delete refused: store unreadable', id);
+    return { ok: false, error: 'lists store unreadable' };
+  }
+  console.log('[session-lists] delete', id, 'lists:', res.value.lists.length);
+  return { ok: true, lists: res.value };
+});
+
+ipcMain.handle('rename-session-list', (_event, id: string, name: string) => {
+  if (!id || typeof id !== 'string') return { ok: false, error: 'invalid id' };
+  if (typeof name !== 'string' || !name.trim()) return { ok: false, error: 'invalid name' };
+  const res = mutateSessionLists((prev) => withRenamedList(prev, id, name));
+  if (!res.known) {
+    console.warn('[session-lists] rename refused: store unreadable', id);
+    return { ok: false, error: 'lists store unreadable' };
+  }
+  return { ok: true, lists: res.value };
+});
+
+// --- Live claude processes (issue #94) ---
+
+ipcMain.handle('get-live-sessions', async () => {
+  try {
+    return await collectLiveSessions();
+  } catch (err) {
+    console.error('[live-sessions] collect failed:', err);
+    return { live: [], staleRegistrations: [], totalRssKb: 0, measuredAt: Date.now() };
+  }
+});
+
 ipcMain.handle('detect-active-sessions', async () => {
   const { activeMap, vscodeSessions, entrypoints } = await detectActiveSessions();
   return {
@@ -2520,11 +2619,12 @@ ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPat
 });
 
 ipcMain.handle('load-session-enrichment', async (_event, sessions: any[]) => {
-  const { titles, branches, prLinks } = await loadSessionEnrichment(sessions);
+  const { titles, branches, prLinks, recaps } = await loadSessionEnrichment(sessions);
   return {
     titles: Object.fromEntries(titles),
     branches: Object.fromEntries(branches),
     prLinks: Object.fromEntries(prLinks),
+    recaps: Object.fromEntries(recaps),
   };
 });
 

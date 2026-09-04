@@ -5,17 +5,27 @@
  * Single cross-account store at ~/.config/codev/session-marks.json (the same
  * directory as the accounts registry), pushed to the renderer via fs.watch —
  * the same pattern as the status files. sessionIds are stable across resumes
- * (verified: `--resume`/`--continue` reuse the id; only `--fork-session`
- * creates a new one), so plain sessionId keying needs no migration logic.
+ * (`--resume`/`--continue` reuse the id); `--fork-session` and `/branch` mint
+ * a new one, which is why pins drift across a branch (issue #142) — plain
+ * sessionId keying stays, and the drift is a display problem, not a store one.
  *
  * Pure helpers (normalize / with* transitions) are separated from fs wrappers
  * so they are unit-testable; fs functions take an explicit file path with
- * default-path wrappers for the app (same layout as share-manager.ts).
+ * default-path wrappers for the app (same layout as share-manager.ts). The
+ * authority invariant, atomic write and directory watch are shared with the
+ * saved-lists store — see `atomic-json-store.ts` for why they must be one.
  */
 
-import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+import {
+  isAuthoritativeRead as isAuthoritativeStoreRead,
+  mutateStoreFile,
+  readStoreResult,
+  watchStoreFile,
+  writeStoreFile,
+} from './atomic-json-store';
 
 export interface PinInfo {
   pinnedAt: string; // ISO timestamp
@@ -141,72 +151,26 @@ export interface MarksRead {
   known: boolean;
 }
 
-/** The only store version this build understands. */
-const SUPPORTED_VERSION = 1;
-
-/** Stable JSON — object keys sorted, so key ORDER can never fake a difference. */
-const canonical = (value: unknown): string =>
-  JSON.stringify(value, (_key, val) =>
-    val && typeof val === 'object' && !Array.isArray(val)
-      ? Object.fromEntries(
-          Object.entries(val as Record<string, unknown>).sort(([x], [y]) =>
-            x < y ? -1 : x > y ? 1 : 0,
-          ),
-        )
-      : val,
-  );
-
 /**
- * Is a parsed value a store we may treat as AUTHORITATIVE?
- *
- * `normalizeMarks` is forgiving by design — it coerces anything into valid v1
- * marks so a partly-corrupt store still renders. That is right for display and
- * wrong for authority: whatever it changes would be written back for real by
- * the next read-modify-write, erasing the original.
- *
- * So the invariant is simply **normalization must be a no-op**. Earlier
- * versions of this check enumerated the ways normalization can differ — the
- * envelope, then dropped entries, then coerced fields, then unknown top-level
- * keys — and each round of review found one more that the enumeration missed,
- * because "all the ways a forgiving function can be forgiving" is not a list
- * anyone can finish. Comparing the whole normalized result against the input
- * has no narrower case left to miss, and it tracks `normalizeMarks`
- * automatically instead of restating its rules beside it.
- *
- * Deliberately strict: a store this build would rewrite in ANY way — including
- * one carrying a field a future version added, or a bare `{}` — is refused
- * rather than silently rewritten. Refusing costs a lost pin action; rewriting
- * costs the user's data.
+ * Is a parsed value a marks store we may treat as AUTHORITATIVE? The rule —
+ * normalization must be a no-op — is the shared store's; kept as a named
+ * export because the tests exercise it against `normalizeMarks` directly.
  */
 export const isAuthoritativeRead = (
   raw: unknown,
   marks: SessionMarks,
-): boolean => canonical(raw) === canonical(marks);
+): boolean => isAuthoritativeStoreRead(raw, marks);
 
 export const readMarksFileResult = (filePath: string): MarksRead => {
-  try {
-    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    const marks = normalizeMarks(raw);
-    return { marks, known: isAuthoritativeRead(raw, marks) };
-  } catch (err) {
-    // A missing file IS authoritative: no store yet means no marks yet, which
-    // is simply the first run. Anything else — permissions, IO, malformed
-    // JSON — leaves the real contents unknown.
-    const code = (err as NodeJS.ErrnoException | undefined)?.code;
-    return { marks: emptyMarks(), known: code === 'ENOENT' };
-  }
+  const read = readStoreResult(filePath, normalizeMarks, emptyMarks);
+  return { marks: read.value, known: read.known };
 };
 
 export const readMarksFile = (filePath: string): SessionMarks =>
   readMarksFileResult(filePath).marks;
 
-export const writeMarksFile = (filePath: string, marks: SessionMarks): void => {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  // temp + rename so a crash mid-write can't corrupt the store
-  const tmp = `${filePath}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(marks, null, 2) + '\n');
-  fs.renameSync(tmp, filePath);
-};
+export const writeMarksFile = (filePath: string, marks: SessionMarks): void =>
+  writeStoreFile(filePath, marks);
 
 const defaultMarksPath = (): string =>
   path.join(os.homedir(), '.config', 'codev', MARKS_FILENAME);
@@ -218,29 +182,18 @@ export const readSessionMarksResult = (): MarksRead =>
   readMarksFileResult(defaultMarksPath());
 
 /**
- * Read-modify-write that REFUSES to write when the store could not be read.
- *
- * Every mutation here is read-modify-write over the whole file, so a read that
- * silently degrades to empty marks turns the next pin or hide into a full
- * overwrite: one keystroke against an unreadable store would erase every other
- * pin and hidden id on disk. A missing file is still fine — ENOENT is
- * authoritative (see MarksRead), so the first-ever pin creates the store as
- * usual.
- *
- * Returns the resulting marks with `known: true` when the write happened, or
- * the unknown read (`known: false`) when it was refused and nothing was
- * touched. Collapsing the four callers onto this one path is deliberate: four
- * copies of read-modify-write are four chances to forget the guard.
+ * Read-modify-write that REFUSES to write when the store could not be read —
+ * one keystroke against an unreadable store would otherwise erase every other
+ * pin and hidden id on disk. Collapsing the four callers onto this one path is
+ * deliberate: four copies of read-modify-write are four chances to forget the
+ * guard.
  */
 export const mutateMarksFile = (
   filePath: string,
   mutate: (marks: SessionMarks) => SessionMarks,
 ): MarksRead => {
-  const read = readMarksFileResult(filePath);
-  if (!read.known) return read;
-  const next = mutate(read.marks);
-  writeMarksFile(filePath, next);
-  return { marks: next, known: true };
+  const read = mutateStoreFile(filePath, normalizeMarks, emptyMarks, mutate);
+  return { marks: read.value, known: read.known };
 };
 
 export const mutateSessionMarks = (
@@ -250,52 +203,18 @@ export const mutateSessionMarks = (
 export const writeSessionMarks = (marks: SessionMarks): void =>
   writeMarksFile(defaultMarksPath(), marks);
 
-/**
- * Watch a marks file for changes (path-based, testable). Watches the parent
- * DIRECTORY: the rename-based write replaces the file inode, which would
- * detach a plain file watcher. Events for sibling files (accounts.json, our
- * own .tmp) are filtered out by name.
- */
+/** Watch a marks file for changes (path-based, testable). */
 export const watchMarksFile = (
   filePath: string,
   onChange: (marks: SessionMarks) => void,
   onError?: (err: Error) => void,
-): (() => void) => {
-  const dir = path.dirname(filePath);
-  const filename = path.basename(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-
-  // Debounce: fs.watch on macOS fires several times per change
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  const watcher = fs.watch(dir, { persistent: false }, (_event, changed) => {
-    if (changed && changed !== filename) return;
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      const read = readMarksFileResult(filePath);
-      // Never broadcast an unknown read. Announcing "the marks are now empty"
-      // because the file could not be parsed would push every listener into
-      // acting on state that is still intact on disk; staying silent leaves
-      // them on the last thing actually seen.
-      if (!read.known) return;
-      onChange(read.marks);
-    }, 50);
-  });
-
-  watcher.on('error', (err: Error) => {
-    // A dead watcher must not crash the main process (unhandled 'error'
-    // would) — close it and let the owner decide whether to recreate.
-    try {
-      watcher.close();
-    } catch {}
-    if (debounceTimer) clearTimeout(debounceTimer);
-    onError?.(err);
-  });
-
-  return () => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    watcher.close();
-  };
-};
+): (() => void) =>
+  watchStoreFile(
+    filePath,
+    (p) => readStoreResult(p, normalizeMarks, emptyMarks),
+    onChange,
+    onError,
+  );
 
 export const watchSessionMarks = (
   onChange: (marks: SessionMarks) => void,
