@@ -1232,9 +1232,12 @@ export const findAccountByLabel = (label: string): CodevAccount | undefined =>
  * either literal. Real project paths never contain these, so refusing them
  * costs nothing and closes the hole for every caller — the saved-list file
  * and history.jsonl are both plain files a user (or a stray tool) can edit.
+ * An EMPTY path is not this function's concern: switching to a running
+ * session never embeds it (iTerm2 matches by tty), and the launch paths that
+ * do need one already check existence.
  */
 export const isSafeLaunchPath = (p: unknown): p is string =>
-  typeof p === 'string' && p.length > 0 && !/["\\$`\n\r\u0000]/.test(p);
+  typeof p === 'string' && !/["\\$`\n\r\u0000]/.test(p);
 
 /**
  * Build `command claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the
@@ -2386,6 +2389,10 @@ export const openSessionListMembers = async (
         m.accountLabel,
       );
       result.opened.push(id);
+    } catch (err) {
+      // Reported, not swallowed: "opened 5" must not hide a sixth that threw.
+      console.error('[open-session-list-members] launch failed:', id, err);
+      skip('launch failed');
     } finally {
       // Long enough for the new process to write its registration.
       setTimeout(() => membersInFlight.delete(id), 10000);

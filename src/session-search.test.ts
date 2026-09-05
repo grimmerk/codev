@@ -539,6 +539,18 @@ describe('findPrRef', () => {
     expect(
       findPrRef('https://evil.github.com/o/r/pull/147', { number: 147 }),
     ).toBeNull();
+    // A path segment inside some other URL is not the host either.
+    expect(
+      findPrRef('https://example.com/github.com/o/r/pull/147', {
+        number: 147,
+      }),
+    ).toBeNull();
+    expect(
+      findPrRef('not_github.com/o/r/pull/147', { number: 147 }),
+    ).toBeNull();
+    expect(
+      findPrRef('(github.com/o/r/pull/147)', { number: 147 }),
+    ).not.toBeNull();
     expect(findPrRef('see #147, done', { number: 147 })).not.toBeNull();
     expect(findPrRef('(see #147)', { number: 147 })).not.toBeNull();
   });
@@ -593,6 +605,9 @@ describe('findPrRef', () => {
     expect(sessionRepos(undefined, undefined)).toEqual([]);
     expect(sessionRepos('not a url', ['#1'])).toEqual([]);
     expect(sessionRepos('https://evil.github.com/o/r/pull/1')).toEqual([]);
+    expect(sessionRepos('https://example.com/github.com/o/r/pull/1')).toEqual(
+      [],
+    );
   });
 
   // Live finding: `pr:151` listed a session whose only "#151" was the marker

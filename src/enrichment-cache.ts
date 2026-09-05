@@ -182,17 +182,20 @@ export const deserializeEnrichment = (raw: unknown): EnrichmentState => {
  * non-word character before it. `&#N` is excluded so HTML entities are not
  * read as references; a leading zero is excluded so `#0` is not.
  */
-// Boundaries on both sides, the same ones the query matcher applies: the
-// host must not be the tail of a longer name (`notgithub.com`), and the
-// number must END there (`#147abc` is an identifier, not PR 147). The two
-// sides drifted once — the matcher had the suffix rule and the miner did
-// not, so `#147abc` was persisted as `#147` — which is why the cache
-// version below moved to 2.
-// Host: `github.com` or `www.github.com`, never a subdomain (`evil.github.com`)
-// and never the tail of another name (`notgithub.com`). Owner: alphanumerics
-// and hyphens only, as on GitHub. Same rules as `session-search.ts`.
+// Boundaries on both sides, the same ones the query matcher applies (`HOST`,
+// `OWNER` and the suffix rule in `session-search.ts`):
+// - the host is `github.com` or `www.github.com`, only where a host can
+//   stand — at the start, after `://`, or after a character no host or path
+//   contains — so never a subdomain (`evil.github.com`), never the tail of
+//   another name (`notgithub.com`, `not_github.com`), never a path segment
+//   of some other URL (`https://example.com/github.com/o/r/…`);
+// - an owner is alphanumerics and hyphens only, as on GitHub;
+// - the number must END there: `#147abc` is an identifier, not PR 147.
+// The two sides drifted once — the matcher had the suffix rule and the miner
+// did not, so `#147abc` was persisted as `#147` — which is why the cache
+// version above moved to 2.
 export const PR_REF_RE =
-  /(?<![a-z0-9.-])(?:www\.)?github\.com\/([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+)\/(?:pull|issues)\/([1-9][0-9]*)(?![A-Za-z0-9_])|([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)(?![A-Za-z0-9_])|(?:^|[^A-Za-z0-9&#])#([1-9][0-9]*)(?![A-Za-z0-9_])/gi;
+  /(?<=^|:\/\/|[^a-z0-9_./-])(?:www\.)?github\.com\/([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+)\/(?:pull|issues)\/([1-9][0-9]*)(?![A-Za-z0-9_])|([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)(?![A-Za-z0-9_])|(?:^|[^A-Za-z0-9&#])#([1-9][0-9]*)(?![A-Za-z0-9_])/gi;
 
 /**
  * The words the assistant actually wrote in one JSONL record, or null when

@@ -45,8 +45,10 @@ const IS_ALIASES: Record<string, string> = { running: 'live', active: 'live' };
 /**
  * A pull-request (or issue — GitHub numbers them together) reference. The
  * repo is kept when the query carried one, so `grimmerk/codev#147` does not
- * match a `fireflies/x/pull/147` URL; a bare `#147` in the target still
- * matches either, because a bare number cannot say which repo it meant.
+ * match a `fireflies/x/pull/147` URL, and a bare `#147` in the target counts
+ * for it only when the session's own repo context names `grimmerk/codev`
+ * (`QueryTarget.repos`) — a bare number cannot say which repo it meant, so
+ * the session has to. The full table is on `findPrRefWith`.
  */
 export interface PrRef {
   number: number;
@@ -135,9 +137,12 @@ export const tokenizeQuery = (query: string): string[] => {
 // keeps `example.com/o/pull/1` from reading as owner `example.com`.
 const OWNER = '[a-z0-9-]+';
 const REPO = `${OWNER}\\/[a-z0-9_.-]+`;
-// `github.com` or `www.github.com`, never `evil.github.com` (the lookbehind
-// refuses a dot before the host) and never the tail of `notgithub.com`.
-const HOST = '(?<![a-z0-9.-])(?:www\\.)?github\\.com';
+// `github.com` or `www.github.com`, and only where a host can stand: at the
+// start, after a scheme's `://`, or after a character no host or path
+// contains. That refuses a subdomain (`evil.github.com` — a dot before it),
+// the tail of another name (`notgithub.com`, `not_github.com`), and a path
+// segment inside some other URL (`https://example.com/github.com/o/r/…`).
+const HOST = '(?<=^|:\\/\\/|[^a-z0-9_.\\/-])(?:www\\.)?github\\.com';
 // Numbers never start with a zero, matching the miner: `#012` is not PR 12.
 const NUMBER = '[1-9][0-9]*';
 // The host is optional: `owner/repo/pull/N` is unambiguous on its own, and it

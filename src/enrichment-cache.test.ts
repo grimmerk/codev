@@ -202,7 +202,7 @@ describe('minePrRefs', () => {
     expect(
       minePrRefs(
         assistant(
-          '#141abc #142_x /pull/143abc o/r#144abc https://notgithub.com/o/r/pull/145 https://evil.github.com/o/r/pull/146 then #151, and https://github.com/o/r/pull/152 and https://www.github.com/o/r/issues/153',
+          '#141abc #142_x /pull/143abc o/r#144abc https://notgithub.com/o/r/pull/145 https://evil.github.com/o/r/pull/146 not_github.com/o/r/pull/147 https://example.com/github.com/o/r/pull/148 then #151, and https://github.com/o/r/pull/152 and https://www.github.com/o/r/issues/153',
         ),
       ),
     ).toEqual(['#151', 'o/r#152', 'o/r#153']);
