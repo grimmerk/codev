@@ -405,6 +405,16 @@ first" moment, which is occasional. The tty is never on the row: a person cannot
 name, and it stays in the tooltip and in the data, where the future window-switching (#142 C0)
 needs it.
 
+**What the main list deliberately does not show.** A running process whose session has no
+`history.jsonl` line — a `/branch` child before its first prompt (measured: the `/branch` prompt
+itself is recorded under the *parent*) — has no row in the main list, and never did before
+this feature either. The live scope synthesizes a row for it (named after its cwd, `⚠
+unregistered` if it also lacks a registration); the main list does not. Decided 2026-09-05 to
+keep it that way for now: a synthetic main-list row would be nearly blank (`codev · … msgs ·
+dot`) until `forkedFrom` is read, and the honest presentation is the generation chain — the
+child under its parent's lineage, with the parent's title — which is #142 C2/C3. The precise
+repro and the interim option are in #149; the workaround today is the live scope.
+
 **An untrusted store is reported, not repaired.** When the lists file exists but its
 normalization is not a no-op (hand-edited, or a hypothetical future format change), the UI
 says so with what the file holds — "N lists / M sessions inside; fix or remove it" — instead
