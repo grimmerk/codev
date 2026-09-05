@@ -1,12 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  compileQuery,
+  emptyQuery,
   extractSnippet,
+  findPrRef,
   findPromptMatch,
+  highlightNeedles,
+  isEmptyQuery,
   isMinorSession,
   matchesAllWords,
   matchesAllWordsOrId,
   matchesSessionId,
+  parsePrRef,
+  parseQuery,
+  parseQueryDate,
+  promptNeedles,
+  tokenizeQuery,
   truncateMiddle,
   windowAroundMatch,
 } from './session-search';
@@ -311,5 +321,298 @@ describe('matchesSessionId — the id is a prefix target, not a substring', () =
     expect(matchesAllWordsOrId(text, id, ['mcp', 'arch'])).toBe(
       matchesAllWords(text, ['mcp', 'arch']),
     );
+  });
+});
+
+describe('tokenizeQuery', () => {
+  it('splits on whitespace and keeps a quoted phrase together, quotes removed', () => {
+    expect(tokenizeQuery('a  b\tc')).toEqual(['a', 'b', 'c']);
+    expect(tokenizeQuery('title:"foo bar" x')).toEqual(['title:foo bar', 'x']);
+    expect(tokenizeQuery('"foo bar"')).toEqual(['foo bar']);
+  });
+
+  it('lets an unterminated quote run to the end (someone is still typing)', () => {
+    expect(tokenizeQuery('a "foo bar')).toEqual(['a', 'foo bar']);
+  });
+});
+
+describe('parsePrRef', () => {
+  it('reads the URL, owner/repo#N and #N forms, never a bare number', () => {
+    expect(parsePrRef('https://github.com/grimmerk/codev/pull/147')).toEqual({
+      number: 147,
+      repo: 'grimmerk/codev',
+    });
+    expect(
+      parsePrRef('https://github.com/grimmerk/codev/issues/144#issuecomment-1'),
+    ).toEqual({ number: 144, repo: 'grimmerk/codev' });
+    expect(parsePrRef('github.com/o/r/pull/9/files')).toEqual({
+      number: 9,
+      repo: 'o/r',
+    });
+    expect(parsePrRef('grimmerk/codev#147')).toEqual({
+      number: 147,
+      repo: 'grimmerk/codev',
+    });
+    expect(parsePrRef('#147')).toEqual({ number: 147 });
+    expect(parsePrRef('147')).toBeNull();
+    expect(parsePrRef('#abc')).toBeNull();
+    expect(parsePrRef('https://github.com/grimmerk/codev')).toBeNull();
+  });
+});
+
+describe('parseQueryDate', () => {
+  const now = new Date(2026, 8, 5, 15, 30).getTime();
+  it('reads YYYY-MM-DD as local midnight, Nh/Nd/Nw as ago, today and yesterday', () => {
+    expect(parseQueryDate('2026-09-01', now)).toBe(
+      new Date(2026, 8, 1).getTime(),
+    );
+    expect(parseQueryDate('7d', now)).toBe(now - 7 * 86400000);
+    expect(parseQueryDate('2w', now)).toBe(now - 14 * 86400000);
+    expect(parseQueryDate('3h', now)).toBe(now - 3 * 3600000);
+    expect(parseQueryDate('today', now)).toBe(new Date(2026, 8, 5).getTime());
+    expect(parseQueryDate('yesterday', now)).toBe(
+      new Date(2026, 8, 4).getTime(),
+    );
+    expect(parseQueryDate('soon', now)).toBeNull();
+    expect(parseQueryDate('2026-13-40', now)).toBeNull();
+  });
+});
+
+describe('parseQuery', () => {
+  const now = new Date(2026, 8, 5, 15, 30).getTime();
+
+  it('keeps a query with no operators exactly as before: lowercased bare words', () => {
+    const q = parseQuery('Multi  Sessions', now);
+    expect(q.words).toEqual(['multi', 'sessions']);
+    expect(q.fields).toEqual([]);
+    expect(q.prRefs).toEqual([]);
+    expect(q.ignored).toEqual([]);
+  });
+
+  it('routes each operator: fields, has:, is:, after:/before:, pr:', () => {
+    const q = parseQuery(
+      'title:PR2 branch:mcp msg:"deploy now" project:fred account:work recap:next has:pr is:live after:7d before:2026-09-01 pr:147',
+      now,
+    );
+    expect(q.fields).toEqual([
+      { field: 'title', value: 'pr2' },
+      { field: 'branch', value: 'mcp' },
+      { field: 'msg', value: 'deploy now' },
+      { field: 'project', value: 'fred' },
+      { field: 'account', value: 'work' },
+      { field: 'recap', value: 'next' },
+    ]);
+    expect(q.has).toEqual(['pr']);
+    expect(q.is).toEqual(['live']);
+    expect(q.after).toBe(now - 7 * 86400000);
+    expect(q.before).toBe(new Date(2026, 8, 1).getTime());
+    expect(q.prRefs).toEqual([{ number: 147 }]);
+    expect(q.words).toEqual([]);
+  });
+
+  it('recognises PR references in every spelling, and pr: with a repo or URL', () => {
+    const q = parseQuery(
+      '#147 grimmerk/codev#148 https://github.com/o/r/pull/9 pr:o/r#10 pr:https://github.com/o/r/issues/11',
+      now,
+    );
+    expect(q.prRefs).toEqual([
+      { number: 147 },
+      { number: 148, repo: 'grimmerk/codev' },
+      { number: 9, repo: 'o/r' },
+      { number: 10, repo: 'o/r' },
+      { number: 11, repo: 'o/r' },
+    ]);
+    expect(q.words).toEqual([]);
+  });
+
+  it('leaves an unknown key:, a clock time and a non-PR URL as bare words', () => {
+    const q = parseQuery('error:ENOENT 12:30 https://example.com/x foo', now);
+    expect(q.words).toEqual([
+      'error:enoent',
+      '12:30',
+      'https://example.com/x',
+      'foo',
+    ]);
+    expect(q.ignored).toEqual([]);
+  });
+
+  it('reports an operator whose value is unusable instead of silently dropping it', () => {
+    const q = parseQuery('title: has:tea is:cold after:soon pr:abc ok', now);
+    expect(q.ignored).toEqual([
+      'title:',
+      'has:tea',
+      'is:cold',
+      'after:soon',
+      'pr:abc',
+    ]);
+    expect(q.words).toEqual(['ok']);
+  });
+
+  it('accepts is:running and is:active as is:live', () => {
+    expect(parseQuery('is:running', now).is).toEqual(['live']);
+    expect(parseQuery('is:active', now).is).toEqual(['live']);
+  });
+
+  it('narrows repeated bounds: the latest after:, the earliest before:', () => {
+    const q = parseQuery(
+      'after:2026-09-01 after:2026-09-03 before:2026-09-04 before:2026-09-02',
+      now,
+    );
+    expect(q.after).toBe(new Date(2026, 8, 3).getTime());
+    expect(q.before).toBe(new Date(2026, 8, 2).getTime());
+  });
+
+  it('isEmptyQuery is true only when nothing constrains the result', () => {
+    expect(isEmptyQuery(parseQuery('', now))).toBe(true);
+    expect(isEmptyQuery(parseQuery('title:', now))).toBe(true);
+    expect(isEmptyQuery(emptyQuery())).toBe(true);
+    expect(isEmptyQuery(parseQuery('is:live', now))).toBe(false);
+    expect(isEmptyQuery(parseQuery('after:1d', now))).toBe(false);
+    expect(isEmptyQuery(parseQuery('x', now))).toBe(false);
+  });
+});
+
+describe('findPrRef', () => {
+  it('matches #N, owner/repo#N, /pull/N and /issues/N — delimited, never a bare number', () => {
+    expect(findPrRef('see #147 for details', { number: 147 })).toEqual({
+      index: 4,
+      length: 4,
+    });
+    expect(findPrRef('grimmerk/codev#147', { number: 147 })).toEqual({
+      index: 0,
+      length: 18,
+    });
+    expect(
+      findPrRef('x https://github.com/o/r/pull/147/files', { number: 147 }),
+    ).toEqual({
+      index: 10,
+      length: 23,
+    });
+    expect(
+      findPrRef('https://github.com/o/r/issues/147', { number: 147 }),
+    ).not.toBeNull();
+    expect(findPrRef('#1475 and 15980 and 147', { number: 147 })).toBeNull();
+    expect(findPrRef('/pull/1470', { number: 147 })).toBeNull();
+    expect(findPrRef('a#147', { number: 147 })).toBeNull();
+  });
+
+  it('honours the repo when the reference names one; a bare #N in the target still matches', () => {
+    const ref = { number: 147, repo: 'grimmerk/codev' };
+    expect(
+      findPrRef('https://github.com/fireflies/fred/pull/147', ref),
+    ).toBeNull();
+    expect(findPrRef('fireflies/fred#147', ref)).toBeNull();
+    expect(
+      findPrRef('https://github.com/grimmerk/codev/pull/147', ref),
+    ).not.toBeNull();
+    expect(findPrRef('grimmerk/codev#147', ref)).not.toBeNull();
+    expect(findPrRef('opened #147 today', ref)).not.toBeNull();
+    // A wrong-repo hit does not hide a right one further on.
+    expect(
+      findPrRef('fireflies/fred#147 then grimmerk/codev#147', ref),
+    ).toEqual({
+      index: 24,
+      length: 18,
+    });
+  });
+});
+
+describe('compileQuery', () => {
+  const now = new Date(2026, 8, 5, 15, 30).getTime();
+  const target = {
+    sessionId: '4ed7505a-eae6-43a5-827b-465c8b5eb759',
+    text: 'codev /Users/g/git/codev open the PR for me #147 harden again',
+    title: 'agentic-fred harden again - pr2-1533',
+    branch: 'feat-mcp-arch',
+    project: 'codev /Users/g/git/codev',
+    account: 'work',
+    recap: 'Next: push the fix',
+    prompts: ['open the PR for me', 'now address #147'],
+    hasPr: true,
+    isLive: true,
+    isPinned: false,
+    lastTimestamp: new Date(2026, 8, 4).getTime(),
+  };
+  const matches = (query: string, t = target) =>
+    compileQuery(parseQuery(query, now)).test(t);
+
+  it('bare words search the text, case-insensitively, and the session id by prefix', () => {
+    expect(matches('HARDEN codev')).toBe(true);
+    expect(matches('harden absent')).toBe(false);
+    expect(matches('4ed7')).toBe(true);
+    expect(matches('4ed')).toBe(false);
+  });
+
+  it('scoped terms look only at their field', () => {
+    expect(matches('title:pr2')).toBe(true);
+    expect(matches('title:codev')).toBe(false);
+    expect(matches('branch:mcp')).toBe(true);
+    expect(matches('project:git/codev')).toBe(true);
+    expect(matches('account:work')).toBe(true);
+    expect(matches('account:home')).toBe(false);
+    expect(matches('recap:push')).toBe(true);
+    expect(matches('msg:address')).toBe(true);
+    expect(matches('msg:harden')).toBe(false);
+  });
+
+  it('a scoped term fails on a target that lacks the field, so a caller must not compile what it cannot judge', () => {
+    expect(matches('title:pr2', { ...target, title: undefined })).toBe(false);
+    expect(matches('msg:open', { ...target, prompts: undefined })).toBe(false);
+    expect(matches('is:live', { ...target, isLive: undefined })).toBe(false);
+  });
+
+  it('has:, is:, after:, before: read the flags and the timestamp', () => {
+    expect(matches('has:pr has:title has:branch has:recap')).toBe(true);
+    expect(matches('has:pr', { ...target, hasPr: false })).toBe(false);
+    expect(matches('has:recap', { ...target, recap: '' })).toBe(false);
+    expect(matches('is:live')).toBe(true);
+    expect(matches('is:pinned')).toBe(false);
+    expect(matches('after:2026-09-04')).toBe(true);
+    expect(matches('after:2026-09-05')).toBe(false);
+    expect(matches('before:2026-09-05')).toBe(true);
+    expect(matches('before:2026-09-04')).toBe(false);
+    expect(matches('after:1d', { ...target, lastTimestamp: undefined })).toBe(
+      false,
+    );
+  });
+
+  it('PR references match any spelling in the text, and every term must hold', () => {
+    expect(matches('#147')).toBe(true);
+    expect(matches('pr:147 title:pr2')).toBe(true);
+    expect(matches('pr:148')).toBe(false);
+    expect(matches('#147 title:nope')).toBe(false);
+  });
+
+  it('an ignored operator does not constrain the match', () => {
+    expect(matches('after:soon harden')).toBe(true);
+  });
+});
+
+describe('highlightNeedles / promptNeedles', () => {
+  it('collects words, scoped values and the spellings of each PR reference, deduplicated', () => {
+    const q = parseQuery('foo title:bar msg:baz #147 foo', 0);
+    expect(highlightNeedles(q)).toEqual([
+      'foo',
+      'bar',
+      'baz',
+      '#147',
+      '/pull/147',
+      '/issues/147',
+    ]);
+    expect(promptNeedles(q)).toEqual(['foo', 'foo', 'baz']);
+  });
+});
+
+describe('findPromptMatch with PR references', () => {
+  it('lands on the prompt carrying the reference when no word matches', () => {
+    const m = findPromptMatch(
+      ['setup', 'please look at o/r#147 now'],
+      [],
+      [{ number: 147 }],
+    );
+    expect(m).toEqual({
+      promptIndex: 1,
+      snippet: 'please look at o/r#147 now',
+    });
   });
 });

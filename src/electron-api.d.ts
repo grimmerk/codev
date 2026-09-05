@@ -235,6 +235,15 @@ interface IElectronAPI {
   scanClosedVSCodeSessions: (activeSessionIds: string[]) => Promise<any[]>;
   refreshSessionPreview: (sessions: any[]) => Promise<Record<string, { lastUserMessage: string; lastAssistantMessage: string }>>;
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => void;
+  /** Resume the given saved-list members that are not running; staggered, skips report why. */
+  openSessionListMembers: (
+    members: { sessionId: string; project: string; accountLabel?: string; title?: string }[],
+  ) => Promise<{
+    opened: string[];
+    skipped: { sessionId: string; reason: string }[];
+    /** Set when nothing could be attempted at all (e.g. the embedded terminal is selected). */
+    error?: string;
+  }>;
   launchNewClaudeSession: (projectPath: string, accountLabel?: string) => void;
   launchNewClaudeSessionInCodev: (projectPath: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;

@@ -4,7 +4,390 @@
  * Used by:
  * - claude-session-utility.ts — main-side full-prompt search (issue #131)
  * - switcher-ui.tsx — minor-session folding predicate
+ *
+ * The query language (issue #140, plan §4.6) lives here too: `parseQuery`
+ * turns the search box into terms, `compileQuery` turns the terms into ONE
+ * matcher that both search paths run. Two implementations of "does this
+ * session match" is how PR #137 and #147 each produced a round of drift bugs;
+ * the two callers now differ only in what they can put on the target.
  */
+
+// ---------------------------------------------------------------------------
+// Query language
+// ---------------------------------------------------------------------------
+
+/** Fields a term can be aimed at with `field:value`. */
+export type ScopedField =
+  | 'title'
+  | 'branch'
+  | 'msg'
+  | 'project'
+  | 'account'
+  | 'recap';
+
+const SCOPED_FIELDS: ReadonlySet<string> = new Set<ScopedField>([
+  'title',
+  'branch',
+  'msg',
+  'project',
+  'account',
+  'recap',
+]);
+const HAS_VALUES: ReadonlySet<string> = new Set([
+  'pr',
+  'title',
+  'branch',
+  'recap',
+]);
+const IS_VALUES: ReadonlySet<string> = new Set(['live', 'pinned']);
+const IS_ALIASES: Record<string, string> = { running: 'live', active: 'live' };
+
+/**
+ * A pull-request (or issue — GitHub numbers them together) reference. The
+ * repo is kept when the query carried one, so `grimmerk/codev#147` does not
+ * match a `fireflies/x/pull/147` URL; a bare `#147` in the target still
+ * matches either, because a bare number cannot say which repo it meant.
+ */
+export interface PrRef {
+  number: number;
+  /** `owner/repo`, lowercased. */
+  repo?: string;
+}
+
+export interface ScopedTerm {
+  field: ScopedField;
+  /** Lowercased. */
+  value: string;
+}
+
+export interface ParsedQuery {
+  /** Bare words (lowercased): today's "search everything" semantics. */
+  words: string[];
+  fields: ScopedTerm[];
+  prRefs: PrRef[];
+  /** `has:` values: `pr` `title` `branch` `recap`. */
+  has: string[];
+  /** `is:` values: `live` `pinned`. */
+  is: string[];
+  /** `after:` — sessions last active at or after this epoch ms. */
+  after?: number;
+  /** `before:` — sessions last active before this epoch ms. */
+  before?: number;
+  /**
+   * Terms recognised as operators whose value could not be used
+   * (`after:soon`, `has:tea`, `title:`). Dropped from matching and reported,
+   * so the search box can say so rather than silently ignoring them.
+   */
+  ignored: string[];
+}
+
+export const emptyQuery = (): ParsedQuery => ({
+  words: [],
+  fields: [],
+  prRefs: [],
+  has: [],
+  is: [],
+  ignored: [],
+});
+
+/** True when nothing in the query constrains the result. */
+export const isEmptyQuery = (q: ParsedQuery): boolean =>
+  q.words.length === 0 &&
+  q.fields.length === 0 &&
+  q.prRefs.length === 0 &&
+  q.has.length === 0 &&
+  q.is.length === 0 &&
+  q.after === undefined &&
+  q.before === undefined;
+
+/**
+ * Split on whitespace, honouring double quotes: `title:"foo bar"` is one
+ * token with the quotes removed (`title:foo bar`). An unterminated quote runs
+ * to the end of the query, which is what someone still typing expects.
+ */
+export const tokenizeQuery = (query: string): string[] => {
+  const out: string[] = [];
+  let cur = '';
+  let quoted = false;
+  for (const ch of query) {
+    if (ch === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (!quoted && /\s/.test(ch)) {
+      if (cur) out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+};
+
+const REPO = '[a-z0-9_.-]+\\/[a-z0-9_.-]+';
+const PR_URL_RE = new RegExp(
+  `^(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/(${REPO})\\/(?:pull|issues)\\/(\\d+)(?:[/?#].*)?$`,
+);
+const REPO_HASH_RE = new RegExp(`^(${REPO})#(\\d+)$`);
+const BARE_HASH_RE = /^#(\d+)$/;
+
+/**
+ * Read a token (lowercased) as a PR reference, or null. Forms: the GitHub
+ * URL (pull or issues, trailing path allowed), `owner/repo#N`, `#N`. Never a
+ * bare number — `1598` is a word.
+ */
+export const parsePrRef = (tokenLower: string): PrRef | null => {
+  let m = PR_URL_RE.exec(tokenLower);
+  if (m) return { number: Number(m[2]), repo: m[1] };
+  m = REPO_HASH_RE.exec(tokenLower);
+  if (m) return { number: Number(m[2]), repo: m[1] };
+  m = BARE_HASH_RE.exec(tokenLower);
+  if (m) return { number: Number(m[1]) };
+  return null;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RELATIVE_UNIT_MS: Record<string, number> = {
+  h: 60 * 60 * 1000,
+  d: DAY_MS,
+  w: 7 * DAY_MS,
+};
+
+/**
+ * A point in time for `after:` / `before:`: `YYYY-MM-DD` (local midnight),
+ * `Nh` / `Nd` / `Nw` ago, `today`, `yesterday`. Null when unreadable.
+ */
+export const parseQueryDate = (value: string, now: number): number | null => {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (iso) {
+    const [y, mo, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+    const date = new Date(y, mo - 1, d);
+    // Date rolls an out-of-range month or day forward (2026-13-40 becomes a
+    // real day in 2027); a typo must be reported, not silently moved.
+    return date.getMonth() === mo - 1 && date.getDate() === d
+      ? date.getTime()
+      : null;
+  }
+  const rel = /^(\d+)([hdw])$/.exec(value);
+  if (rel) return now - Number(rel[1]) * RELATIVE_UNIT_MS[rel[2]];
+  if (value === 'today' || value === 'yesterday') {
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() - (value === 'yesterday' ? DAY_MS : 0);
+  }
+  return null;
+};
+
+/**
+ * Parse the search box. Everything is lowercased; a token with an unknown
+ * `key:` prefix (`error:`, `12:30`, a URL that is not a PR) stays a bare
+ * word, so the operators cost nothing to queries that do not use them.
+ */
+export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
+  const q = emptyQuery();
+  for (const raw of tokenizeQuery(query)) {
+    const token = raw.toLowerCase();
+    const pr = parsePrRef(token);
+    if (pr) {
+      q.prRefs.push(pr);
+      continue;
+    }
+    const colon = token.indexOf(':');
+    const key = colon > 0 ? token.slice(0, colon) : '';
+    const value = colon > 0 ? token.slice(colon + 1) : '';
+    if (key === 'pr') {
+      // `pr:147`, `pr:o/r#147`, `pr:<url>` — a number alone is allowed here
+      // because the key already says what it is.
+      const ref = /^\d+$/.test(value)
+        ? { number: Number(value) }
+        : parsePrRef(value);
+      if (ref) q.prRefs.push(ref);
+      else q.ignored.push(raw);
+    } else if (SCOPED_FIELDS.has(key)) {
+      if (value) q.fields.push({ field: key as ScopedField, value });
+      else q.ignored.push(raw);
+    } else if (key === 'has') {
+      if (HAS_VALUES.has(value)) q.has.push(value);
+      else q.ignored.push(raw);
+    } else if (key === 'is') {
+      const v = IS_ALIASES[value] ?? value;
+      if (IS_VALUES.has(v)) q.is.push(v);
+      else q.ignored.push(raw);
+    } else if (key === 'after' || key === 'before') {
+      const t = parseQueryDate(value, now);
+      if (t === null) q.ignored.push(raw);
+      else if (key === 'after') q.after = Math.max(q.after ?? -Infinity, t);
+      else q.before = Math.min(q.before ?? Infinity, t);
+    } else if (token) {
+      q.words.push(token);
+    }
+  }
+  return q;
+};
+
+/**
+ * What a matcher needs to know about one session. Everything optional: a
+ * caller supplies what it has, and a term aimed at a field the caller could
+ * not supply simply fails for that session — so a caller that cannot judge a
+ * term must leave it out of the query it compiles (see the two callers).
+ */
+export interface QueryTarget {
+  sessionId: string;
+  /** Free text bare words and PR references search. Raw case. */
+  text: string;
+  title?: string;
+  branch?: string;
+  /** Project name and path together. */
+  project?: string;
+  account?: string;
+  recap?: string;
+  /** For `msg:` — every prompt the caller has (all of them on the main side; first/last in the renderer). */
+  prompts?: string[];
+  hasPr?: boolean;
+  isLive?: boolean;
+  isPinned?: boolean;
+  lastTimestamp?: number;
+}
+
+/**
+ * Where a PR reference occurs in `textLower`, honouring the repo when the
+ * reference carries one. Delimited forms only — `#147` never matches inside
+ * `#1475` or `15980` — which is the rule §4.6 insists on: **never match a
+ * bare number**.
+ */
+interface PrRefPatterns {
+  ref: PrRef;
+  n: string;
+  hash: RegExp;
+  url: RegExp;
+}
+
+// Built once per query, not once per session.
+const prRefPatterns = (ref: PrRef): PrRefPatterns => {
+  const n = String(ref.number);
+  return {
+    ref,
+    n,
+    // `#N` and `owner/repo#N`. The optional repo group is anchored by the
+    // boundary before it, so `foo/bar#12` captures `foo/bar`, not `o/bar`.
+    hash: new RegExp(`(?:^|[^0-9a-z_./-])((?:${REPO})?)#${n}(?!\\d)`, 'g'),
+    url: new RegExp(
+      `github\\.com\\/(${REPO})\\/(?:pull|issues)\\/${n}(?!\\d)`,
+      'g',
+    ),
+  };
+};
+
+const findPrRefWith = (
+  textLower: string,
+  p: PrRefPatterns,
+): { index: number; length: number } | null => {
+  const { ref, n, hash, url } = p;
+  // Most sessions never mention the number at all; a substring check is far
+  // cheaper than either regex over a session's whole prompt text. Measured
+  // over 560 sessions: a PR-reference keystroke cost ~20ms without this,
+  // against ~8ms for a bare word.
+  if (!textLower.includes(n)) return null;
+  hash.lastIndex = 0;
+  for (let m = hash.exec(textLower); m; m = hash.exec(textLower)) {
+    const repo = m[1];
+    if (ref.repo && repo && repo !== ref.repo) continue;
+    const at = m.index + m[0].length - n.length - 1 - repo.length;
+    return { index: at, length: repo.length + 1 + n.length };
+  }
+  url.lastIndex = 0;
+  for (let m = url.exec(textLower); m; m = url.exec(textLower)) {
+    if (ref.repo && m[1] !== ref.repo) continue;
+    return { index: m.index, length: m[0].length };
+  }
+  return null;
+};
+
+export const findPrRef = (
+  textLower: string,
+  ref: PrRef,
+): { index: number; length: number } | null =>
+  findPrRefWith(textLower, prRefPatterns(ref));
+
+export interface QueryMatcher {
+  test: (target: QueryTarget) => boolean;
+  query: ParsedQuery;
+}
+
+/**
+ * One matcher for one query. Every term must hold (AND), and a term that
+ * looks at a field the target does not carry fails — the caller decides what
+ * it can judge by what it compiles, not by how the matcher forgives.
+ */
+export const compileQuery = (query: ParsedQuery): QueryMatcher => {
+  const lower = (s: string | undefined) => (s ?? '').toLowerCase();
+  const prPatterns = query.prRefs.map(prRefPatterns);
+  const test = (t: QueryTarget): boolean => {
+    const textLower = t.text.toLowerCase();
+    for (const w of query.words) {
+      if (!textLower.includes(w) && !matchesSessionId(t.sessionId, w))
+        return false;
+    }
+    for (const p of prPatterns) {
+      if (!findPrRefWith(textLower, p)) return false;
+    }
+    for (const { field, value } of query.fields) {
+      if (field === 'msg') {
+        if (!(t.prompts ?? []).some((p) => p.toLowerCase().includes(value)))
+          return false;
+      } else if (!lower(t[field]).includes(value)) {
+        return false;
+      }
+    }
+    for (const h of query.has) {
+      const present =
+        h === 'pr'
+          ? !!t.hasPr
+          : h === 'title'
+            ? !!t.title
+            : h === 'branch'
+              ? !!t.branch
+              : !!t.recap;
+      if (!present) return false;
+    }
+    for (const i of query.is) {
+      if (i === 'live' ? !t.isLive : !t.isPinned) return false;
+    }
+    if (
+      query.after !== undefined &&
+      !((t.lastTimestamp ?? -Infinity) >= query.after)
+    )
+      return false;
+    if (
+      query.before !== undefined &&
+      !((t.lastTimestamp ?? Infinity) < query.before)
+    )
+      return false;
+    return true;
+  };
+  return { test, query };
+};
+
+/**
+ * Strings worth highlighting in a matched row: bare words, scoped values, and
+ * the `#N` / `/pull/N` spellings of each PR reference. Highlighting is
+ * cosmetic — `#147` will also light up inside `#1475` on a row that matched
+ * for another reason — so it deliberately does not re-run the matcher.
+ */
+export const highlightNeedles = (q: ParsedQuery): string[] => {
+  const out = [...q.words, ...q.fields.map((f) => f.value)];
+  for (const r of q.prRefs) {
+    out.push(`#${r.number}`, `/pull/${r.number}`, `/issues/${r.number}`);
+  }
+  return [...new Set(out.filter(Boolean))];
+};
+
+/** The words a prompt snippet should be centred on: bare words and `msg:` values. */
+export const promptNeedles = (q: ParsedQuery): string[] => [
+  ...q.words,
+  ...q.fields.filter((f) => f.field === 'msg').map((f) => f.value),
+];
 
 export interface PromptMatch {
   /** 0-based index into the session's prompt list (0 = first user message). */
@@ -73,6 +456,7 @@ export const extractSnippet = (
 export const findPromptMatch = (
   prompts: string[],
   wordsLower: string[],
+  prRefs: PrRef[] = [],
 ): PromptMatch | null => {
   for (let i = 0; i < prompts.length; i++) {
     const lower = prompts[i].toLowerCase();
@@ -82,6 +466,15 @@ export const findPromptMatch = (
         return {
           promptIndex: i,
           snippet: extractSnippet(prompts[i], idx, w.length),
+        };
+      }
+    }
+    for (const ref of prRefs) {
+      const hit = findPrRef(lower, ref);
+      if (hit) {
+        return {
+          promptIndex: i,
+          snippet: extractSnippet(prompts[i], hit.index, hit.length),
         };
       }
     }

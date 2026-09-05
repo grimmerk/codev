@@ -13,8 +13,12 @@ import {
   mergeSessionsById,
 } from './session-list-view';
 import {
-  matchesAllWordsOrId,
+  compileQuery,
+  emptyQuery,
+  highlightNeedles,
+  isEmptyQuery,
   matchesSessionId,
+  parseQuery,
   truncateMiddle,
   windowAroundMatch,
 } from './session-search';
@@ -702,6 +706,13 @@ function SwitcherApp() {
   });
   const [viewingListId, setViewingListId] = useState<string | null>(null);
   const [confirmDeleteListId, setConfirmDeleteListId] = useState<string | null>(null);
+  // "Open the members not running" (issue #145): armed by a first click,
+  // fired by the second, same shape as delete. `openingList` while the main
+  // process is still staggering the launches.
+  const [confirmOpenListId, setConfirmOpenListId] = useState<string | null>(null);
+  const [openingList, setOpeningList] = useState(false);
+  // The query-language cheat sheet under the search box (issue #140).
+  const [searchHelpOpen, setSearchHelpOpen] = useState(false);
   const [listsNotice, setListsNotice] = useState<string | null>(null);
   // Set when the lists store exists but cannot be trusted as written — a
   // file an earlier build wrote, or hand-edited. Persistent until repaired
@@ -761,24 +772,70 @@ function SwitcherApp() {
     fetchVSCodeBasedIDESqlite(); //retryFetchRecentProjectRecord();
   };
 
+  // Sessions the ps join saw running — the `is:live` answer, and the "not
+  // running" side of opening a list. A registration-only fallback for the
+  // moment before the first report lands.
+  const liveSessionIds = () => {
+    const ids = new Set<string>();
+    for (const p of liveReport?.live ?? []) if (p.sessionId) ids.add(p.sessionId);
+    if (!liveReport) for (const id of Object.keys(activeStateRef.current)) ids.add(id);
+    return ids;
+  };
+  const isRunning = (s: { sessionId: string; isActive?: boolean }, liveIds: Set<string>) =>
+    liveIds.has(s.sessionId) || (!liveReport && !!s.isActive);
+
+  // The SAME matcher the main-side search runs (session-search.ts), over
+  // what this side has: first/last prompt, enrichment, a saved-list member's
+  // captured fields, and the two things only this side can judge — `is:live`
+  // (the ps join) and `is:pinned` (the pin store). The session id is
+  // searchable too, by the prefix rule in matchesSessionId (#142).
   const filterSessionsLocally = (allItems: any[], query: string) => {
-    if (!query.trim()) return allItems;
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const parsed = parseQuery(query);
+    if (isEmptyQuery(parsed)) return allItems;
+    const matcher = compileQuery(parsed);
+    const liveIds = liveSessionIds();
     return allItems.filter((s) => {
-      const prInfo = prLinks[s.sessionId];
-      const terminalBadge = terminalApps[s.sessionId] || ((s as any).entrypoint === 'claude-vscode' ? 'vscode' : '');
-      // The session id is searchable too — by the prefix rule in
-      // matchesSessionId, shared with the main-side searchClaudeSessions so
-      // both paths agree on what an id query is (#142: the id is the one
-      // field that stays unique when several sessions share a name).
+      const id = s.sessionId;
+      const prInfo = prLinks[id];
+      const terminalBadge = terminalApps[id] || ((s as any).entrypoint === 'claude-vscode' ? 'vscode' : '');
       // A saved-list member whose session is gone has only what was captured;
       // search those fields too, or a query on its captured title drops it.
-      const captured = s.__listMember;
-      const capturedText = captured
-        ? `${captured.title || ''} ${captured.branch || ''} ${captured.recap?.text || ''} ${captured.lastUserMessage || ''} ${captured.lastAssistantMessage || ''}`
-        : '';
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''} ${terminalBadge} ${capturedText}`.toLowerCase();
-      return matchesAllWordsOrId(searchTarget, s.sessionId, words);
+      const captured = s.__listMember as SessionListMember | undefined;
+      const title = customTitles[id] || captured?.title;
+      const branch = branches[id] || captured?.branch;
+      const recap = recaps[id]?.text || captured?.recap?.text;
+      const prompts = [s.firstUserMessage, s.lastUserMessage, captured?.lastUserMessage].filter(
+        (p): p is string => !!p,
+      );
+      const text = [
+        s.projectName,
+        s.project,
+        s.firstUserMessage,
+        s.lastUserMessage,
+        title,
+        branch,
+        prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : '',
+        assistantResponses[id],
+        terminalBadge,
+        recap,
+        captured?.lastAssistantMessage,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      return matcher.test({
+        sessionId: id,
+        text,
+        title,
+        branch,
+        project: `${s.projectName ?? ''} ${s.project ?? ''}`,
+        account: s.accountLabel,
+        recap,
+        prompts,
+        hasPr: !!prInfo,
+        isLive: isRunning(s, liveIds),
+        isPinned: id in sessionMarks.pins,
+        lastTimestamp: s.lastTimestamp,
+      });
     });
   };
 
@@ -838,13 +895,30 @@ function SwitcherApp() {
     const base = filterSessionsLocally(candidates, query);
     if (!query.trim() || deepMatchesRef.current.length === 0) return base;
     const seen = new Set(base.map((s: any) => s.sessionId));
+    // The main side judged every term it can see; `is:` it cannot (the ps
+    // join and the pin store live here), so a deep match still has to pass
+    // those before it is appended.
+    const parsed = parseQuery(query);
+    const isMatcher =
+      parsed.is.length > 0 ? compileQuery({ ...emptyQuery(), is: parsed.is }) : null;
+    const liveIds = liveSessionIds();
     const extra = deepMatchesRef.current
       .filter((s: any) => !seen.has(s.sessionId))
       .map((s: any) => ({
         ...s,
         isActive: s.sessionId in activeStateRef.current,
         activePid: activeStateRef.current[s.sessionId],
-      }));
+      }))
+      .filter(
+        (s: any) =>
+          !isMatcher ||
+          isMatcher.test({
+            sessionId: s.sessionId,
+            text: '',
+            isLive: isRunning(s, liveIds),
+            isPinned: s.sessionId in sessionMarks.pins,
+          }),
+      );
     if (extra.length === 0) return base;
     const merged = [...base, ...extra];
     merged.sort(
@@ -943,17 +1017,22 @@ function SwitcherApp() {
     customTitles,
     branches,
     prLinks,
+    recaps,
     assistantResponses,
     terminalApps,
     extraPinnedSessions,
     extraScopeSessions,
+    // `is:live` and `is:pinned` read these; a row must (dis)appear when
+    // they change, not on the next keystroke.
+    liveReport,
+    sessionMarks,
   ]);
 
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
-  const searchWordsLower = sessionSearchValue
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
+  // One parse per render for everything that highlights or annotates a row.
+  const parsedSearch = parseQuery(sessionSearchValue);
+  const searchHighlightWords = highlightNeedles(parsedSearch);
+  const searchWordsLower = searchHighlightWords.map((w) => w.toLowerCase());
   // One rule for every length-capped line in a row: while searching, the window
   // moves to the first match so you can see WHY the row is in the results;
   // otherwise it keeps both ends, because these titles put the newest step last.
@@ -1276,6 +1355,7 @@ function SwitcherApp() {
     setLiveOnly(false);
     setViewingListId(id);
     setConfirmDeleteListId(null);
+    setConfirmOpenListId(null);
     setSelectedSessionIndex(0);
     // Members resolve their running state from the ps join as well as the
     // registration map (see activeFrom in session-list-view.ts), so viewing a
@@ -1285,7 +1365,39 @@ function SwitcherApp() {
   };
   const closeList = () => {
     setViewingListId(null);
+    setConfirmOpenListId(null);
     setSelectedSessionIndex(0);
+  };
+  // Resume the members of a list that are not running (issue #145). The
+  // main process staggers the launches and reports what it skipped; the
+  // running set is re-read on return so the rows turn green as they register.
+  const openListMembers = async (members: SessionListMember[]) => {
+    setConfirmOpenListId(null);
+    if (members.length === 0 || openingList) return;
+    setOpeningList(true);
+    try {
+      const r = await window.electronAPI.openSessionListMembers(
+        members.map((m) => ({
+          sessionId: m.sessionId,
+          project: m.project,
+          accountLabel: m.accountLabel,
+          title: m.title,
+        })),
+      );
+      if (r?.error) {
+        showListsNotice(r.error);
+      } else if (r && r.skipped.length > 0) {
+        const byReason = new Map<string, number>();
+        for (const s of r.skipped) byReason.set(s.reason, (byReason.get(s.reason) ?? 0) + 1);
+        const why = [...byReason].map(([reason, n]) => `${n} ${reason}`).join(', ');
+        showListsNotice(`Opened ${r.opened.length}, skipped ${r.skipped.length} (${why})`);
+      }
+    } catch {
+      showListsNotice('open failed');
+    } finally {
+      setOpeningList(false);
+      refreshLiveReport();
+    }
   };
   const deleteList = async (id: string) => {
     try {
@@ -2435,6 +2547,30 @@ function SwitcherApp() {
                 outline: 'none',
               }}
             />
+            {/* The query language (issue #140) has no discoverability of its
+                own; one chip opens the cheat sheet. */}
+            <span
+              role="button"
+              tabIndex={0}
+              aria-pressed={searchHelpOpen}
+              title={searchHelpOpen ? 'Hide search syntax' : 'Search syntax: title: branch: msg: has:pr is:live after:7d #147 …'}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setSearchHelpOpen((v) => !v)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSearchHelpOpen((v) => !v);
+                }
+              }}
+              style={{
+                ...SCOPE_CHIP_STYLE,
+                border: `1px solid ${searchHelpOpen ? '#888' : '#444'}`,
+                color: searchHelpOpen ? '#ddd' : '#888',
+                padding: '1px 5px',
+              }}
+            >
+              ?
+            </span>
             {/* Scope chips: live processes (issue #94) and saved lists
                 (issue #145). Here, not in the list, because this row has
                 spare width and the list has no spare height. */}
@@ -2547,6 +2683,52 @@ function SwitcherApp() {
                   : `${pinnedOnlyActive ? displayedSessions.length : sessions.length} sessions`}
             </span>
           </div>
+          {searchHelpOpen && (
+            <div
+              style={{
+                margin: '4px 15px 0',
+                padding: '6px 8px',
+                border: '1px solid #3a3a3a',
+                borderRadius: '4px',
+                color: THEME.text.secondary,
+                fontSize: '11px',
+                lineHeight: '17px',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              }}
+            >
+              <div>
+                <span style={{ color: '#ddd' }}>title:</span>x{'  '}
+                <span style={{ color: '#ddd' }}>branch:</span>x{'  '}
+                <span style={{ color: '#ddd' }}>msg:</span>x{'  '}
+                <span style={{ color: '#ddd' }}>project:</span>x{'  '}
+                <span style={{ color: '#ddd' }}>account:</span>x{'  '}
+                <span style={{ color: '#ddd' }}>recap:</span>x{'  '}
+                <span style={{ color: '#ddd' }}>"two words"</span>
+              </div>
+              <div>
+                <span style={{ color: '#ddd' }}>has:</span>pr|title|branch|recap{'  '}
+                <span style={{ color: '#ddd' }}>is:</span>live|pinned{'  '}
+                <span style={{ color: '#ddd' }}>after:</span>7d|2026-09-01|today{'  '}
+                <span style={{ color: '#ddd' }}>before:</span>…
+              </div>
+              <div>
+                <span style={{ color: '#ddd' }}>#147</span>{'  '}
+                <span style={{ color: '#ddd' }}>pr:147</span>{'  '}
+                <span style={{ color: '#ddd' }}>owner/repo#147</span>{'  '}
+                <span style={{ color: '#ddd' }}>https://github.com/…/pull/147</span>
+                {'  '}— any spelling finds the others, in prompts and in what the assistant said
+              </div>
+              <div>
+                bare words search everything; a session id matches by prefix (4+ hex chars); every term must hold
+              </div>
+            </div>
+          )}
+          {parsedSearch.ignored.length > 0 && (
+            <div style={{ margin: '4px 15px 0', color: '#e0b060', fontSize: '11px' }}>
+              ⚠ ignored: {parsedSearch.ignored.join(' ')}
+              {' '}— unreadable value (see <span style={{ color: '#ddd' }}>?</span>)
+            </div>
+          )}
           {/* The store exists but cannot be trusted as written. Say so, with
               what it holds — never rewrite it from here (same policy as the
               marks store; a future format change gets a migration, not a
@@ -2590,6 +2772,69 @@ function SwitcherApp() {
                     ✎
                   </span>
                 </span>
+                {(() => {
+                  // Only the members NOT running, by the ps join: pressing
+                  // it twice opens nothing the second time. The projected
+                  // cost is on the button because that cost — a process per
+                  // session — is exactly why this is a deliberate act.
+                  const liveIds = liveSessionIds();
+                  const notRunning = viewingList.members.filter((m) => !isRunning(m, liveIds));
+                  const n = notRunning.length;
+                  const meanKb =
+                    liveReport && liveReport.live.length > 0
+                      ? liveReport.totalRssKb / liveReport.live.length
+                      : 145 * 1024;
+                  const projected = formatMb(n * meanKb);
+                  const armed = confirmOpenListId === viewingList.id;
+                  const idle = n === 0 || openingList;
+                  const label = openingList
+                    ? 'opening…'
+                    : n === 0
+                      ? 'all running'
+                      : armed
+                        ? `open ${n} · ~${projected}?`
+                        : `▶ open ${n}`;
+                  const fire = () => {
+                    if (idle) return;
+                    if (armed) openListMembers(notRunning);
+                    else setConfirmOpenListId(viewingList.id);
+                  };
+                  return (
+                    <span
+                      role="button"
+                      tabIndex={idle ? -1 : 0}
+                      aria-disabled={idle}
+                      title={
+                        n === 0
+                          ? 'Every member of this list has a running process'
+                          : armed
+                            ? `Click again to resume ${n} session${n === 1 ? '' : 's'} in the configured terminal (~${projected} of processes, one every 0.7s)`
+                            : `Resume the ${n} member${n === 1 ? '' : 's'} not running · ~${projected} of processes`
+                      }
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fire();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          fire();
+                        }
+                      }}
+                      style={{
+                        ...LISTS_CHIP_STYLE,
+                        marginLeft: 'auto',
+                        marginRight: '6px',
+                        cursor: idle ? 'default' : 'pointer',
+                        color: idle ? '#666' : armed ? '#e0b060' : LISTS_CHIP_STYLE.color,
+                        border: `1px solid ${idle ? '#3a3a3a' : armed ? '#e0b060' : '#4a6a8a'}`,
+                      }}
+                    >
+                      {label}
+                    </span>
+                  );
+                })()}
                 <span
                   role="button"
                   tabIndex={0}
@@ -2858,7 +3103,7 @@ function SwitcherApp() {
                         )}
                         <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
                           <Highlighter
-                            searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                            searchWords={searchHighlightWords}
                             autoEscape
                             textToHighlight={session.projectName}
                             highlightStyle={SEARCH_HIGHLIGHT_STYLE}
@@ -2877,7 +3122,7 @@ function SwitcherApp() {
                             }}
                           >
                             {' '}* <Highlighter
-                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              searchWords={searchHighlightWords}
                               autoEscape
                               textToHighlight={fitToRow(
                                 customTitles[session.sessionId] || session.__listMember?.title || '',
@@ -2890,7 +3135,7 @@ function SwitcherApp() {
                         {(branches[session.sessionId] || session.__listMember?.branch) && (
                           <span style={{ color: '#888', fontSize: '11px', fontStyle: 'italic' }}>
                             {' '}[<Highlighter
-                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              searchWords={searchHighlightWords}
                               autoEscape
                               textToHighlight={fitToRow(
                                 branches[session.sessionId] || session.__listMember?.branch || '',
@@ -2972,7 +3217,7 @@ function SwitcherApp() {
                             on when the match is not already visible). */}
                         {isSearchingSessions &&
                           !session.__liveOrphan &&
-                          searchWordsLower.some((w) => matchesSessionId(session.sessionId, w)) && (
+                          parsedSearch.words.some((w) => matchesSessionId(session.sessionId, w)) && (
                             <span
                               style={{
                                 fontSize: '10px',
@@ -2989,10 +3234,14 @@ function SwitcherApp() {
                           )}
                         {prLinks[session.sessionId] && (() => {
                           const prInfo = prLinks[session.sessionId];
-                          const searchWords = sessionSearchValue.split(/\s+/).filter(Boolean);
+                          const searchWords = searchHighlightWords;
                           // Highlight badge when search matches PR URL (not just badge text)
-                          const urlMatch = searchWords.length > 0 && searchWords.some((w: string) =>
-                            prInfo.prUrl.toLowerCase().includes(w.toLowerCase()));
+                          // or names this PR by number in any spelling.
+                          const urlMatch =
+                            (searchWords.length > 0 &&
+                              searchWords.some((w: string) =>
+                                prInfo.prUrl.toLowerCase().includes(w.toLowerCase()))) ||
+                            parsedSearch.prRefs.some((r) => r.number === prInfo.prNumber);
                           return (
                             <span
                               style={{
@@ -3012,6 +3261,7 @@ function SwitcherApp() {
                             >
                               <Highlighter
                                 searchWords={searchWords}
+                                autoEscape
                                 textToHighlight={`PR #${prInfo.prNumber}`}
                                 highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                               />
@@ -3048,7 +3298,8 @@ function SwitcherApp() {
                               textTransform: 'uppercase',
                             }}>
                               <Highlighter
-                                searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                                searchWords={searchHighlightWords}
+                                autoEscape
                                 textToHighlight={badge}
                                 highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                               />
@@ -3069,7 +3320,7 @@ function SwitcherApp() {
                         {(sessionDisplayMode === 'first' || sessionDisplayMode === 'both') && session.firstUserMessage && (
                           <span style={{ color: '#999', fontSize: '12px' }}>
                             <Highlighter
-                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              searchWords={searchHighlightWords}
                               autoEscape
                               textToHighlight={fitToRow(
                                 session.firstUserMessage || '',
@@ -3082,7 +3333,7 @@ function SwitcherApp() {
                         {sessionDisplayMode === 'last' && session.lastUserMessage && (
                           <span style={{ color: '#c89030', fontSize: '12px' }}>
                             <Highlighter
-                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              searchWords={searchHighlightWords}
                               autoEscape
                               textToHighlight={fitToRow(
                                 session.lastUserMessage || '',
@@ -3096,7 +3347,7 @@ function SwitcherApp() {
                           <span style={{ color: '#c89030', fontSize: '12px' }}>
                             {'  →  '}
                             <Highlighter
-                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              searchWords={searchHighlightWords}
                               autoEscape
                               textToHighlight={fitToRow(
                                 session.lastUserMessage || '',
@@ -3113,7 +3364,7 @@ function SwitcherApp() {
                     {(() => {
                       const m = searchSnippets[session.sessionId];
                       if (!m || !isSearchingSessions) return null;
-                      const words = sessionSearchValue.split(/\s+/).filter(Boolean);
+                      const words = searchHighlightWords;
                       // Stale guard: snippet must still match the current query
                       if (!words.some((w) => m.snippet.toLowerCase().includes(w.toLowerCase()))) return null;
                       const dupFirst = m.promptIndex === 0 && (sessionDisplayMode === 'first' || sessionDisplayMode === 'both');
@@ -3163,7 +3414,7 @@ function SwitcherApp() {
                                 recap{stale ? ' ⏱' : ''}
                               </span>{' '}
                               <Highlighter
-                                searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                                searchWords={searchHighlightWords}
                                 autoEscape
                                 textToHighlight={fitToRow(recap.text, 110)}
                                 highlightStyle={SEARCH_HIGHLIGHT_STYLE}
@@ -3178,7 +3429,7 @@ function SwitcherApp() {
                         <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
                           <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
                             ◀ <Highlighter
-                              searchWords={sessionSearchValue.split(/\s+/).filter(Boolean)}
+                              searchWords={searchHighlightWords}
                               autoEscape
                               textToHighlight={fitToRow(reply, 80)}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}

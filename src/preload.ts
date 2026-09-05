@@ -111,6 +111,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   refreshSessionPreview: (sessions: any[]) => ipcRenderer.invoke('refresh-session-preview', sessions),
   openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) =>
     ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid, customTitle),
+  openSessionListMembers: (
+    members: { sessionId: string; project: string; accountLabel?: string; title?: string }[],
+  ) => ipcRenderer.invoke('open-session-list-members', members),
   launchNewClaudeSession: (projectPath: string, accountLabel?: string) =>
     ipcRenderer.send('launch-new-claude-session', projectPath, accountLabel),
   launchNewClaudeSessionInCodev: (projectPath: string) =>
