@@ -134,6 +134,8 @@ interface IElectronAPI {
 
   // Session terminal settings
   getSessionTerminalApp: () => Promise<string>;
+  /** Normal app mode: back to the default size, centred, and forget the remembered bounds (#148). */
+  resetSwitcherWindowBounds: () => Promise<void>;
   setSessionTerminalApp: (app: string) => void;
   getSessionTerminalMode: () => Promise<string>;
   setSessionTerminalMode: (mode: string) => void;

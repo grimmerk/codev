@@ -2437,6 +2437,25 @@ function SwitcherApp() {
               {quickSwitcherShortcut}
             </span>
           )}
+          {currentAppMode === 'normal' && (
+            <span
+              role="button"
+              tabIndex={0}
+              title="Reset the window to its default size and position"
+              onClick={() => window.electronAPI.resetSwitcherWindowBounds()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  window.electronAPI.resetSwitcherWindowBounds();
+                }
+              }}
+              style={{ fontSize: '11px', color: '#555', cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#555'; }}
+            >
+              ⤢
+            </span>
+          )}
           <div
             style={{
               display: 'flex',

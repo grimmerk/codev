@@ -2384,6 +2384,17 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
   }
 });
 
+// Normal app mode: the default size, centred, and the remembered bounds
+// forgotten — macOS has no "reset" convention (zoom restores the previous
+// user size), so the header offers one (#148).
+ipcMain.handle('reset-switcher-window-bounds', async () => {
+  const window = getSwitcherWindow();
+  if (!window) return;
+  const position = getWindowPosition();
+  window.setBounds({ x: position.x, y: position.y, width: WIN_WIDTH, height: WIN_HEIGHT }, false);
+  await settings.unset('switcher-window-bounds').catch(() => {});
+});
+
 ipcMain.handle('get-session-terminal-app', async () => {
   return (await settings.get('session-terminal-app')) || 'iterm2';
 });
