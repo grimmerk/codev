@@ -663,7 +663,13 @@ function SwitcherApp() {
     keptLists: number;
     keptMembers: number;
   } | null>(null);
-  const [saveListPrompt, setSaveListPrompt] = useState<{ name: string; count: number } | null>(null);
+  // One dialog for two jobs: naming a new list (`count` set) and renaming an
+  // existing one (`renameId` set). Same input, same keys, one code path.
+  const [saveListPrompt, setSaveListPrompt] = useState<{
+    name: string;
+    count: number;
+    renameId?: string;
+  } | null>(null);
   // Rows a scope needs that are outside the loaded list (list members, live
   // sessions older than the window), fetched by id — same mechanism as pins.
   const [extraScopeSessions, setExtraScopeSessions] = useState<ListViewSession[]>([]);
@@ -1175,8 +1181,25 @@ function SwitcherApp() {
     setSaveListPrompt(null);
     setTimeout(() => sessionSearchRef.current?.focus(), 0);
   };
+  const openRenameListPrompt = (id: string) => {
+    const current = sessionLists.find((l) => l.id === id);
+    if (!current) return;
+    setSaveListPrompt({ name: current.name, count: current.members.length, renameId: id });
+  };
   const saveList = () => {
     if (!saveListPrompt) return;
+    if (saveListPrompt.renameId) {
+      // Rename: an empty name keeps the old one (the store does the same).
+      const id = saveListPrompt.renameId;
+      const name = saveListPrompt.name.trim();
+      closeSaveListPrompt();
+      if (!name) return;
+      window.electronAPI
+        .renameSessionList(id, name)
+        .then(applyListsResult)
+        .catch(() => showListsNotice('rename failed'));
+      return;
+    }
     const members = captureDisplayedSessions();
     const name =
       saveListPrompt.name.trim() || nextListName(sessionLists.map((l) => l.name));
@@ -2390,6 +2413,26 @@ function SwitcherApp() {
               <div style={LISTS_HEADER_STYLE}>
                 <span title={`Saved ${new Date(viewingList.createdAt).toLocaleString()}`}>
                   🗂 {viewingList.name} ({viewingList.members.length}) · saved {formatRelativeTime(viewingList.createdAt)}
+                  {' '}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title="Rename this list"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openRenameListPrompt(viewingList.id);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openRenameListPrompt(viewingList.id);
+                      }
+                    }}
+                    style={{ cursor: 'pointer', color: '#666', fontSize: '11px' }}
+                  >
+                    ✎
+                  </span>
                 </span>
                 <span
                   role="button"
@@ -2444,6 +2487,26 @@ function SwitcherApp() {
                       {' · '}
                       {l.members.slice(0, 4).map((m) => m.title || m.projectName).join(' · ')}
                       {l.members.length > 4 ? ' …' : ''}
+                    </span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      title="Rename this list"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openRenameListPrompt(l.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          openRenameListPrompt(l.id);
+                        }
+                      }}
+                      style={{ cursor: 'pointer', fontSize: '11px', flexShrink: 0, color: '#666' }}
+                    >
+                      ✎
                     </span>
                     <span
                       role="button"
@@ -3361,14 +3424,20 @@ function SwitcherApp() {
             }}
           >
             <div style={{ fontSize: '11px', color: '#888', padding: '2px 4px 8px' }}>
-              Save {saveListPrompt.count} session{saveListPrompt.count === 1 ? '' : 's'} as a list (Enter · Esc)
+              {saveListPrompt.renameId
+                ? `Rename this list (${saveListPrompt.count} session${saveListPrompt.count === 1 ? '' : 's'}) — Enter · Esc`
+                : `Save ${saveListPrompt.count} session${saveListPrompt.count === 1 ? '' : 's'} as a list (Enter · Esc)`}
             </div>
             <input
               autoFocus
               value={saveListPrompt.name}
               onChange={(e) => setSaveListPrompt({ ...saveListPrompt, name: e.target.value })}
               onFocus={(e) => e.target.select()}
-              placeholder={nextListName(sessionLists.map((l) => l.name))}
+              placeholder={
+                saveListPrompt.renameId
+                  ? sessionLists.find((l) => l.id === saveListPrompt.renameId)?.name
+                  : nextListName(sessionLists.map((l) => l.name))
+              }
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
