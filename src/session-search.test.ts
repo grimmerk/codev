@@ -521,7 +521,7 @@ describe('findPrRef', () => {
   // Claude Code writes for a pasted screenshot.
   it('does not read the [Image #N] paste marker as a reference, but still finds a real one after it', () => {
     expect(
-      findPrRef('[image #151] 我剛測試打包版', { number: 151 }),
+      findPrRef('[image #151] tested the packaged build', { number: 151 }),
     ).toBeNull();
     expect(findPrRef('[Image #151]'.toLowerCase(), { number: 151 })).toBeNull();
     expect(findPrRef('[image #151] then see #151', { number: 151 })).toEqual({
