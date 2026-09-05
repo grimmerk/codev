@@ -571,6 +571,68 @@ const nextListName = (existing: string[]): string => {
 
 /** Caution it will be invoked twice due to <React.StrictMode> !! */
 let loadTimes = 0;
+/**
+ * One tooltip for the whole window, drawn by us. Native `title` tooltips are
+ * painted by Chromium only while the window is the key window, and a
+ * frameless popup that the pointer merely crosses usually is not — measured
+ * in the first live test as "the tooltip almost never shows". Elements carry
+ * `data-tip` instead; this layer reads it on hover and positions a box under
+ * the element, clamped to the viewport.
+ */
+function TooltipLayer() {
+  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    const onOver = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('[data-tip]') as HTMLElement | null;
+      const text = el?.getAttribute('data-tip');
+      if (!el || !text) {
+        setTip(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      setTip({ text, x: r.left, y: r.bottom + 6 });
+    };
+    const onLeave = () => setTip(null);
+    document.addEventListener('mouseover', onOver);
+    document.addEventListener('mousedown', onLeave);
+    document.addEventListener('mouseleave', onLeave);
+    window.addEventListener('blur', onLeave);
+    return () => {
+      document.removeEventListener('mouseover', onOver);
+      document.removeEventListener('mousedown', onLeave);
+      document.removeEventListener('mouseleave', onLeave);
+      window.removeEventListener('blur', onLeave);
+    };
+  }, []);
+  if (!tip) return null;
+  const maxWidth = 360;
+  const left = Math.max(8, Math.min(tip.x, window.innerWidth - maxWidth - 8));
+  return (
+    <div
+      role="tooltip"
+      style={{
+        position: 'fixed',
+        left,
+        top: Math.min(tip.y, window.innerHeight - 60),
+        maxWidth,
+        padding: '5px 8px',
+        backgroundColor: '#3a3a3a',
+        color: '#e6e6e6',
+        border: '1px solid #555',
+        borderRadius: '4px',
+        fontSize: '11px',
+        lineHeight: '15px',
+        whiteSpace: 'pre-wrap',
+        pointerEvents: 'none',
+        zIndex: 10000,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+      }}
+    >
+      {tip.text}
+    </div>
+  );
+}
+
 function SwitcherApp() {
   const optionPress = useRef(false);
   const launchClaudeRef = useRef<'external' | 'codev' | 'external-pick' | null>(null);
@@ -2429,7 +2491,7 @@ function SwitcherApp() {
           {quickSwitcherShortcut && (
             <span
               onClick={() => setSettingsOpenToTab('shortcuts')}
-              title="Click to customize shortcuts"
+              data-tip="Click to customize shortcuts"
               style={{ fontSize: '10px', color: '#555', cursor: 'pointer' }}
               onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = '#555'; }}
@@ -2441,7 +2503,7 @@ function SwitcherApp() {
             <span
               role="button"
               tabIndex={0}
-              title="Reset the window to its default size and position"
+              data-tip="Reset the window to its default size and position"
               onClick={() => window.electronAPI.resetSwitcherWindowBounds()}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -2678,7 +2740,7 @@ function SwitcherApp() {
               role="button"
               tabIndex={0}
               aria-pressed={searchHelpOpen}
-              title={searchHelpOpen ? 'Hide search syntax' : 'Search syntax: title: branch: msg: has:pr is:live after:7d #147 …'}
+              data-tip={searchHelpOpen ? 'Hide search syntax' : 'Search syntax: title: branch: msg: has:pr is:live after:7d #147 …'}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setSearchHelpOpen((v) => !v)}
               onKeyDown={(e) => {
@@ -2703,7 +2765,7 @@ function SwitcherApp() {
                 role="button"
                 tabIndex={0}
                 aria-pressed={sortByMatch}
-                title={
+                data-tip={
                   sortByMatch
                     ? 'Ordered by when the match happened; click for last activity'
                     : 'Order by when the match happened instead of the session’s last activity'
@@ -2732,7 +2794,7 @@ function SwitcherApp() {
               role="button"
               tabIndex={0}
               aria-pressed={liveOnlyActive}
-              title={
+              data-tip={
                 liveOnlyActive
                   ? `Show every session again${liveReport ? ` · measured ${formatRelativeTime(liveReport.measuredAt)}; re-read on each open and on toggling${memorySummary ? ` · ${memorySummary}` : ''}` : ''}`
                   : `Show only sessions with a running process${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}${memorySummary ? ` · ${memorySummary}` : ''}`
@@ -2755,7 +2817,7 @@ function SwitcherApp() {
                 in the live chip's tooltip. */}
             {memoryWarning && (
               <span
-                title={`${memoryWarning.detail} — close sessions (save a list first) or quit heavy apps; macOS only clears swap on a restart`}
+                data-tip={`${memoryWarning.detail} — close sessions (save a list first) or quit heavy apps; macOS only clears swap on a restart`}
                 style={{
                   ...SCOPE_CHIP_STYLE,
                   cursor: 'default',
@@ -2771,7 +2833,7 @@ function SwitcherApp() {
                 role="button"
                 tabIndex={0}
                 aria-pressed={liveStats}
-                title={
+                data-tip={
                   liveStats
                     ? 'Hide per-row memory and uptime'
                     : 'Show each running session’s memory and uptime (which one to close first)'
@@ -2793,7 +2855,7 @@ function SwitcherApp() {
               <span
                 role="button"
                 tabIndex={0}
-                title="Save the sessions shown as a named list"
+                data-tip="Save the sessions shown as a named list"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={(e) => {
                   // The document-level click handler refocuses the search box
@@ -2816,7 +2878,7 @@ function SwitcherApp() {
               role="button"
               tabIndex={0}
               aria-pressed={listsExpanded}
-              title={
+              data-tip={
                 sessionLists.length === 0
                   ? 'No saved lists yet — scope the list (live / only / search) and click "save list…"'
                   : listsExpanded
@@ -2921,13 +2983,13 @@ function SwitcherApp() {
             {/* A list being viewed: its header replaces every other zone. */}
             {listViewActive && viewingList && (
               <div style={LISTS_HEADER_STYLE}>
-                <span title={`Saved ${new Date(viewingList.createdAt).toLocaleString()}`}>
+                <span data-tip={`Saved ${new Date(viewingList.createdAt).toLocaleString()}`}>
                   🗂 {viewingList.name} ({viewingList.members.length}) · saved {formatRelativeTime(viewingList.createdAt)}
                   {' '}
                   <span
                     role="button"
                     tabIndex={0}
-                    title="Rename this list"
+                    data-tip="Rename this list"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -2976,7 +3038,7 @@ function SwitcherApp() {
                       role="button"
                       tabIndex={idle ? -1 : 0}
                       aria-disabled={idle}
-                      title={
+                      data-tip={
                         n === 0
                           ? 'Every member of this list has a running process'
                           : armed
@@ -3010,7 +3072,7 @@ function SwitcherApp() {
                 <span
                   role="button"
                   tabIndex={0}
-                  title="Back to every session"
+                  data-tip="Back to every session"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={closeList}
                   onKeyDown={(e) => {
@@ -3053,7 +3115,7 @@ function SwitcherApp() {
                       role="button"
                       tabIndex={0}
                       aria-label={`Open list ${l.name}, ${l.members.length} sessions`}
-                      title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
+                      data-tip={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => openList(l.id)}
                       onKeyDown={(e) => {
@@ -3076,7 +3138,7 @@ function SwitcherApp() {
                       role="button"
                       tabIndex={0}
                       aria-label={`Rename list ${l.name}`}
-                      title="Rename this list"
+                      data-tip="Rename this list"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -3097,7 +3159,7 @@ function SwitcherApp() {
                       role="button"
                       tabIndex={0}
                       aria-label={`Delete list ${l.name}`}
-                      title={confirmDeleteListId === l.id ? 'Click again to delete this list' : 'Delete this list'}
+                      data-tip={confirmDeleteListId === l.id ? 'Click again to delete this list' : 'Delete this list'}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -3130,7 +3192,7 @@ function SwitcherApp() {
                 <span
                   role="button"
                   tabIndex={0}
-                  title={
+                  data-tip={
                     canGroupPins
                       ? 'Click to group pins at the top / leave them in time order · ⌘D pin/unpin · ⇧⌘D hide'
                       : 'Grouping applies while browsing every session'
@@ -3154,7 +3216,7 @@ function SwitcherApp() {
                   role="button"
                   tabIndex={0}
                   aria-pressed={pinnedOnlyActive}
-                  title={
+                  data-tip={
                     pinnedOnlyActive
                       ? 'Show every session again'
                       : 'Show — and search — pinned sessions only'
@@ -3278,7 +3340,7 @@ function SwitcherApp() {
                           <span style={{ color: '#f5b942', fontSize: '12px', marginRight: '3px' }}>★</span>
                         )}
                         {hiddenSet.has(session.sessionId) && (
-                          <span title="Hidden session" style={{ color: '#e07a5f', fontSize: '11px', marginRight: '3px' }}>⊘</span>
+                          <span data-tip="Hidden session" style={{ color: '#e07a5f', fontSize: '11px', marginRight: '3px' }}>⊘</span>
                         )}
                         <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
                           <Highlighter
@@ -3293,7 +3355,7 @@ function SwitcherApp() {
                             still reads as the session it was. */}
                         {(customTitles[session.sessionId] || session.__listMember?.title) && (
                           <span
-                            title={customTitles[session.sessionId] || session.__listMember?.title}
+                            data-tip={customTitles[session.sessionId] || session.__listMember?.title}
                             style={{
                               color: '#7ec87e',
                               fontSize: '13px',
@@ -3322,7 +3384,7 @@ function SwitcherApp() {
                                     : null;
                                 return tag ? (
                                   <span
-                                    title="Two or more running sessions share this title; this is the one on this terminal"
+                                    data-tip="Two or more running sessions share this title; this is the one on this terminal"
                                     style={{ color: '#888', fontSize: '10px', fontWeight: 'normal' }}
                                   >
                                     {' '}·{tag}
@@ -3349,7 +3411,7 @@ function SwitcherApp() {
                         {index === selectedSessionIndex && !session.__liveOrphan && (
                           <>
                             <span
-                              title={sessionMarks.pins[session.sessionId] ? 'Unpin (⌘D)' : 'Pin (⌘D)'}
+                              data-tip={sessionMarks.pins[session.sessionId] ? 'Unpin (⌘D)' : 'Pin (⌘D)'}
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={(e) => { e.stopPropagation(); togglePin(session); }}
                               style={{ cursor: 'pointer', fontSize: '11px', color: sessionMarks.pins[session.sessionId] ? '#f5b942' : '#777' }}
@@ -3357,7 +3419,7 @@ function SwitcherApp() {
                               📌
                             </span>
                             <span
-                              title={hiddenSet.has(session.sessionId) ? 'Unhide' : session.__pinnedRow ? 'Unpin & hide into minor sessions (⇧⌘D)' : 'Hide into minor sessions (⇧⌘D)'}
+                              data-tip={hiddenSet.has(session.sessionId) ? 'Unhide' : session.__pinnedRow ? 'Unpin & hide into minor sessions (⇧⌘D)' : 'Hide into minor sessions (⇧⌘D)'}
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={(e) => { e.stopPropagation(); toggleHide(session); }}
                               style={{ cursor: 'pointer', fontSize: '11px', color: hiddenSet.has(session.sessionId) ? '#e07a5f' : '#666' }}
@@ -3386,7 +3448,7 @@ function SwitcherApp() {
                               {liveStats && (
                                 <span
                                   style={LIVE_INFO_STYLE}
-                                  title={`pid ${live.pid}${live.tty ? ` on ${live.tty}` : ' (no terminal)'} · resident memory · time since the process started`}
+                                  data-tip={`pid ${live.pid}${live.tty ? ` on ${live.tty}` : ' (no terminal)'} · resident memory · time since the process started`}
                                 >
                                   {formatMb(live.rssKb)} · {formatUptime(live.uptimeSec)}
                                 </span>
@@ -3394,7 +3456,7 @@ function SwitcherApp() {
                               {!live.registered && (
                                 <span
                                   style={LIVE_WARN_STYLE}
-                                  title="Running, but not registered in ~/.claude/sessions — invisible to the usual active-session detection"
+                                  data-tip="Running, but not registered in ~/.claude/sessions — invisible to the usual active-session detection"
                                 >
                                   ⚠ unregistered
                                 </span>
@@ -3402,7 +3464,7 @@ function SwitcherApp() {
                               {session.__liveExtra && (
                                 <span
                                   style={LIVE_WARN_STYLE}
-                                  title={`A second process is running this same session (pid ${live.pid}) — a resumed copy, or a /branch parent and child`}
+                                  data-tip={`A second process is running this same session (pid ${live.pid}) — a resumed copy, or a /branch parent and child`}
                                 >
                                   ⚠ 2nd process
                                 </span>
@@ -3426,7 +3488,7 @@ function SwitcherApp() {
                                 padding: '1px 5px',
                                 fontFamily: 'Menlo, monospace',
                               }}
-                              title={session.sessionId}
+                              data-tip={session.sessionId}
                             >
                               id {session.sessionId.slice(0, 8)}
                             </span>
@@ -3452,7 +3514,7 @@ function SwitcherApp() {
                                 cursor: 'pointer',
                                 backgroundColor: urlMatch ? 'rgba(126, 200, 227, 0.2)' : 'transparent',
                               }}
-                              title={prInfo.prUrl}
+                              data-tip={prInfo.prUrl}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 window.electronAPI.openExternal(prInfo.prUrl);
@@ -3477,7 +3539,7 @@ function SwitcherApp() {
                               padding: '1px 4px',
                               textTransform: 'uppercase',
                             }}
-                            title={`Claude account: ${session.accountLabel}`}
+                            data-tip={`Claude account: ${session.accountLabel}`}
                           >
                             {session.accountLabel}
                           </span>
@@ -3592,7 +3654,7 @@ function SwitcherApp() {
                                     <span
                                       role="button"
                                       tabIndex={-1}
-                                      title="Previous hit in this session"
+                                      data-tip="Previous hit in this session"
                                       style={{ cursor: 'pointer', padding: '0 2px' }}
                                       onClick={() => setHitIndex((h) => ({ ...h, [id]: (k - 1 + hits.length) % hits.length }))}
                                     >
@@ -3602,7 +3664,7 @@ function SwitcherApp() {
                                     <span
                                       role="button"
                                       tabIndex={-1}
-                                      title="Next hit in this session"
+                                      data-tip="Next hit in this session"
                                       style={{ cursor: 'pointer', padding: '0 2px' }}
                                       onClick={() => setHitIndex((h) => ({ ...h, [id]: (k + 1) % hits.length }))}
                                     >
@@ -3614,7 +3676,7 @@ function SwitcherApp() {
                                   <span
                                     role="button"
                                     tabIndex={-1}
-                                    title={expanded ? 'Hide the prompts around this hit' : 'Show the prompts before and after this hit'}
+                                    data-tip={expanded ? 'Hide the prompts around this hit' : 'Show the prompts before and after this hit'}
                                     style={{ color: '#777', fontSize: '10px', cursor: 'pointer', padding: '0 3px' }}
                                     onMouseDown={stop}
                                     onClick={(e) => {
@@ -3712,7 +3774,7 @@ function SwitcherApp() {
                             <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
                               <span
                                 style={RECAP_MARKER_STYLE}
-                                title={
+                                data-tip={
                                   writtenAt
                                     ? `Recap written ${formatRelativeTime(writtenAt)}${stale ? ` — ${formatUptime(lagMs / 1000)} before the session's last activity, so its "next step" may be done` : ''}`
                                     : 'Recap (time unknown)'
@@ -3872,7 +3934,7 @@ function SwitcherApp() {
           IndicatorSeparator: () => null,
           DropdownIndicator: () => (
             <div
-              title="\u2325\u2318+Enter: choose the account first"
+              data-tip="\u2325\u2318+Enter: choose the account first"
               style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}
             >
               {isMultiAccountUI
@@ -4197,7 +4259,12 @@ export default SwitcherApp;
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
   const root = ReactDOM.createRoot(document.getElementById('switcher-root'));
-  root.render(<SwitcherApp />);
+  root.render(
+    <>
+      <SwitcherApp />
+      <TooltipLayer />
+    </>,
+  );
 
   console.log('SwitcherApp rendered');
 });
