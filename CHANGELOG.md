@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.87
+
+- Feat: saved session lists and a live-process view, on the Session Buddy model ([#145](https://github.com/grimmerk/codev/issues/145), [#94](https://github.com/grimmerk/codev/issues/94))
+  - **`● N live` chip** next to the search box scopes the list to sessions with a running process; the total memory they hold shows beside it. A **`stats`** toggle (off by default, remembered) adds each row's **memory and uptime** for the "which one to close first" moment — off by default because on most rows those figures track the message count closely enough to be noise. Pid and terminal device live in the tooltip. Measured while building it: 36 `claude` processes held 4.66GB while the terminal app itself held 368MB
+  - The live view is built by joining `ps` against `~/.claude/sessions/`, not by trusting the registration files: a session that is running but never registered shows up marked **`⚠ unregistered`** (invisible to every other view), and a registration whose process is gone is counted as stale in the chip's tooltip instead of being shown as a ghost. The same join also tells a saved-list member whether it is running, so clicking a running session that has no history row yet (a fresh `/branch` child) switches to it instead of resuming a second copy
+  - **`save list…`** captures what is on screen — the live set, the pinned set, or a search result — as a named list, stored in `~/.config/codev/session-lists.json`
+  - **`🗂 N` chip** shows the saved lists; click one to view its members in the order they were captured and resume any of them. Lists can be renamed (`✎` on the row or in the list header) and deleted (`✕`, confirmed with a second click). The default name is today's `MMDD` — a label, not an identity — and becomes `MMDD-2`, `MMDD-3` on a second save that day. A member whose transcript is gone still reads as the session it was, because the list stored its title, branch and last messages
+  - Each member carries the **recap line** Claude Code writes into the transcript (`away_summary` — "where we are, what's next"), shown on the row in place of the last reply. Measured: 65 of 66 non-trivial sessions have one. A recap that predates the session's last activity by more than 30 minutes is marked `⏱`, because its "next step" may already be done
+  - **Search matches the session id** (both search paths, one shared rule), so the id a terminal status line shows finds the session — the one field that stays unique when several sessions share a name ([#142](https://github.com/grimmerk/codev/issues/142)). The rule is a **prefix of at least four hex characters**, never a substring — `de` or `cafe` would otherwise match nearly every session through its id. A row that matched on its id shows an `id 4ed7505a` marker, since the id is not otherwise on screen
+  - A session with **two running processes** (a resumed copy, or a `/branch` parent and child) shows both in the live scope, the second marked `⚠ 2nd process`, so the chip's count and the list agree and the memory total adds every process
+  - The marks and lists stores are now written with owner-only permissions (`0600`); the lists store carries conversation snippets
+  - **A scope survives resuming from it.** Open a session from a saved list or from the live scope, come back, and you are still in that list / that scope — a scope is a place to work through several sessions. Only the search box is cleared on return, as before
+  - Deliberately absent: an "open all" button. Reopening 22 browser tabs is cheap; resuming 22 sessions is ~3GB of processes, which is the problem this feature exists to relieve
+  - Under the hood: the marks store and the new lists store share one atomic-JSON-store module (`src/atomic-json-store.ts`) — the read-authority invariant PR #137 spent four review rounds on now has exactly one implementation. 53 new unit tests (lists normalize / transitions / file roundtrip / normalizer fixed point / untrusted-file inspection, `ps` parsing and the live join, list-view scopes, session-id prefix search) — 138 total
+
 ## 1.0.86
 
 - Feat: session rows are readable again when titles are long

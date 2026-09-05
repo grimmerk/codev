@@ -20,6 +20,36 @@ export const matchesAllWords = (
 ): boolean => wordsLower.every((w) => haystackLower.includes(w));
 
 /**
+ * Does a query word name a session by its id? A PREFIX of at least four hex
+ * characters (hyphens allowed), never a substring: the id is searchable so
+ * the one a terminal status line shows can be typed in, and people type it
+ * from the start. A substring rule would make `de` or `cafe` match nearly
+ * every session on the machine through its id, regardless of content.
+ */
+export const matchesSessionId = (
+  sessionId: string,
+  wordLower: string,
+): boolean =>
+  wordLower.length >= 4 &&
+  /^[0-9a-f-]+$/.test(wordLower) &&
+  sessionId.toLowerCase().startsWith(wordLower);
+
+/**
+ * `matchesAllWords` plus the id rule: every word must match the text OR
+ * the session id. One definition for both search paths (main-side prompt
+ * search and the renderer's field filter), so they cannot disagree about
+ * what an id query is.
+ */
+export const matchesAllWordsOrId = (
+  haystackLower: string,
+  sessionId: string,
+  wordsLower: string[],
+): boolean =>
+  wordsLower.every(
+    (w) => haystackLower.includes(w) || matchesSessionId(sessionId, w),
+  );
+
+/**
  * Extract a snippet of `radius` chars on each side of the match, collapsing
  * whitespace/newlines so it renders as a single line. Ellipses mark truncation.
  */

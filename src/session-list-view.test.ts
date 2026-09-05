@@ -168,6 +168,270 @@ describe('buildSessionListView — invariants across the whole matrix', () => {
   });
 });
 
+describe('buildSessionListView — live scope', () => {
+  const active = {
+    sessionId: 'active',
+    lastTimestamp: 400,
+    messageCount: 3,
+    isActive: true,
+  };
+  const orphan = {
+    sessionId: 'pid:4242',
+    projectName: 'orphan',
+    lastTimestamp: 0,
+    __liveOrphan: true,
+  };
+
+  it('keeps only running sessions, appends orphans, and never folds a running one', () => {
+    const v = build({
+      // `junk` has 1 msg and no title — it would fold while browsing.
+      sessions: [recent, active, junk],
+      activePids: { junk: 77 },
+      liveOnly: true,
+      liveOrphans: [orphan],
+    });
+    expect(v.liveOnlyActive).toBe(true);
+    expect(ids(v.displayedSessions)).toEqual(['active', 'junk', 'pid:4242']);
+    expect(v.minorSessions).toEqual([]);
+    expect(v.canGroupPins).toBe(false);
+  });
+
+  it('never shows a synthetic row for a session a real row already covers', () => {
+    // The renderer synthesizes a row for a live id the list did not know;
+    // one render later the by-id fetch may have produced the real row.
+    // Same id AND same pid as the real row: the same process, twice.
+    const real = { ...active, activePid: 1 };
+    const synthetic = {
+      sessionId: 'active',
+      lastTimestamp: 0,
+      __live: { pid: 1, rssKb: 1, tty: null, uptimeSec: 1, registered: true },
+    };
+    const v = build({
+      sessions: [real, recent],
+      liveOnly: true,
+      liveOrphans: [synthetic, orphan],
+    });
+    expect(ids(v.displayedSessions)).toEqual(['active', 'pid:4242']);
+    expect(v.displayedSessions[0].messageCount).toBe(3); // the real row won
+  });
+
+  it('keeps a synthetic row for a SECOND process on a session a real row shows', () => {
+    // Same id, different pid: a resumed copy, or a /branch parent and child.
+    // The chip counts both; the list must show both.
+    const real = { ...active, activePid: 1 };
+    const second = {
+      sessionId: 'active',
+      lastTimestamp: 0,
+      activePid: 2,
+      __live: {
+        pid: 2,
+        rssKb: 1,
+        tty: 'ttys002',
+        uptimeSec: 1,
+        registered: true,
+      },
+      __liveExtra: true,
+    };
+    const v = build({
+      sessions: [real],
+      liveOnly: true,
+      liveOrphans: [second],
+    });
+    expect(v.displayedSessions.map((s) => s.activePid)).toEqual([1, 2]);
+  });
+
+  it('gives a timeline row its running state from the ps join, and the join pid wins over a stale map', () => {
+    // `middle` is not in the active map at all; `recent` is, but the map's
+    // pid is stale — the join says the session now runs under pid 9.
+    const v = build({
+      sessions: [recent, middle],
+      activePids: { recent: 1 },
+      liveOnly: true,
+      liveBySession: {
+        middle: {
+          pid: 5,
+          rssKb: 1,
+          tty: 'ttys005',
+          uptimeSec: 1,
+          registered: true,
+        },
+        recent: {
+          pid: 9,
+          rssKb: 1,
+          tty: 'ttys009',
+          uptimeSec: 1,
+          registered: true,
+        },
+      },
+    });
+    expect(
+      v.displayedSessions.map((s) => [s.sessionId, s.isActive, s.activePid]),
+    ).toEqual([
+      ['recent', true, 9],
+      ['middle', true, 5],
+    ]);
+    // …and a synthetic row for the SAME process as such a row is dropped.
+    const dup = {
+      sessionId: 'middle',
+      lastTimestamp: 0,
+      __live: {
+        pid: 5,
+        rssKb: 1,
+        tty: 'ttys005',
+        uptimeSec: 1,
+        registered: true,
+      },
+    };
+    const w = build({
+      sessions: [middle],
+      liveOnly: true,
+      liveBySession: { middle: dup.__live },
+      liveOrphans: [dup],
+    });
+    expect(ids(w.displayedSessions)).toEqual(['middle']);
+  });
+
+  it('does not fold junk under a saved list', () => {
+    // `junk` is in the browse list and would fold; the list scope renders
+    // members, so the fold must be empty there.
+    const v = build({
+      viewingList: {
+        id: 'L',
+        name: 'l',
+        createdAt: '2026-09-05T00:00:00Z',
+        members: [],
+      },
+    });
+    expect(v.listViewActive).toBe(true);
+    expect(v.minorSessions).toEqual([]);
+    expect(v.displayedSessions).toEqual([]);
+  });
+
+  it('recognises liveness from the live report, not only from the active map', () => {
+    const v = build({
+      sessions: [recent, middle],
+      liveOnly: true,
+      liveBySession: {
+        middle: {
+          pid: 1,
+          rssKb: 1,
+          tty: 'ttys001',
+          uptimeSec: 1,
+          registered: false,
+        },
+      },
+    });
+    expect(ids(v.displayedSessions)).toEqual(['middle']);
+  });
+
+  it('drops orphans while searching and outranks the pinned scope', () => {
+    const v = build({
+      sessions: [active, middle],
+      pins: { middle: at('2026-01-01T00:00:00Z') },
+      pinnedOnly: true,
+      liveOnly: true,
+      liveOrphans: [orphan],
+      isSearching: true,
+    });
+    expect(v.pinnedOnlyActive).toBe(false);
+    expect(ids(v.displayedSessions)).toEqual(['active']);
+  });
+});
+
+describe('buildSessionListView — saved-list scope', () => {
+  const memberOf = (sessionId: string, over: Record<string, unknown> = {}) => ({
+    sessionId,
+    project: '/p/' + sessionId,
+    projectName: sessionId + '-proj',
+    pinned: false,
+    lastTimestamp: 1,
+    ...over,
+  });
+  const list = {
+    id: 'L1',
+    name: 'tuesday',
+    createdAt: '2026-09-05T00:00:00Z',
+    // Captured order is deliberately NOT recency order.
+    members: [
+      memberOf('middle'),
+      memberOf('gone', { lastUserMessage: 'last words' }),
+      memberOf('old'),
+    ],
+  };
+
+  it('renders members in captured order, resolving rows from the list, the by-id fetch, or the capture itself', () => {
+    const v = build({
+      viewingList: list,
+      extraListSessions: [outOfWindowPin],
+    });
+    expect(v.listViewActive).toBe(true);
+    expect(ids(v.displayedSessions)).toEqual(['middle', 'gone', 'old']);
+    const [m, g, o] = v.displayedSessions;
+    expect(m.messageCount).toBe(20); // the loaded row
+    expect(o.messageCount).toBe(90); // the by-id row
+    // The placeholder carries what was captured, with no fake message count.
+    expect(g.messageCount).toBeUndefined();
+    expect(g.projectName).toBe('gone-proj');
+    expect(g.lastUserMessage).toBe('last words');
+    expect(g.__listMember?.sessionId).toBe('gone');
+  });
+
+  it('narrows to the matched members while searching but keeps captured order', () => {
+    const v = build({
+      viewingList: list,
+      sessions: [outOfWindowPin, middle], // as if the query matched these two
+      isSearching: true,
+    });
+    expect(ids(v.displayedSessions)).toEqual(['middle', 'old']);
+  });
+
+  it('outranks both the live and the pinned scope', () => {
+    const v = build({
+      viewingList: list,
+      liveOnly: true,
+      pinnedOnly: true,
+      pins: { recent: at('2026-01-01T00:00:00Z') },
+    });
+    expect(v.liveOnlyActive).toBe(false);
+    expect(v.pinnedOnlyActive).toBe(false);
+    expect(ids(v.displayedSessions)).toEqual(['middle', 'gone', 'old']);
+  });
+
+  it('marks a member as active from the active map even for a placeholder', () => {
+    const v = build({ viewingList: list, activePids: { gone: 99 } });
+    const g = v.displayedSessions.find((s) => s.sessionId === 'gone');
+    expect(g?.isActive).toBe(true);
+    expect(g?.activePid).toBe(99);
+  });
+
+  it('marks a member as active from the ps join when the active map missed it', () => {
+    // A running session with no history row is invisible to the
+    // registration-based detection; a click on it would RESUME (a second
+    // process) instead of switching. The live report knows better.
+    const live = {
+      pid: 4242,
+      rssKb: 1,
+      tty: 'ttys009',
+      uptimeSec: 5,
+      registered: true,
+    };
+    const v = build({ viewingList: list, liveBySession: { gone: live } });
+    const g = v.displayedSessions.find((s) => s.sessionId === 'gone');
+    expect(g?.isActive).toBe(true);
+    expect(g?.activePid).toBe(4242);
+    // Same rule for a pinned placeholder.
+    const p = build({
+      pins: { ghost: at('2026-01-01T00:00:00Z') },
+      liveBySession: { ghost: live },
+    });
+    expect(p.pinnedRows[0]).toMatchObject({
+      sessionId: 'ghost',
+      isActive: true,
+      activePid: 4242,
+    });
+  });
+});
+
 describe('mergeSessionsById', () => {
   it('appends only rows the primary list does not already have', () => {
     const merged = mergeSessionsById(

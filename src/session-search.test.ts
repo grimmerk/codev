@@ -5,6 +5,8 @@ import {
   findPromptMatch,
   isMinorSession,
   matchesAllWords,
+  matchesAllWordsOrId,
+  matchesSessionId,
   truncateMiddle,
   windowAroundMatch,
 } from './session-search';
@@ -279,5 +281,35 @@ describe('truncateMiddle lower boundary', () => {
     expect(truncateMiddle('ab', 1)).toBe('…');
     expect(truncateMiddle('abcdef', 2).length).toBe(2);
     expect(truncateMiddle('abcdef', 3).length).toBe(3);
+  });
+});
+
+describe('matchesSessionId — the id is a prefix target, not a substring', () => {
+  const id = '4ed7505a-eae6-43a5-827b-465c8b5eb759';
+
+  it('matches a hex prefix of four or more characters, hyphens allowed', () => {
+    expect(matchesSessionId(id, '4ed7')).toBe(true);
+    expect(matchesSessionId(id, '4ed7505a-eae6')).toBe(true);
+    expect(matchesSessionId(id, id)).toBe(true);
+    expect(matchesSessionId(id, '4ED7'.toLowerCase())).toBe(true);
+  });
+
+  it('refuses short or non-hex words, and anything not at the start', () => {
+    // `de`, `cafe`-style fragments appear inside nearly every UUID; as
+    // substrings they would match the whole corpus regardless of content.
+    expect(matchesSessionId(id, 'de')).toBe(false);
+    expect(matchesSessionId(id, 'eae6')).toBe(false); // inside, not a prefix
+    expect(matchesSessionId(id, '4ed7x')).toBe(false);
+    expect(matchesSessionId(id, '')).toBe(false);
+  });
+
+  it('matchesAllWordsOrId lets each word hit the text or the id', () => {
+    const text = 'fred-ff nextjs backend and mcp arch';
+    expect(matchesAllWordsOrId(text, id, ['nextjs', '4ed7'])).toBe(true);
+    expect(matchesAllWordsOrId(text, id, ['nextjs', 'eae6'])).toBe(false);
+    // Plain text search is unchanged by the id rule.
+    expect(matchesAllWordsOrId(text, id, ['mcp', 'arch'])).toBe(
+      matchesAllWords(text, ['mcp', 'arch']),
+    );
   });
 });
