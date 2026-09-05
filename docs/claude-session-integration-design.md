@@ -174,6 +174,112 @@ Could supplement with branch name, AI summary, and PR info in Phase 2.
 
 The "30 days" in Claude Code's data-usage docs refers to **server-side** retention, not local. Local files are **not observed to be auto-deleted** — `history.jsonl` entries persist 5+ months, session JSONL files persist indefinitely. However, Claude Code could introduce local cleanup in a future version.
 
+## Flow at a glance
+
+Three flows, in the order a user meets them: the list is built and told which rows are running (§1); a click on a row that is not running opens it (§2); a click on a running row switches to it (§3). The diagrams show the structure; the bullets under each carry the detail, and the sections further down the history.
+
+**Open or switch — how the click decides.** The row itself says: `isActive` with an `activePid`, set by §1's detection (or by the live report, for a second process on the same session id), means switch; otherwise open. The renderer passes both to `open-claude-session`, `openSession` branches on them — and a running row whose registration says `entrypoint: claude-vscode` takes the VS Code path whatever the terminal setting says.
+
+### 1. The list, and what is running
+
+```mermaid
+flowchart TB
+  subgraph rows["Session rows — claude-session-utility.ts"]
+    H["history.jsonl, one per account<br/>one line per user prompt"]
+    R["rows: id · project · first/last prompt<br/>promptCount · account"]
+    E["enrichment, async, cached by transcript size<br/>title · branch · PR badge · recap · mined PR refs"]
+    S["hook status files → dot colour<br/>working · idle · needs-attention"]
+    H --> R --> E --> S
+  end
+  subgraph det["Running? — detectActiveSessions()"]
+    REG["~/.claude/sessions/PID.json<br/>written at start, deleted at exit — best-effort"]
+    ALIVE{"pid alive?"}
+    KNOWN{"sessionId in history?"}
+    EXACT["row.activePid = pid<br/>EXACT"]
+    GUESS["one same-cwd candidate, or a terminal-tab title<br/>row.activePid = pid — GUESSED"]
+    DOT["purple dot · terminal badge<br/>provenance kept: isGuessedPid, read by §3"]
+    REG --> ALIVE
+    ALIVE -- no --> SKIP["skip"]
+    ALIVE -- yes --> KNOWN
+    KNOWN -- yes --> EXACT
+    KNOWN -- no --> GUESS
+    EXACT --> DOT
+    GUESS --> DOT
+  end
+  subgraph live["Live view — live-sessions.ts, PR 147"]
+    PS["ps: every live claude process<br/>pid · tty · RSS · uptime"]
+    JOIN["registrations ⋈ processes, by pid<br/>registered or not · stale registration"]
+    CHIP["● live N · ttysNNN tag on same-titled rows<br/>⚠ unregistered · swap chip"]
+    PS --> JOIN --> CHIP
+  end
+  R -.-> KNOWN
+  REG -.-> JOIN
+```
+
+- **Rows** come from every account's `history.jsonl`; enrichment reads each transcript later (title, branch, PR badge, recap, PR refs mined from the assistant's text) and is persisted in `~/.config/codev/enrichment-cache`. Hook status files (`session-status-hooks.ts`) colour the dot: working (orange pulse), idle (green), needs-attention (blink); a `working` untouched for 10 minutes shows idle (#110).
+- **Detection** trusts a registration only when its `sessionId` is in the history (or it is a VS Code registration): that pid is *exact*. Otherwise the pid is attached by a guess — the single same-cwd candidate, or the row whose title matches a terminal tab. With no `sessions/` directory at all (old Claude Code), `ps` supplies the pids: a `--resume <id>` on the command line is exact, an `lsof` cwd match is a guess.
+- **The live view** joins the registrations with the process table, so it also shows processes that never registered, registrations whose process is gone, per-process tty / RSS / uptime, and the machine's swap and memory-pressure figures (`sysctl`); the swap chip appears past 8GB or at warn / critical.
+
+### 2. Open — a row that is not running
+
+```mermaid
+flowchart TB
+  CLICK["click / Enter on a row that is not running<br/>⌘+Enter on a project · ▶ open N on a saved list"]
+  IPC["IPC open-claude-session / open-session-list-members — main.ts<br/>path safe to embed · unknown account label dropped<br/>open N: not-running members only, 700 ms apart"]
+  OS["openSession() — Settings › Terminal decides"]
+  IT["iTerm2<br/>AppleScript: new tab or window, write text"]
+  TA["Terminal.app<br/>AppleScript: do script"]
+  GH["Ghostty<br/>AppleScript: new tab or window, initial input"]
+  CM["cmux<br/>CLI: new workspace"]
+  VS["VS Code<br/>open -b IDE, then the URI handler once the extension is ready"]
+  CV["CodeV<br/>the embedded Term tab"]
+  CMD["cd PROJECT, then: command claude --resume SESSION-ID<br/>CLAUDE_CONFIG_DIR=DIR prefixed for a non-anchor account"]
+  CLICK --> IPC --> OS
+  OS --> IT
+  OS --> TA
+  OS --> GH
+  OS --> CM
+  OS --> CV
+  OS --> VS
+  IT --> CMD
+  TA --> CMD
+  GH --> CMD
+  CM --> CMD
+  CV --> CMD
+```
+
+- The IPC layer refuses a project path that could end a shell or AppleScript string literal, drops an account label no configured account carries, and — for `▶ open N` — resumes only the members that are not running, 700 ms apart, reporting each failure.
+- The command is `cd "<project>" && command claude --resume <id>`, prefixed with `CLAUDE_CONFIG_DIR='<dir>'` when the session belongs to a non-anchor account (multi-account, PR #122); `command` skips the shell's `claude` dispatcher. VS Code opens the project (`open -b <ide>`) and fires the extension's URI handler once the IDE lock file says the extension is ready.
+
+### 3. Switch — a row that is running (purple dot)
+
+```mermaid
+flowchart TB
+  CLICK["click on a running row"]
+  OS["openSession(isActive, activePid)<br/>detectTerminalApp(pid): walk the parent processes<br/>the terminal the process lives in wins over the setting"]
+  PROV{"isGuessedPid(pid)?"}
+  TTY1["registered, exact<br/>tty → title → activate only"]
+  TITLE1["cwd / tab-title guess<br/>title → tty → activate only"]
+  KEYS["terminal-switch.ts builds the AppleScript<br/>tty: ps -o tty= vs tty of session / tab<br/>title: the /rename title vs name of session / custom title of tab<br/>no title → tty only"]
+  GH["Ghostty<br/>title → cwd → not found: resume command to the clipboard<br/>no per-tab tty (ghostty 11592, issue 63)"]
+  CM["cmux<br/>cmux tree --all: title → surface tty → cwd → project name"]
+  VS["VS Code — registration says claude-vscode<br/>focus the window, then the URI handler"]
+  CV["CodeV<br/>switch to the Term tab"]
+  CLICK --> OS
+  OS -- "iTerm2 / Terminal.app" --> PROV
+  PROV -- no --> TTY1
+  PROV -- yes --> TITLE1
+  TTY1 --> KEYS
+  TITLE1 --> KEYS
+  OS --> GH
+  OS --> CM
+  OS --> VS
+  OS --> CV
+```
+
+- `detectTerminalApp` walks the parent processes (up to 20 levels), so a session running in cmux is switched with cmux's logic even when the setting says iTerm2; the setting only decides where a *new* session opens.
+- iTerm2 and Terminal.app try both keys when the session has a title, in the order the pid's provenance calls for (see "Switch matching order" under iTerm2 integration for the table and the history); with no title, tty is the only key. Ghostty has no per-tab tty (#63) and falls back from title to cwd, then copies the resume command to the clipboard. cmux reads its own `tree --all` for surface titles and ttys.
+
 ## Current Implementation
 
 ### Architecture
@@ -277,14 +383,23 @@ Detection Flow:
 | Action | Method |
 |--------|--------|
 | **Detect** | `ps aux` → extract `--resume <id>` from args, or `lsof` for cwd |
-| **Switch** | Three-layer AppleScript matching: (1) title match → (2) TTY fallback → (3) not found |
+| **Switch** | Three-layer AppleScript matching: (1) TTY match → (2) title fallback → (3) not found (order flipped in PR #152, see below) |
 | **Launch (tab)** | AppleScript: `create tab with default profile` + `write text` |
 | **Launch (window)** | AppleScript: `create window with default profile` + `write text` |
 
-**Switch matching order (title first for same-cwd accuracy):**
-1. **Title match** — if session has `/rename` custom title, match against iTerm2 tab `name of s contains "title"`. Most precise for same-cwd sessions.
-2. **TTY match** — match process TTY against iTerm2 session TTYs. Precise when PID-session mapping is correct.
+**Switch matching order follows the pid's provenance (PR #152; `src/terminal-switch.ts`).** Two keys can find the tab, and both are tried — only the order changes (a session with no custom title has only the tty key):
+1. **TTY match** — the process's tty against iTerm2 session ttys. A process has exactly one controlling terminal, so this cannot pick a sibling *when the pid is right*; it jumps to the guessed process's tab when the pid was a guess.
+2. **Title match** — the `/rename` custom title, `name of s contains "title"`. Unique only when the user kept it so (three `/branch` siblings under 2.1.260 shared one; a session opened twice does too).
 3. **Not found** — activates iTerm2 without switching.
+
+| Where the pid came from | Order | Why |
+|---|---|---|
+| `~/.claude/sessions/<pid>.json` whose `sessionId` is in `history.jsonl` (or a VS Code registration) — *exact* | tty → title | Registration + `ps` join (PR #147) make the pid exact; titles are the non-unique key |
+| Attached by a guess: the registration names a session the history does not know (a fresh `claude` with no prompt yet, a `/branch` child before its first prompt, post-`/clear`), so the pid went to the single same-cwd candidate or to the row whose title matched a terminal tab; or old Claude Code with no registrations (`--resume <id>` from `ps`, `lsof` cwd) | title → tty | The pre-#152 order. `868db59` (2026-03-21) put title first because a guessed pid's tty had picked the wrong tab during a `claude -r` picker; with a guess in hand the title, when there is one, is the better bet |
+
+History: title-first was the order from 2026-03-21 to PR #152 because *every* pid was potentially a guess then — the registration file was read (since PR #67) but never validated, so the code could not tell a registered pid from a guessed one. PR #147's `ps` join made that distinction available; PR #152 first flipped the order to tty-first for everything (the `/branch`-sibling case in #142 C0), then narrowed it to exact pids only. `isGuessedPid` in `claude-session-utility.ts` is the classification: whatever the last detection attached outside the two registration paths.
+
+**Where TTY is relied on** (the list to revisit when Ghostty exposes a per-tab tty, #63): the iTerm2 and Terminal.app switch scripts above, `detectTerminalApp` (parent-process walk), the live view's `·ttysNNN` tag for same-titled rows (the tty comes from `live-sessions.ts`, the tag is rendered in `switcher-ui.tsx`; PR #152), and `openSessionInGhostty`, which today has only title → cwd and would gain the same TTY layer.
 
 **Workarounds discovered:**
 - `ps -o tty=` output has trailing whitespace → pipe through `tr -d '[:space:]'`
@@ -295,7 +410,7 @@ Detection Flow:
 | Action | Method |
 |--------|--------|
 | **Detect** | Process tree walk → `commLower === 'terminal'` or `commLower.includes('terminal.app')` |
-| **Switch** | Two-layer AppleScript matching: (1) title match → (2) TTY fallback |
+| **Switch** | Two-layer AppleScript matching, ordered by pid provenance like iTerm2 (PR #152): exact pid → TTY then title; guessed pid → title then TTY |
 | **Launch (tab)** | AppleScript: `do script "cmd" in front window` |
 | **Launch (window)** | AppleScript: `do script "cmd"` (standalone) |
 
@@ -379,10 +494,10 @@ Session-related settings are only visible when in Sessions mode (fixes popup int
 
 | Terminal | Detect | Switch | Launch | External Access |
 |----------|--------|--------|--------|----------------|
-| iTerm2 ✅ | `ps` + `lsof` + tty | Title match → TTY fallback | AppleScript: new tab/window + execute | No restriction |
+| iTerm2 ✅ | `ps` + `lsof` + tty | Exact pid: TTY match → title fallback; guessed pid: title → TTY (PR #152) | AppleScript: new tab/window + execute | No restriction |
 | Ghostty ✅ | `ps` + parent tree | Title match → cwd fallback | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
-| cmux ✅ | `ps` + `lsof` | Title match → cwd fallback → project name fallback (surface-level) | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll` |
-| Terminal.app ✅ | `ps` + tty | Title match → TTY fallback | AppleScript: new tab/window + execute | No restriction |
+| cmux ✅ | `ps` + `lsof` | Title match → surface TTY → cwd fallback → project name fallback (surface-level) | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll` |
+| Terminal.app ✅ | `ps` + tty | Same order rule as iTerm2 | AppleScript: new tab/window + execute | No restriction |
 | Custom | — | — | User command template / clipboard | — |
 
 ### Same-CWD Session Matching
@@ -424,7 +539,7 @@ Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of sessio
 | `claude` or `claude -r` (picker), `/rename`'d but not yet exited | Yes (but detection wrong without cross-ref) | Cross-reference fixes detection ✓ → Title match ✓ | Detection wrong → may click wrong item |
 | `claude` or `claude -r` (picker), never `/rename`'d | No | **Unsolvable** | cwd fallback ✗ |
 
-**Key difference**: iTerm2 and Terminal.app have TTY matching as fallback — when detection has the correct PID, they can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty lacks per-tab TTY, so without a custom title + same cwd, it falls back to cwd matching which may switch to the wrong tab. cmux also lacks native TTY in AppleScript, but compensates via its `tree --all` CLI which exposes per-surface TTY for cross-reference.
+**Key difference**: iTerm2 and Terminal.app have TTY matching — first when the pid is exact, as the fallback when it was guessed (see "Switch matching order" under iTerm2 integration) — so when detection has the correct PID they can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty lacks per-tab TTY, so without a custom title + same cwd, it falls back to cwd matching which may switch to the wrong tab. cmux also lacks native TTY in AppleScript, but compensates via its `tree --all` CLI which exposes per-surface TTY for cross-reference.
 
 **Detection with `sessions/` (v1.0.44+)**: Most cases are resolved by direct sessionId matching against history.jsonl. Cross-reference only needed after `/clear` (sessionId mismatch) with multiple same-cwd sessions — a rare combination. The "unsolvable" case (no `/rename` + same cwd) is now limited to cross-reference fallback scenarios, not the primary detection path.
 

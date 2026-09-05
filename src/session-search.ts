@@ -554,6 +554,7 @@ export const findPromptMatch = (
   wordsLower: string[],
   prRefs: PrRef[] = [],
   repos?: string[],
+  radius = 40,
 ): PromptMatch | null => {
   for (let i = 0; i < prompts.length; i++) {
     const lower = prompts[i].toLowerCase();
@@ -562,7 +563,7 @@ export const findPromptMatch = (
       if (idx !== -1) {
         return {
           promptIndex: i,
-          snippet: extractSnippet(prompts[i], idx, w.length),
+          snippet: extractSnippet(prompts[i], idx, w.length, radius),
         };
       }
     }
@@ -571,12 +572,129 @@ export const findPromptMatch = (
       if (hit) {
         return {
           promptIndex: i,
-          snippet: extractSnippet(prompts[i], hit.index, hit.length),
+          snippet: extractSnippet(prompts[i], hit.index, hit.length, radius),
         };
       }
     }
   }
   return null;
+};
+
+/** One hit in a session's prompt list (issue #146): where, when, and its neighbours. */
+export interface PromptHit extends PromptMatch {
+  /** Epoch ms of the matched prompt, 0 when unknown. */
+  at: number;
+  /** The prompt before / after the hit, for the context lines; capped. */
+  before?: string;
+  after?: string;
+}
+
+const CONTEXT_CAP = 200;
+const capContext = (s: string | undefined): string | undefined => {
+  // Code units bound code points from above, so a short string needs no split.
+  if (s === undefined || s.length <= CONTEXT_CAP) return s;
+  // Count and cut by code point: a cut inside a surrogate pair renders as
+  // U+FFFD, and a code-unit count would put an ellipsis on text that fit.
+  const points = Array.from(s);
+  return points.length <= CONTEXT_CAP
+    ? s
+    : `${points.slice(0, CONTEXT_CAP).join('')}…`;
+};
+
+/**
+ * EVERY prompt a query hits, in order, up to `limit` — `findPromptMatch`
+ * returns only the first, which is why a session with twelve hits used to
+ * show one. Each hit carries its time (for sorting by when the match
+ * happened rather than by the session's last activity) and its
+ * neighbouring prompts (the smallest useful version of a reader).
+ */
+export const findPromptHits = (
+  prompts: string[],
+  times: number[],
+  wordsLower: string[],
+  prRefs: PrRef[] = [],
+  repos?: string[],
+  limit = 20,
+): PromptHit[] => {
+  const hits: PromptHit[] = [];
+  for (let i = 0; i < prompts.length && hits.length < limit; i++) {
+    // A wide snippet: the row caps it to its width (#148), so a wider
+    // window shows more of the sentence rather than the same 80 characters.
+    const one = findPromptMatch([prompts[i]], wordsLower, prRefs, repos, 160);
+    if (!one) continue;
+    hits.push({
+      promptIndex: i,
+      snippet: one.snippet,
+      at: times[i] ?? 0,
+      before: capContext(i > 0 ? prompts[i - 1] : undefined),
+      after: capContext(i + 1 < prompts.length ? prompts[i + 1] : undefined),
+    });
+  }
+  return hits;
+};
+
+/** Which fields of a target a query touched — the answer to "why is this row here" (issue #141). */
+export type MatchField =
+  | 'title'
+  | 'branch'
+  | 'project'
+  | 'path'
+  | 'prompt'
+  | 'recap'
+  | 'reply'
+  | 'assistant'
+  | 'pr'
+  | 'id';
+
+/**
+ * The fields a query matched in, for a target that already passed the
+ * matcher. Every bare word and PR reference is checked against each named
+ * field separately; a field is listed once. Fields the caller did not supply
+ * are simply absent, so each side reports what it can see.
+ */
+export const explainMatch = (
+  t: QueryTarget & {
+    path?: string;
+    reply?: string;
+    assistant?: string;
+    prText?: string;
+  },
+  q: ParsedQuery,
+): MatchField[] => {
+  const fields: [MatchField, string | undefined][] = [
+    ['title', t.title],
+    ['branch', t.branch],
+    ['project', t.project],
+    ['path', t.path],
+    ['prompt', t.prompts?.join('\n')],
+    ['recap', t.recap],
+    ['reply', t.reply],
+    ['assistant', t.assistant],
+    ['pr', t.prText],
+  ];
+  // A scoped term names its field: `msg:` is the prompt index; `project:` is
+  // matched against the project name AND its path (the matcher's `project`
+  // field is both), so it can name either; the rest are the field of the
+  // same name (`account:` has no reason line — the account chip is always on
+  // the row).
+  const scopedValuesFor = (name: MatchField): string[] =>
+    q.fields
+      .filter(
+        ({ field }) =>
+          (field === 'msg' ? 'prompt' : field) === name ||
+          (field === 'project' && name === 'path'),
+      )
+      .map(({ value }) => value);
+  const out = new Set<MatchField>();
+  for (const [name, raw] of fields) {
+    if (!raw) continue;
+    const lower = raw.toLowerCase();
+    if (q.words.some((w) => lower.includes(w))) out.add(name);
+    if (q.prRefs.some((r) => findPrRef(lower, r, t.repos))) out.add(name);
+    if (scopedValuesFor(name).some((v) => lower.includes(v))) out.add(name);
+  }
+  if (q.words.some((w) => matchesSessionId(t.sessionId, w))) out.add('id');
+  return [...out];
 };
 
 /**

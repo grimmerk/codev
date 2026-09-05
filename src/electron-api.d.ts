@@ -134,6 +134,8 @@ interface IElectronAPI {
 
   // Session terminal settings
   getSessionTerminalApp: () => Promise<string>;
+  /** Normal app mode: back to the default size, centred, and forget the remembered bounds (#148). */
+  resetSwitcherWindowBounds: () => Promise<void>;
   setSessionTerminalApp: (app: string) => void;
   getSessionTerminalMode: () => Promise<string>;
   setSessionTerminalMode: (mode: string) => void;
@@ -215,6 +217,8 @@ interface IElectronAPI {
     staleRegistrations: { pid: number; sessionId: string; cwd: string }[];
     totalRssKb: number;
     measuredAt: number;
+    /** Machine-wide swap and pressure level (1 normal, 2 warn, 4 critical); absent when unreadable. */
+    memory?: { swapUsedMb: number; swapTotalMb: number; level: number };
   }>;
 
   // Claude Code sessions
@@ -223,7 +227,25 @@ interface IElectronAPI {
     sessions: any[];
     snippets: Record<
       string,
-      { snippet: string; promptIndex: number; isLastPrompt: boolean }
+      {
+        snippet: string;
+        promptIndex: number;
+        isLastPrompt: boolean;
+        /** Prompts in the index for this session — what `promptIndex` counts against (not `messageCount`). */
+        promptCount: number;
+        /** Every prompt hit (up to 20): where, when, and the prompts around it. */
+        hits: {
+          promptIndex: number;
+          snippet: string;
+          at: number;
+          before?: string;
+          after?: string;
+        }[];
+        /** Epoch ms of the latest hit; 0 when the match was not in a prompt. */
+        matchedAt: number;
+        /** Fields the query matched in — the `MatchField` union the main process produces. */
+        reasons: import('./session-search').MatchField[];
+      }
     >;
   }>;
   detectActiveSessions: () => Promise<{

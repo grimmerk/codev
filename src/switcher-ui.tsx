@@ -26,6 +26,10 @@ import {
 import TerminalTab from './terminal-tab';
 
 type LiveReport = Awaited<ReturnType<Window['electronAPI']['getLiveSessions']>>;
+/** One session's search result detail: hits, their time, and which fields matched. */
+type SearchHit = Awaited<
+  ReturnType<Window['electronAPI']['searchClaudeSessions']>
+>['snippets'][string];
 type ListsResponse = Awaited<ReturnType<Window['electronAPI']['getSessionLists']>>;
 /** Shape every list mutation returns (save / delete / rename). */
 type ListsWriteResult = {
@@ -522,6 +526,40 @@ const formatUptime = (sec: number): string => {
   return `${m}m`;
 };
 
+// A `working` status file that no hook has touched for this long is a
+// session parked at a prompt Claude Code fires no hook for — the context-
+// limit "new task? /clear …" prompt (issue #110) is the known case. Ten
+// minutes is longer than any tool call this app has seen finish, and the
+// cost of being wrong is one dot that is green a little early.
+const STALE_WORKING_SEC = 10 * 60;
+
+/** The dot colour for one status entry, with the stale-working rule applied. */
+const dotStatus = (v: { status?: string; timestamp?: number } | string): string => {
+  if (typeof v !== 'object' || !v) return v as string;
+  const status = v.status ?? '';
+  if (
+    status === 'working' &&
+    typeof v.timestamp === 'number' &&
+    v.timestamp > 0 &&
+    Date.now() / 1000 - v.timestamp > STALE_WORKING_SEC
+  ) {
+    return 'idle';
+  }
+  return status;
+};
+
+/** Every status entry through `dotStatus`. */
+const deriveDotStatuses = (raw: Record<string, any>): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const [id, v] of Object.entries(raw)) out[id] = dotStatus(v);
+  return out;
+};
+
+const sameStatuses = (a: Record<string, string>, b: Record<string, string>): boolean => {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
+};
+
 const formatMb = (kb: number): string => {
   const mb = kb / 1024;
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)}GB` : `${Math.round(mb)}MB`;
@@ -545,6 +583,68 @@ const nextListName = (existing: string[]): string => {
 
 /** Caution it will be invoked twice due to <React.StrictMode> !! */
 let loadTimes = 0;
+/**
+ * One tooltip for the whole window, drawn by us. Native `title` tooltips are
+ * painted by Chromium only while the window is the key window, and a
+ * frameless popup that the pointer merely crosses usually is not — measured
+ * in the first live test as "the tooltip almost never shows". Elements carry
+ * `data-tip` instead; this layer reads it on hover and positions a box under
+ * the element, clamped to the viewport.
+ */
+function TooltipLayer() {
+  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    const onOver = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('[data-tip]') as HTMLElement | null;
+      const text = el?.getAttribute('data-tip');
+      if (!el || !text) {
+        setTip(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      setTip({ text, x: r.left, y: r.bottom + 6 });
+    };
+    const onLeave = () => setTip(null);
+    document.addEventListener('mouseover', onOver);
+    document.addEventListener('mousedown', onLeave);
+    document.addEventListener('mouseleave', onLeave);
+    window.addEventListener('blur', onLeave);
+    return () => {
+      document.removeEventListener('mouseover', onOver);
+      document.removeEventListener('mousedown', onLeave);
+      document.removeEventListener('mouseleave', onLeave);
+      window.removeEventListener('blur', onLeave);
+    };
+  }, []);
+  if (!tip) return null;
+  const maxWidth = 360;
+  const left = Math.max(8, Math.min(tip.x, window.innerWidth - maxWidth - 8));
+  return (
+    <div
+      role="tooltip"
+      style={{
+        position: 'fixed',
+        left,
+        top: Math.min(tip.y, window.innerHeight - 60),
+        maxWidth,
+        padding: '5px 8px',
+        backgroundColor: '#3a3a3a',
+        color: '#e6e6e6',
+        border: '1px solid #555',
+        borderRadius: '4px',
+        fontSize: '11px',
+        lineHeight: '15px',
+        whiteSpace: 'pre-wrap',
+        pointerEvents: 'none',
+        zIndex: 10000,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+      }}
+    >
+      {tip.text}
+    </div>
+  );
+}
+
 function SwitcherApp() {
   const optionPress = useRef(false);
   const launchClaudeRef = useRef<'external' | 'codev' | 'external-pick' | null>(null);
@@ -633,7 +733,42 @@ function SwitcherApp() {
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
-  const [searchSnippets, setSearchSnippets] = useState<Record<string, { snippet: string; promptIndex: number; isLastPrompt: boolean }>>({});
+  const [searchSnippets, setSearchSnippets] = useState<Record<string, SearchHit>>({});
+  // Mirrored for applySearchFilter (stale-closure trap, see sessionSearchRef2).
+  const searchSnippetsRef = useRef<Record<string, SearchHit>>({});
+  // The hook statuses as last received. The dot colour is a function of the
+  // clock as well (the stale-working rule, #110), so it is re-derived from
+  // these on a timer — nothing else fires while a session just sits.
+  const rawStatusesRef = useRef<Record<string, any>>({});
+  const applyStatuses = (rawStatuses: Record<string, any>) => {
+    rawStatusesRef.current = rawStatuses;
+    setSessionStatuses(deriveDotStatuses(rawStatuses));
+  };
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = deriveDotStatuses(rawStatusesRef.current);
+      setSessionStatuses((prev) => (sameStatuses(prev, next) ? prev : next));
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  // The header's ⤢ (normal mode). `invoke` rejects when the main handler
+  // throws; neither activation path wants an unhandled rejection for it.
+  const resetWindowBounds = async () => {
+    try {
+      await window.electronAPI.resetSwitcherWindowBounds();
+    } catch (err) {
+      console.warn('[switcher] reset window bounds failed:', err);
+    }
+  };
+  // Issue #146: order results by when the match happened instead of the
+  // session's last activity. Off by default — "what was I just working on"
+  // is the commoner question, and it wants last activity.
+  const [sortByMatch, setSortByMatch] = useState(false);
+  const sortByMatchRef = useRef(false);
+  // Which of a session's hits the row shows, and whether its context
+  // (the prompts before and after) is unfolded.
+  const [hitIndex, setHitIndex] = useState<Record<string, number>>({});
+  const [expandedHits, setExpandedHits] = useState<Set<string>>(new Set());
   const [minorsExpanded, setMinorsExpanded] = useState(false);
   // Folding waits for the first active-session detection so a just-started
   // (≤2 msgs, not-yet-detected) session is never folded away at app start.
@@ -714,6 +849,20 @@ function SwitcherApp() {
   const [openingList, setOpeningList] = useState(false);
   // The query-language cheat sheet under the search box (issue #140).
   const [searchHelpOpen, setSearchHelpOpen] = useState(false);
+  // Width of the sessions list, for width-aware line caps (issue #148).
+  // 0 until measured, which the cap scale treats as the default width.
+  const sessionListRef = useRef<HTMLDivElement | null>(null);
+  const [sessionListWidth, setSessionListWidth] = useState(0);
+  useEffect(() => {
+    const el = sessionListRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      setSessionListWidth((prev) => (Math.abs(prev - w) > 8 ? w : prev));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
   const [listsNotice, setListsNotice] = useState<string | null>(null);
   // Set when the lists store exists but cannot be trusted as written — a
   // file an earlier build wrote, or hand-edited. Persistent until repaired
@@ -922,11 +1071,16 @@ function SwitcherApp() {
             isPinned: s.sessionId in sessionMarks.pins,
           }),
       );
-    if (extra.length === 0) return base;
-    const merged = [...base, ...extra];
-    merged.sort(
-      (a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0),
-    );
+    // Base rows arrive in timeline order; only a merge or a match-time sort
+    // needs a re-sort. Match time falls back to last activity for a row whose
+    // match was not in a prompt (title, branch, badge).
+    if (extra.length === 0 && !sortByMatchRef.current) return base;
+    const merged = extra.length === 0 ? [...base] : [...base, ...extra];
+    const key = (s: any): number =>
+      sortByMatchRef.current
+        ? searchSnippetsRef.current[s.sessionId]?.matchedAt || s.lastTimestamp || 0
+        : s.lastTimestamp || 0;
+    merged.sort((a: any, b: any) => key(b) - key(a));
     return merged;
   };
 
@@ -967,6 +1121,7 @@ function SwitcherApp() {
       // Drop stale responses (query changed while this one was in flight)
       if (seq !== deepSearchSeqRef.current || sessionSearchRef2.current !== query) return;
       deepMatchesRef.current = res?.sessions || [];
+      searchSnippetsRef.current = res?.snippets || {};
       setSearchSnippets(res?.snippets || {});
       // Bump a revision instead of filtering here. This callback was created
       // ~180ms + one IPC round-trip ago and closes over the enrichment maps of
@@ -1029,6 +1184,9 @@ function SwitcherApp() {
     // they change, not on the next keystroke.
     liveReport,
     sessionMarks,
+    // Sorting by match time reads the snippets and the toggle.
+    searchSnippets,
+    sortByMatch,
   ]);
 
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
@@ -1039,10 +1197,17 @@ function SwitcherApp() {
   // One rule for every length-capped line in a row: while searching, the window
   // moves to the first match so you can see WHY the row is in the results;
   // otherwise it keeps both ends, because these titles put the newest step last.
-  const fitToRow = (text: string, max: number) =>
-    isSearchingSessions
-      ? windowAroundMatch(text, searchWordsLower, max)
-      : truncateMiddle(text, max);
+  // Issue #148 step 2: the caps are in characters, tuned for the default
+  // 800px window. A wider window scales them up (never down — the constants
+  // stay the floor), measured off the list container, so a resize actually
+  // shows more of each line instead of more empty space to its right.
+  const capScale = Math.max(1, sessionListWidth / 760);
+  const fitToRow = (text: string, max: number) => {
+    const cap = Math.round(max * capScale);
+    return isSearchingSessions
+      ? windowAroundMatch(text, searchWordsLower, cap)
+      : truncateMiddle(text, cap);
+  };
   const hiddenSet = new Set(sessionMarks.hidden);
   const hasPins = Object.keys(sessionMarks.pins).length > 0;
   const viewingList =
@@ -1175,6 +1340,34 @@ function SwitcherApp() {
   const liveCount = liveReport
     ? liveReport.live.length
     : Object.keys(activeStateRef.current).length;
+  // Swap and pressure level from the live report. A chip only when the
+  // machine is actually under pressure (level warn/critical, or swap past
+  // 8GB — the reference machine was stuttering at 13–18GB); the plain
+  // figures live in the live chip's tooltip so the row stays quiet otherwise.
+  const memory = liveReport?.memory;
+  const memorySummary = memory
+    ? `swap ${formatMb(memory.swapUsedMb * 1024)} of ${formatMb(memory.swapTotalMb * 1024)} · pressure ${memory.level >= 4 ? 'critical' : memory.level >= 2 ? 'warn' : 'normal'}`
+    : '';
+  const memoryWarning =
+    memory && (memory.level >= 2 || memory.swapUsedMb > 8 * 1024)
+      ? {
+          critical: memory.level >= 4,
+          label: `${memory.level >= 4 ? '⚠ ' : ''}swap ${formatMb(memory.swapUsedMb * 1024)}`,
+          detail: memorySummary,
+        }
+      : null;
+  // Live rows that share a title (typically /branch siblings, issue #142 C0)
+  // get a tty tag so they can be told apart on screen; the tty is also what
+  // the switch now matches on, so the tag names the thing the click uses.
+  const liveTitleDupes = (() => {
+    const seen = new Map<string, number>();
+    for (const s of displayedSessions) {
+      if (!s.isActive) continue;
+      const t = customTitles[s.sessionId] || s.__listMember?.title;
+      if (t) seen.set(t, (seen.get(t) ?? 0) + 1);
+    }
+    return new Set([...seen].filter(([, n]) => n > 1).map(([t]) => t));
+  })();
   const staleCount = liveReport?.staleRegistrations.length ?? 0;
   // Memory of the rows on screen — not of every live process — so the figure
   // beside a search result describes the result.
@@ -1893,19 +2086,10 @@ function SwitcherApp() {
     // Session status updates from hooks (fs.watch)
     window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
       if (!rawStatuses) return;
-      const statusStrings: Record<string, string> = {};
-      for (const [id, v] of Object.entries(rawStatuses)) {
-        statusStrings[id] = typeof v === 'object' ? v.status : v;
-      }
-      setSessionStatuses(statusStrings);
+      applyStatuses(rawStatuses);
     });
     window.electronAPI.onSessionStatusesUpdated((_event: any, rawStatuses: Record<string, any>) => {
-      // Extract status strings for dots display
-      const statusStrings: Record<string, string> = {};
-      for (const [id, v] of Object.entries(rawStatuses)) {
-        statusStrings[id] = typeof v === 'object' ? v.status : v;
-      }
-      setSessionStatuses(statusStrings);
+      applyStatuses(rawStatuses);
 
       // Auto-refresh preview (user msg + assistant msg + order) for idle sessions
       const currentSessions = allSessionsRef.current;
@@ -2060,11 +2244,7 @@ function SwitcherApp() {
       // Refresh session statuses on window focus
       window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
         if (!rawStatuses) return;
-        const statusStrings: Record<string, string> = {};
-        for (const [id, v] of Object.entries(rawStatuses)) {
-          statusStrings[id] = typeof v === 'object' ? v.status : v;
-        }
-        setSessionStatuses(statusStrings);
+        applyStatuses(rawStatuses);
       });
       // Refresh display mode setting
       window.electronAPI.getSessionDisplayMode().then((mode: string) => {
@@ -2334,12 +2514,33 @@ function SwitcherApp() {
           {quickSwitcherShortcut && (
             <span
               onClick={() => setSettingsOpenToTab('shortcuts')}
-              title="Click to customize shortcuts"
+              data-tip="Click to customize shortcuts"
               style={{ fontSize: '10px', color: '#555', cursor: 'pointer' }}
               onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = '#555'; }}
             >
               {quickSwitcherShortcut}
+            </span>
+          )}
+          {currentAppMode === 'normal' && (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Reset the window to its default size and position"
+              data-tip="Reset the window to its default size and position"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => void resetWindowBounds()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  void resetWindowBounds();
+                }
+              }}
+              style={{ fontSize: '11px', color: '#555', cursor: 'pointer' }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#555'; }}
+            >
+              ⤢
             </span>
           )}
           <div
@@ -2564,7 +2765,7 @@ function SwitcherApp() {
               role="button"
               tabIndex={0}
               aria-pressed={searchHelpOpen}
-              title={searchHelpOpen ? 'Hide search syntax' : 'Search syntax: title: branch: msg: has:pr is:live after:7d #147 …'}
+              data-tip={searchHelpOpen ? 'Hide search syntax' : 'Search syntax: title: branch: msg: has:pr is:live after:7d #147 …'}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => setSearchHelpOpen((v) => !v)}
               onKeyDown={(e) => {
@@ -2582,6 +2783,35 @@ function SwitcherApp() {
             >
               ?
             </span>
+            {/* Issue #146: order a search by when the match happened. Only
+                while searching — it has no meaning for the timeline. */}
+            {isSearchingSessions && (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-pressed={sortByMatch}
+                data-tip={
+                  sortByMatch
+                    ? 'Ordered by when the match happened; click for last activity'
+                    : 'Order by when the match happened instead of the session’s last activity'
+                }
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  sortByMatchRef.current = !sortByMatch;
+                  setSortByMatch(!sortByMatch);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    sortByMatchRef.current = !sortByMatch;
+                    setSortByMatch(!sortByMatch);
+                  }
+                }}
+                style={sortByMatch ? SCOPE_CHIP_ACTIVE_STYLE : SCOPE_CHIP_STYLE}
+              >
+                by match
+              </span>
+            )}
             {/* Scope chips: live processes (issue #94) and saved lists
                 (issue #145). Here, not in the list, because this row has
                 spare width and the list has no spare height. */}
@@ -2589,10 +2819,10 @@ function SwitcherApp() {
               role="button"
               tabIndex={0}
               aria-pressed={liveOnlyActive}
-              title={
+              data-tip={
                 liveOnlyActive
-                  ? `Show every session again${liveReport ? ` · measured ${formatRelativeTime(liveReport.measuredAt)}; re-read on each open and on toggling` : ''}`
-                  : `Show only sessions with a running process${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}`
+                  ? `Show every session again${liveReport ? ` · measured ${formatRelativeTime(liveReport.measuredAt)}; re-read on each open and on toggling${memorySummary ? ` · ${memorySummary}` : ''}` : ''}`
+                  : `Show only sessions with a running process${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}${memorySummary ? ` · ${memorySummary}` : ''}`
               }
               onMouseDown={(e) => e.preventDefault()}
               onClick={toggleLiveOnly}
@@ -2606,12 +2836,29 @@ function SwitcherApp() {
             >
               ● {liveCount} live{staleCount > 0 ? ` ⚠${staleCount}` : ''}
             </span>
+            {/* Machine-wide memory, shown only when it is a problem: swap is
+                what said "trouble" first the night 42 claude processes
+                pushed a 32GB machine to 18GB of swap. Normal pressure stays
+                in the live chip's tooltip. */}
+            {memoryWarning && (
+              <span
+                data-tip={`${memoryWarning.detail} — close sessions (save a list first) or quit heavy apps; macOS only clears swap on a restart`}
+                style={{
+                  ...SCOPE_CHIP_STYLE,
+                  cursor: 'default',
+                  border: `1px solid ${memoryWarning.critical ? '#e07a5f' : '#e0b060'}`,
+                  color: memoryWarning.critical ? '#e07a5f' : '#e0b060',
+                }}
+              >
+                {memoryWarning.label}
+              </span>
+            )}
             {liveOnlyActive && (
               <span
                 role="button"
                 tabIndex={0}
                 aria-pressed={liveStats}
-                title={
+                data-tip={
                   liveStats
                     ? 'Hide per-row memory and uptime'
                     : 'Show each running session’s memory and uptime (which one to close first)'
@@ -2633,7 +2880,7 @@ function SwitcherApp() {
               <span
                 role="button"
                 tabIndex={0}
-                title="Save the sessions shown as a named list"
+                data-tip="Save the sessions shown as a named list"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={(e) => {
                   // The document-level click handler refocuses the search box
@@ -2656,7 +2903,7 @@ function SwitcherApp() {
               role="button"
               tabIndex={0}
               aria-pressed={listsExpanded}
-              title={
+              data-tip={
                 sessionLists.length === 0
                   ? 'No saved lists yet — scope the list (live / only / search) and click "save list…"'
                   : listsExpanded
@@ -2757,17 +3004,17 @@ function SwitcherApp() {
               ⚠ {listsNotice}
             </div>
           )}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
+          <div ref={sessionListRef} style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
             {/* A list being viewed: its header replaces every other zone. */}
             {listViewActive && viewingList && (
               <div style={LISTS_HEADER_STYLE}>
-                <span title={`Saved ${new Date(viewingList.createdAt).toLocaleString()}`}>
+                <span data-tip={`Saved ${new Date(viewingList.createdAt).toLocaleString()}`}>
                   🗂 {viewingList.name} ({viewingList.members.length}) · saved {formatRelativeTime(viewingList.createdAt)}
                   {' '}
                   <span
                     role="button"
                     tabIndex={0}
-                    title="Rename this list"
+                    data-tip="Rename this list"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -2816,7 +3063,7 @@ function SwitcherApp() {
                       role="button"
                       tabIndex={idle ? -1 : 0}
                       aria-disabled={idle}
-                      title={
+                      data-tip={
                         n === 0
                           ? 'Every member of this list has a running process'
                           : armed
@@ -2850,7 +3097,7 @@ function SwitcherApp() {
                 <span
                   role="button"
                   tabIndex={0}
-                  title="Back to every session"
+                  data-tip="Back to every session"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={closeList}
                   onKeyDown={(e) => {
@@ -2893,7 +3140,7 @@ function SwitcherApp() {
                       role="button"
                       tabIndex={0}
                       aria-label={`Open list ${l.name}, ${l.members.length} sessions`}
-                      title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
+                      data-tip={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => openList(l.id)}
                       onKeyDown={(e) => {
@@ -2916,7 +3163,7 @@ function SwitcherApp() {
                       role="button"
                       tabIndex={0}
                       aria-label={`Rename list ${l.name}`}
-                      title="Rename this list"
+                      data-tip="Rename this list"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2937,7 +3184,7 @@ function SwitcherApp() {
                       role="button"
                       tabIndex={0}
                       aria-label={`Delete list ${l.name}`}
-                      title={confirmDeleteListId === l.id ? 'Click again to delete this list' : 'Delete this list'}
+                      data-tip={confirmDeleteListId === l.id ? 'Click again to delete this list' : 'Delete this list'}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2970,7 +3217,7 @@ function SwitcherApp() {
                 <span
                   role="button"
                   tabIndex={0}
-                  title={
+                  data-tip={
                     canGroupPins
                       ? 'Click to group pins at the top / leave them in time order · ⌘D pin/unpin · ⇧⌘D hide'
                       : 'Grouping applies while browsing every session'
@@ -2994,7 +3241,7 @@ function SwitcherApp() {
                   role="button"
                   tabIndex={0}
                   aria-pressed={pinnedOnlyActive}
-                  title={
+                  data-tip={
                     pinnedOnlyActive
                       ? 'Show every session again'
                       : 'Show — and search — pinned sessions only'
@@ -3118,7 +3365,7 @@ function SwitcherApp() {
                           <span style={{ color: '#f5b942', fontSize: '12px', marginRight: '3px' }}>★</span>
                         )}
                         {hiddenSet.has(session.sessionId) && (
-                          <span title="Hidden session" style={{ color: '#e07a5f', fontSize: '11px', marginRight: '3px' }}>⊘</span>
+                          <span data-tip="Hidden session" style={{ color: '#e07a5f', fontSize: '11px', marginRight: '3px' }}>⊘</span>
                         )}
                         <span style={{ fontWeight: '500', fontSize: '15px', color: THEME.text.primary }}>
                           <Highlighter
@@ -3133,7 +3380,7 @@ function SwitcherApp() {
                             still reads as the session it was. */}
                         {(customTitles[session.sessionId] || session.__listMember?.title) && (
                           <span
-                            title={customTitles[session.sessionId] || session.__listMember?.title}
+                            data-tip={customTitles[session.sessionId] || session.__listMember?.title}
                             style={{
                               color: '#7ec87e',
                               fontSize: '13px',
@@ -3149,6 +3396,26 @@ function SwitcherApp() {
                               )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
+                            {session.isActive &&
+                              liveTitleDupes.has(
+                                customTitles[session.sessionId] || session.__listMember?.title || '',
+                              ) &&
+                              (() => {
+                                const live = session.__live || liveBySession[session.sessionId];
+                                const tag = live?.tty
+                                  ? live.tty
+                                  : live?.pid || session.activePid
+                                    ? `pid ${live?.pid ?? session.activePid}`
+                                    : null;
+                                return tag ? (
+                                  <span
+                                    data-tip="Two or more running sessions share this title; this is the one on this terminal"
+                                    style={{ color: '#888', fontSize: '10px', fontWeight: 'normal' }}
+                                  >
+                                    {' '}·{tag}
+                                  </span>
+                                ) : null;
+                              })()}
                           </span>
                         )}
                         {(branches[session.sessionId] || session.__listMember?.branch) && (
@@ -3169,7 +3436,7 @@ function SwitcherApp() {
                         {index === selectedSessionIndex && !session.__liveOrphan && (
                           <>
                             <span
-                              title={sessionMarks.pins[session.sessionId] ? 'Unpin (⌘D)' : 'Pin (⌘D)'}
+                              data-tip={sessionMarks.pins[session.sessionId] ? 'Unpin (⌘D)' : 'Pin (⌘D)'}
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={(e) => { e.stopPropagation(); togglePin(session); }}
                               style={{ cursor: 'pointer', fontSize: '11px', color: sessionMarks.pins[session.sessionId] ? '#f5b942' : '#777' }}
@@ -3177,7 +3444,7 @@ function SwitcherApp() {
                               📌
                             </span>
                             <span
-                              title={hiddenSet.has(session.sessionId) ? 'Unhide' : session.__pinnedRow ? 'Unpin & hide into minor sessions (⇧⌘D)' : 'Hide into minor sessions (⇧⌘D)'}
+                              data-tip={hiddenSet.has(session.sessionId) ? 'Unhide' : session.__pinnedRow ? 'Unpin & hide into minor sessions (⇧⌘D)' : 'Hide into minor sessions (⇧⌘D)'}
                               onMouseDown={(e) => e.preventDefault()}
                               onClick={(e) => { e.stopPropagation(); toggleHide(session); }}
                               style={{ cursor: 'pointer', fontSize: '11px', color: hiddenSet.has(session.sessionId) ? '#e07a5f' : '#666' }}
@@ -3206,7 +3473,7 @@ function SwitcherApp() {
                               {liveStats && (
                                 <span
                                   style={LIVE_INFO_STYLE}
-                                  title={`pid ${live.pid}${live.tty ? ` on ${live.tty}` : ' (no terminal)'} · resident memory · time since the process started`}
+                                  data-tip={`pid ${live.pid}${live.tty ? ` on ${live.tty}` : ' (no terminal)'} · resident memory · time since the process started`}
                                 >
                                   {formatMb(live.rssKb)} · {formatUptime(live.uptimeSec)}
                                 </span>
@@ -3214,7 +3481,7 @@ function SwitcherApp() {
                               {!live.registered && (
                                 <span
                                   style={LIVE_WARN_STYLE}
-                                  title="Running, but not registered in ~/.claude/sessions — invisible to the usual active-session detection"
+                                  data-tip="Running, but not registered in ~/.claude/sessions — invisible to the usual active-session detection"
                                 >
                                   ⚠ unregistered
                                 </span>
@@ -3222,7 +3489,7 @@ function SwitcherApp() {
                               {session.__liveExtra && (
                                 <span
                                   style={LIVE_WARN_STYLE}
-                                  title={`A second process is running this same session (pid ${live.pid}) — a resumed copy, or a /branch parent and child`}
+                                  data-tip={`A second process is running this same session (pid ${live.pid}) — a resumed copy, or a /branch parent and child`}
                                 >
                                   ⚠ 2nd process
                                 </span>
@@ -3246,7 +3513,7 @@ function SwitcherApp() {
                                 padding: '1px 5px',
                                 fontFamily: 'Menlo, monospace',
                               }}
-                              title={session.sessionId}
+                              data-tip={session.sessionId}
                             >
                               id {session.sessionId.slice(0, 8)}
                             </span>
@@ -3272,7 +3539,7 @@ function SwitcherApp() {
                                 cursor: 'pointer',
                                 backgroundColor: urlMatch ? 'rgba(126, 200, 227, 0.2)' : 'transparent',
                               }}
-                              title={prInfo.prUrl}
+                              data-tip={prInfo.prUrl}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 window.electronAPI.openExternal(prInfo.prUrl);
@@ -3297,7 +3564,7 @@ function SwitcherApp() {
                               padding: '1px 4px',
                               textTransform: 'uppercase',
                             }}
-                            title={`Claude account: ${session.accountLabel}`}
+                            data-tip={`Claude account: ${session.accountLabel}`}
                           >
                             {session.accountLabel}
                           </span>
@@ -3384,26 +3651,158 @@ function SwitcherApp() {
                       const m = searchSnippets[session.sessionId];
                       if (!m || !isSearchingSessions) return null;
                       const words = searchHighlightWords;
-                      // Stale guard: snippet must still match the current query
-                      if (!words.some((w) => m.snippet.toLowerCase().includes(w.toLowerCase()))) return null;
-                      const dupFirst = m.promptIndex === 0 && (sessionDisplayMode === 'first' || sessionDisplayMode === 'both');
-                      const dupLast = m.isLastPrompt && (sessionDisplayMode === 'last' || sessionDisplayMode === 'both');
-                      if (dupFirst || dupLast) return null;
-                      return (
-                        <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
-                          <span style={SNIPPET_LINE_STYLE}>
-                            <span style={SNIPPET_MARKER_STYLE}>
-                              match #{m.promptIndex + 1}
-                            </span>{' '}
-                            <Highlighter
-                              searchWords={words}
-                              autoEscape
-                              textToHighlight={m.snippet.slice(0, 120)}
-                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
-                            />
-                          </span>
-                        </div>
-                      );
+                      const id = session.sessionId;
+                      const hits = m.hits ?? [];
+                      const k = Math.min(hitIndex[id] ?? 0, Math.max(0, hits.length - 1));
+                      const hit = hits[k];
+                      const lineStyle = { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' } as const;
+                      const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+                      // The small controls inside a row: a click must not open
+                      // the session, and must not pull focus off the search
+                      // box; Enter / Space activate them from the keyboard.
+                      const keepFocus = (e: React.MouseEvent) => { e.stopPropagation(); e.preventDefault(); };
+                      const onKeyActivate = (fn: () => void) => (e: React.KeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          fn();
+                        }
+                      };
+                      const lines: React.ReactNode[] = [];
+                      // Issue #146: the matched prompt, with the other hits one
+                      // click away and the prompts around it unfoldable. The
+                      // line is still suppressed when the only hit is already
+                      // on screen (first/last prompt) — vertical space rule.
+                      if (hit && words.some((w) => hit.snippet.toLowerCase().includes(w.toLowerCase()))) {
+                        // Against the prompt index, not messageCount: that
+                        // counts every history line, prompts or not.
+                        const lastIndex = m.promptCount - 1;
+                        const dupFirst = hit.promptIndex === 0 && (sessionDisplayMode === 'first' || sessionDisplayMode === 'both');
+                        const dupLast = hit.promptIndex === lastIndex && (sessionDisplayMode === 'last' || sessionDisplayMode === 'both');
+                        const expanded = expandedHits.has(id);
+                        const hasContext = !!(hit.before || hit.after);
+                        const prevHit = () => setHitIndex((h) => ({ ...h, [id]: (k - 1 + hits.length) % hits.length }));
+                        const nextHit = () => setHitIndex((h) => ({ ...h, [id]: (k + 1) % hits.length }));
+                        const toggleContext = () =>
+                          setExpandedHits((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          });
+                        if (!(dupFirst || dupLast) || hits.length > 1 || expanded) {
+                          lines.push(
+                            <div key="hit" style={lineStyle}>
+                              <span style={SNIPPET_LINE_STYLE}>
+                                <span style={SNIPPET_MARKER_STYLE}>match #{hit.promptIndex + 1}</span>
+                                {hits.length > 1 && (
+                                  <span style={{ color: '#777', fontSize: '10px' }} onClick={stop} onMouseDown={keepFocus}>
+                                    {' '}
+                                    <span
+                                      role="button"
+                                      tabIndex={0}
+                                      aria-label="Previous hit in this session"
+                                      data-tip="Previous hit in this session"
+                                      style={{ cursor: 'pointer', padding: '0 2px' }}
+                                      onClick={prevHit}
+                                      onKeyDown={onKeyActivate(prevHit)}
+                                    >
+                                      ‹
+                                    </span>
+                                    {k + 1}/{hits.length}
+                                    <span
+                                      role="button"
+                                      tabIndex={0}
+                                      aria-label="Next hit in this session"
+                                      data-tip="Next hit in this session"
+                                      style={{ cursor: 'pointer', padding: '0 2px' }}
+                                      onClick={nextHit}
+                                      onKeyDown={onKeyActivate(nextHit)}
+                                    >
+                                      ›
+                                    </span>
+                                  </span>
+                                )}
+                                {hasContext && (
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-expanded={expanded}
+                                    aria-label={expanded ? 'Hide the prompts around this hit' : 'Show the prompts before and after this hit'}
+                                    data-tip={expanded ? 'Hide the prompts around this hit' : 'Show the prompts before and after this hit'}
+                                    style={{ color: '#777', fontSize: '10px', cursor: 'pointer', padding: '0 3px' }}
+                                    onMouseDown={keepFocus}
+                                    onClick={(e) => {
+                                      stop(e);
+                                      toggleContext();
+                                    }}
+                                    onKeyDown={onKeyActivate(toggleContext)}
+                                  >
+                                    {expanded ? '▾ hide' : '▸ context'}
+                                  </span>
+                                )}{' '}
+                                <Highlighter
+                                  searchWords={words}
+                                  autoEscape
+                                  textToHighlight={fitToRow(hit.snippet, 120)}
+                                  highlightStyle={SEARCH_HIGHLIGHT_STYLE}
+                                />
+                              </span>
+                            </div>,
+                          );
+                          if (expanded && hit.before) {
+                            lines.push(
+                              <div key="before" style={lineStyle}>
+                                <span style={{ ...SNIPPET_LINE_STYLE, color: '#777' }}>
+                                  {'  ↑ '}
+                                  <Highlighter searchWords={words} autoEscape textToHighlight={fitToRow(hit.before, 110)} highlightStyle={SEARCH_HIGHLIGHT_STYLE} />
+                                </span>
+                              </div>,
+                            );
+                          }
+                          if (expanded && hit.after) {
+                            lines.push(
+                              <div key="after" style={lineStyle}>
+                                <span style={{ ...SNIPPET_LINE_STYLE, color: '#777' }}>
+                                  {'  ↓ '}
+                                  <Highlighter searchWords={words} autoEscape textToHighlight={fitToRow(hit.after, 110)} highlightStyle={SEARCH_HIGHLIGHT_STYLE} />
+                                </span>
+                              </div>,
+                            );
+                          }
+                        }
+                      }
+                      // Issue #141: name the field that matched when that field is
+                      // not on the row — the path, the assistant's mined
+                      // references, a recap the row is not showing, a reply hidden
+                      // behind a recap. Fields that render (title, branch, project
+                      // name, badge, first/last prompt) already carry the highlight.
+                      const hasRecapLine = !!session.__listMember?.recap;
+                      const explain: [string, string][] = [];
+                      for (const r of m.reasons ?? []) {
+                        if (r === 'path') explain.push(['path', session.project || '']);
+                        else if (r === 'assistant')
+                          explain.push([
+                            'assistant',
+                            parsedSearch.prRefs.length > 0
+                              ? parsedSearch.prRefs.map((p) => (p.repo ? `${p.repo}#${p.number}` : `#${p.number}`)).join(' ')
+                              : parsedSearch.words.join(' '),
+                          ]);
+                        else if (r === 'recap' && !hasRecapLine) explain.push(['recap', recaps[id]?.text || '']);
+                        else if (r === 'reply' && hasRecapLine) explain.push(['reply', assistantResponses[id] || '']);
+                      }
+                      for (const [field, text] of explain) {
+                        if (!text) continue;
+                        lines.push(
+                          <div key={`why-${field}`} style={lineStyle}>
+                            <span style={SNIPPET_LINE_STYLE}>
+                              <span style={SNIPPET_MARKER_STYLE}>match {field}</span>{' '}
+                              <Highlighter searchWords={words} autoEscape textToHighlight={fitToRow(text, 110)} highlightStyle={SEARCH_HIGHLIGHT_STYLE} />
+                            </span>
+                          </div>,
+                        );
+                      }
+                      return lines.length > 0 ? <>{lines}</> : null;
                     })()}
                     {/* Line 3: on a saved-list member, the recap captured
                         with it — Claude Code's own "where we are, what's
@@ -3424,7 +3823,7 @@ function SwitcherApp() {
                             <span style={{ color: '#9DC8E0', fontSize: '11px' }}>
                               <span
                                 style={RECAP_MARKER_STYLE}
-                                title={
+                                data-tip={
                                   writtenAt
                                     ? `Recap written ${formatRelativeTime(writtenAt)}${stale ? ` — ${formatUptime(lagMs / 1000)} before the session's last activity, so its "next step" may be done` : ''}`
                                     : 'Recap (time unknown)'
@@ -3584,7 +3983,7 @@ function SwitcherApp() {
           IndicatorSeparator: () => null,
           DropdownIndicator: () => (
             <div
-              title="\u2325\u2318+Enter: choose the account first"
+              data-tip="\u2325\u2318+Enter: choose the account first"
               style={{ fontSize: '11px', color: '#666', paddingRight: '8px', whiteSpace: 'nowrap' }}
             >
               {isMultiAccountUI
@@ -3729,7 +4128,10 @@ function SwitcherApp() {
             backgroundColor: 'transparent',
             padding: '0 6px',
             margin: '0 6px',
-            maxHeight: '480px', // Increased max height for more items
+            // Grows with the window now that normal mode is resizable (#148);
+            // the old fixed 480px left a scrollbar floating mid-window.
+            maxHeight: 'calc(100vh - 120px)',
+            overflowX: 'hidden',
           }),
           option: (base) => ({
             ...base,
@@ -3906,7 +4308,12 @@ export default SwitcherApp;
 // Initialize the app
 document.addEventListener('DOMContentLoaded', () => {
   const root = ReactDOM.createRoot(document.getElementById('switcher-root'));
-  root.render(<SwitcherApp />);
+  root.render(
+    <>
+      <SwitcherApp />
+      <TooltipLayer />
+    </>,
+  );
 
   console.log('SwitcherApp rendered');
 });

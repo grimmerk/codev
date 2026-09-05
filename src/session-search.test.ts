@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   compileQuery,
   emptyQuery,
+  explainMatch,
+  findPromptHits,
   extractSnippet,
   findPrRef,
   findPromptMatch,
@@ -741,5 +743,121 @@ describe('findPromptMatch with PR references', () => {
       promptIndex: 1,
       snippet: 'please look at o/r#147 now',
     });
+  });
+});
+
+describe('findPromptHits', () => {
+  const prompts = [
+    'setup',
+    'see #147 first',
+    'unrelated',
+    'again #147 and pr2',
+    'done',
+  ];
+  const times = [1, 2, 3, 4, 5];
+
+  it('returns every hit with its time and neighbours, in order', () => {
+    const hits = findPromptHits(prompts, times, ['pr2'], [{ number: 147 }]);
+    expect(hits.map((h) => [h.promptIndex, h.at])).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+    expect(hits[0].before).toBe('setup');
+    expect(hits[0].after).toBe('unrelated');
+    expect(hits[1].after).toBe('done');
+    expect(hits[1].snippet).toContain('#147');
+  });
+
+  it('caps context by code point, never splitting a surrogate pair', () => {
+    const before = 'x'.repeat(199) + '😀' + 'tail';
+    const [hit] = findPromptHits([before, 'hit here'], [1, 2], ['hit']);
+    expect(hit.before).toBe('x'.repeat(199) + '😀…');
+    // 150 emoji are 300 code units but 150 code points: nothing is cut, so
+    // nothing is marked as cut.
+    const emoji = '😀'.repeat(150);
+    const [fits] = findPromptHits([emoji, 'hit here'], [1, 2], ['hit']);
+    expect(fits.before).toBe(emoji);
+  });
+
+  it('has no neighbour past either end, caps long context, and honours the limit', () => {
+    const one = findPromptHits(['x'.repeat(300) + ' hit'], [9], ['hit']);
+    expect(one[0].before).toBeUndefined();
+    expect(one[0].after).toBeUndefined();
+    const many = findPromptHits(
+      Array(30).fill('hit here'),
+      [],
+      ['hit'],
+      [],
+      undefined,
+      5,
+    );
+    expect(many).toHaveLength(5);
+    const ctx = findPromptHits(['a'.repeat(400), 'hit'], [1, 2], ['hit']);
+    expect(ctx[0].before?.length).toBe(201);
+    expect(ctx[0].before?.endsWith('…')).toBe(true);
+  });
+});
+
+describe('explainMatch', () => {
+  const q = parseQuery('pr2 #147', 0);
+  it('names each field a word or reference matched in, once, and only fields supplied', () => {
+    const fields = explainMatch(
+      {
+        sessionId: 'abcd1234-0000',
+        text: '',
+        title: 'harden again - pr2-1533',
+        branch: 'feat-pr2',
+        path: '/Users/g/git/pr2',
+        prompts: ['open #147', 'pr2 again'],
+        assistant: 'grimmerk/codev#147',
+        recap: 'nothing here',
+      },
+      q,
+    );
+    expect(fields.sort()).toEqual([
+      'assistant',
+      'branch',
+      'path',
+      'prompt',
+      'title',
+    ]);
+  });
+
+  it('names the field a scoped term hit, reporting msg: as prompt', () => {
+    const target = {
+      sessionId: 'abcd1234-0000',
+      text: '',
+      title: 'zeta',
+      recap: 'needle here',
+      prompts: ['open the vault'],
+    };
+    expect(explainMatch(target, parseQuery('recap:needle', 0))).toEqual([
+      'recap',
+    ]);
+    expect(explainMatch(target, parseQuery('msg:vault', 0))).toEqual([
+      'prompt',
+    ]);
+    expect(explainMatch(target, parseQuery('title:zeta', 0))).toEqual([
+      'title',
+    ]);
+    // The scope is respected: the word is in the recap, not the title.
+    expect(explainMatch(target, parseQuery('title:needle', 0))).toEqual([]);
+    // `project:` is matched against name and path alike, so it names the
+    // path when only the path carries the term.
+    const proj = { ...target, project: 'codev', path: '/Users/g/git/codev' };
+    expect(explainMatch(proj, parseQuery('project:git', 0))).toEqual(['path']);
+    expect(explainMatch(proj, parseQuery('project:codev', 0)).sort()).toEqual([
+      'path',
+      'project',
+    ]);
+  });
+
+  it('reports the session id when a word is an id prefix', () => {
+    expect(
+      explainMatch(
+        { sessionId: 'abcd1234-0000', text: '' },
+        parseQuery('abcd', 0),
+      ),
+    ).toEqual(['id']);
   });
 });

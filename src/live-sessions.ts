@@ -60,13 +60,55 @@ export interface LiveSession {
   accountIsAnchor?: boolean;
 }
 
+/**
+ * What the machine as a whole is doing about memory, so the live view can
+ * warn before the cursor starts to stutter. Measured the night this was
+ * added: 42 `claude` processes at 5.1GB pushed a 32GB machine to 18GB of
+ * swap and the compositor to 40–80% CPU; the number that said so first was
+ * swap, not any process's RSS.
+ */
+export interface MemoryPressure {
+  swapUsedMb: number;
+  swapTotalMb: number;
+  /**
+   * `kern.memorystatus_vm_pressure_level`: 1 normal, 2 warn, 4 critical.
+   * Never a placeholder: when either figure is unreadable the whole object
+   * is absent (`parseMemoryPressure` returns null).
+   */
+  level: number;
+}
+
 export interface LiveSessionsReport {
   live: LiveSession[];
   /** Registered pids whose process is gone — a stale file, shown as a ghost by anything that trusts it. */
   staleRegistrations: { pid: number; sessionId: string; cwd: string }[];
   totalRssKb: number;
   measuredAt: number;
+  /** Absent when `sysctl` could not be read; never guessed. */
+  memory?: MemoryPressure;
 }
+
+/**
+ * Parse the two lines `sysctl -n vm.swapusage kern.memorystatus_vm_pressure_level`
+ * prints, e.g. `total = 14336.00M  used = 13066.94M  free = 1221.06M  (encrypted)`
+ * and `1`. Null when either is missing — a missing figure is not zero.
+ */
+export const parseMemoryPressure = (out: string): MemoryPressure | null => {
+  const lines = out.split('\n').map((l) => l.trim());
+  const swap = lines.find((l) => l.includes('used ='));
+  const levelLine = lines.find((l) => /^\d+$/.test(l));
+  if (!swap || !levelLine) return null;
+  const num = (label: string): number | null => {
+    const m = new RegExp(`${label} = ([0-9.]+)([KMG])`).exec(swap);
+    if (!m) return null;
+    const v = Number(m[1]);
+    return m[2] === 'G' ? v * 1024 : m[2] === 'K' ? v / 1024 : v;
+  };
+  const used = num('used');
+  const total = num('total');
+  if (used === null || total === null) return null;
+  return { swapUsedMb: used, swapTotalMb: total, level: Number(levelLine) };
+};
 
 /** `[[dd-]hh:]mm:ss` as `ps -o etime` prints it. */
 export const parseEtime = (s: string): number => {
@@ -162,8 +204,12 @@ const isClaudeBinary = (token: string): boolean =>
  * hidden from the live scope while it runs. That is rare, temporary, and
  * visible; a one-shot leaking into a saved list is a stale member forever.
  */
-export const isSessionProcess = (p: ClaudeProcess): boolean => {
-  const tokens = p.args.split(/\s+/);
+export const isSessionProcess = (p: ClaudeProcess): boolean =>
+  isSessionArgs(p.args);
+
+/** The same rule on a bare command line (`ps` COMMAND column). */
+export const isSessionArgs = (args: string): boolean => {
+  const tokens = args.split(/\s+/);
   if (!tokens[0] || !isClaudeBinary(tokens[0])) return false;
   const first = tokens[1];
   if (first && !first.startsWith('-') && NON_SESSION_SUBCOMMANDS.has(first)) {
@@ -312,6 +358,8 @@ export interface CollectDeps {
   ps?: () => Promise<string>;
   readRegistrations?: () => SessionRegistration[];
   cwdOf?: (pid: number) => Promise<string | null>;
+  /** `sysctl -n vm.swapusage kern.memorystatus_vm_pressure_level`; empty on failure. */
+  sysctl?: () => Promise<string>;
 }
 
 export const collectLiveSessions = async (
@@ -323,8 +371,17 @@ export const collectLiveSessions = async (
       execFileP('ps', ['-Ao', 'pid=,rss=,tty=,etime=,args='], PS_TIMEOUT_MS));
   const readRegs = deps.readRegistrations ?? readSessionRegistrations;
   const cwdOf = deps.cwdOf ?? lsofCwd;
+  const sysctl =
+    deps.sysctl ??
+    (() =>
+      execFileP(
+        'sysctl',
+        ['-n', 'vm.swapusage', 'kern.memorystatus_vm_pressure_level'],
+        2000,
+      ));
 
-  const procs = parsePsOutput(await ps());
+  const [psOut, sysctlOut] = await Promise.all([ps(), sysctl()]);
+  const procs = parsePsOutput(psOut);
   // A process table is never empty — `ps` lists at least itself — so an empty
   // parse means the call failed or timed out. Report that rather than a
   // fabricated "nothing is running".
@@ -339,5 +396,7 @@ export const collectLiveSessions = async (
         s.cwd = await cwdOf(s.pid);
       }),
   );
+  const memory = parseMemoryPressure(sysctlOut);
+  if (memory) report.memory = memory;
   return report;
 };
