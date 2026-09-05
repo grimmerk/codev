@@ -12,6 +12,13 @@ import {
   ListViewSession,
   mergeSessionsById,
 } from './session-list-view';
+import {
+  matchesAllWordsOrId,
+  matchesSessionId,
+  truncateMiddle,
+  windowAroundMatch,
+} from './session-search';
+import TerminalTab from './terminal-tab';
 
 type LiveReport = Awaited<ReturnType<Window['electronAPI']['getLiveSessions']>>;
 type ListsResponse = Awaited<ReturnType<Window['electronAPI']['getSessionLists']>>;
@@ -21,13 +28,6 @@ type ListsWriteResult = {
   error?: string;
   lists?: { lists: SessionList[] };
 };
-import {
-  matchesAllWordsOrId,
-  matchesSessionId,
-  truncateMiddle,
-  windowAroundMatch,
-} from './session-search';
-import TerminalTab from './terminal-tab';
 
 type SwitcherMode = 'projects' | 'sessions' | 'terminal';
 // import { fetchVSCodeBasedOpenedWindows, SERVER_URL, deleteRecentProjectRecord } from "./vscode-based-ide-utility"
@@ -687,6 +687,7 @@ function SwitcherApp() {
   const [extraScopeSessions, setExtraScopeSessions] = useState<ListViewSession[]>([]);
   const extraScopeSessionsRef = useRef<ListViewSession[]>([]);
   const extraScopeKeyRef = useRef('');
+  const viewingListRef = useRef<SessionList | null>(null);
   // Keep the selection on the same session after pin/hide reshuffles the list
   const reanchorSelectionRef = useRef<string | null>(null);
   const hoverSuppressTokenRef = useRef(0);
@@ -732,7 +733,13 @@ function SwitcherApp() {
       // matchesSessionId, shared with the main-side searchClaudeSessions so
       // both paths agree on what an id query is (#142: the id is the one
       // field that stays unique when several sessions share a name).
-      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''} ${terminalBadge}`.toLowerCase();
+      // A saved-list member whose session is gone has only what was captured;
+      // search those fields too, or a query on its captured title drops it.
+      const captured = s.__listMember;
+      const capturedText = captured
+        ? `${captured.title || ''} ${captured.branch || ''} ${captured.recap?.text || ''} ${captured.lastUserMessage || ''} ${captured.lastAssistantMessage || ''}`
+        : '';
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''} ${terminalBadge} ${capturedText}`.toLowerCase();
       return matchesAllWordsOrId(searchTarget, s.sessionId, words);
     });
   };
@@ -749,10 +756,32 @@ function SwitcherApp() {
     // Only while a query is live: this runs on every keystroke including the
     // one that empties the box, and widening the browse list is not this
     // function's job.
+    // While viewing a saved list, members the by-id fetch could not resolve
+    // exist only as captured records; give them a placeholder row here so a
+    // query on a captured field keeps them, the way the list view itself
+    // renders them. mergeSessionsById keeps the first occurrence, so resolved
+    // members are untouched.
+    const listPlaceholders: ListViewSession[] = (
+      viewingListRef.current?.members ?? []
+    ).map((m) => ({
+      sessionId: m.sessionId,
+      project: m.project,
+      projectName: m.projectName,
+      firstUserMessage: '',
+      lastUserMessage: m.lastUserMessage || '',
+      lastTimestamp: m.lastTimestamp,
+      messageCount: undefined,
+      isActive: false,
+      accountLabel: m.accountLabel,
+      __listMember: m,
+    }));
     const candidates = query.trim()
       ? mergeSessionsById(
-          mergeSessionsById(allItems, extraPinnedSessionsRef.current),
-          extraScopeSessionsRef.current,
+          mergeSessionsById(
+            mergeSessionsById(allItems, extraPinnedSessionsRef.current),
+            extraScopeSessionsRef.current,
+          ),
+          listPlaceholders,
         )
       : allItems;
     const base = filterSessionsLocally(candidates, query);
@@ -885,6 +914,9 @@ function SwitcherApp() {
   const hasPins = Object.keys(sessionMarks.pins).length > 0;
   const viewingList =
     viewingListId ? sessionLists.find((l) => l.id === viewingListId) ?? null : null;
+  // Mirrored into a ref for applySearchFilter, which runs from debounced
+  // timeouts and setState updaters (the stale-closure trap, see above).
+  viewingListRef.current = viewingList;
   // Process facts by session, plus a synthetic row for every running process
   // that has no session row to carry them: no id at all (the "unregistered"
   // case the live view exists for), or an id the session list does not know —
@@ -1579,8 +1611,12 @@ function SwitcherApp() {
       window.electronAPI.loadSessionEnrichment(result.slice(0, 100)).then(applyEnrichment);
     }
     // The live report describes processes, which change independently of
-    // history.jsonl — refresh it with every session refetch while in scope.
-    if (liveOnlyRef.current) refreshLiveReport();
+    // history.jsonl. Refresh it with EVERY session refetch, not only in the
+    // live scope: rows resolve their running pid from the report (it beats
+    // the cached detection map), so a report older than the map would hand a
+    // click a dead pid. One `ps` per popup open — `detectTerminalApps` on the
+    // same trigger spawns a few hundred.
+    refreshLiveReport();
   };
 
   const fetchWorkingFolderAndUpdate = async () => {
@@ -2521,33 +2557,34 @@ function SwitcherApp() {
                   </div>
                 )}
                 {sessionLists.map((l) => (
-                  // Keyboard-activatable row (Tab to it, Enter / Space opens)
-                  // without role="button": the rename / delete controls inside
-                  // it are the buttons, and a button nested in a button is
-                  // invalid ARIA.
-                  <div
-                    key={l.id}
-                    tabIndex={0}
-                    title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => openList(l.id)}
-                    onKeyDown={(e) => {
-                      if (e.target !== e.currentTarget) return; // a control inside handled it
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        openList(l.id);
-                      }
-                    }}
-                    className="codev-list-row"
-                    style={LIST_ROW_STYLE}
-                  >
-                    <span style={{ color: '#9DC8E0', fontWeight: 500, flexShrink: 0 }}>{l.name}</span>
-                    <span style={{ color: THEME.text.secondary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {l.members.length} sessions · {formatRelativeTime(l.createdAt)}
-                      {' · '}
-                      {l.members.slice(0, 4).map((m) => m.title || m.projectName).join(' · ')}
-                      {l.members.length > 4 ? ' …' : ''}
-                    </span>
+                  // The clickable part is a real button with a name; the
+                  // rename / delete controls are its SIBLINGS, so nothing is
+                  // nested in a button and every control is reachable by
+                  // keyboard and announced by a screen reader.
+                  <div key={l.id} className="codev-list-row" style={LIST_ROW_STYLE}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open list ${l.name}, ${l.members.length} sessions`}
+                      title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => openList(l.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          openList(l.id);
+                        }
+                      }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, cursor: 'pointer' }}
+                    >
+                      <span style={{ color: '#9DC8E0', fontWeight: 500, flexShrink: 0 }}>{l.name}</span>
+                      <span style={{ color: THEME.text.secondary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {l.members.length} sessions · {formatRelativeTime(l.createdAt)}
+                        {' · '}
+                        {l.members.slice(0, 4).map((m) => m.title || m.projectName).join(' · ')}
+                        {l.members.length > 4 ? ' …' : ''}
+                      </span>
+                    </div>
                     <span
                       role="button"
                       tabIndex={0}

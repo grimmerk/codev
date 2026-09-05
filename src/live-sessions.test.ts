@@ -105,6 +105,15 @@ describe('isSessionProcess', () => {
         ' 6 1 ttys001 00:01 claude -n branch-test-a',
         ' 7 1 ttys001 00:01 claude -p summarize this',
         ' 8 1 ttys001 00:01 claude --print --output-format json',
+        // One-shot flags after other options are still one-shots…
+        ' 9 1 ttys001 00:01 claude -c -p query',
+        ' 10 1 ttys001 00:01 claude --model opus -p query',
+        ' 11 1 ttys001 00:01 claude -r -p query',
+        // …while interactive invocations with the same leading options stay sessions,
+        ' 12 1 ttys001 00:01 claude -c',
+        ' 13 1 ttys001 00:01 claude --model opus --resume f339c186-ba82-4362-a901-2938323c0198',
+        // and a prompt that merely mentions a flag is not parsed as one.
+        ' 14 1 ttys001 00:01 claude explain the -p flag',
       ].join('\n'),
     );
     expect(procs.map((p) => isSessionProcess(p))).toEqual([
@@ -116,6 +125,12 @@ describe('isSessionProcess', () => {
       true,
       false,
       false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
     ]);
   });
 });

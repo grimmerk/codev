@@ -148,14 +148,46 @@ const isClaudeBinary = (token: string): boolean =>
   /\/share\/claude\/versions\/[^/]+$/.test(token) ||
   /ClaudeCode\.app\/Contents\/MacOS\/claude$/.test(token);
 
+/**
+ * Options that take a value, so the token after them is not an option even
+ * when the walk below is looking for one. A value that itself starts with
+ * `-` is not consumed — `-r -p x` is a print run, not a resume of "-p".
+ */
+const VALUE_FLAGS = new Set([
+  '-n',
+  '--name',
+  '-r',
+  '--resume',
+  '--session-id',
+  '--model',
+  '--add-dir',
+  '--settings',
+  '--mcp-config',
+  '--permission-mode',
+  '--agent',
+  '--effort',
+]);
+
 /** A `claude` process that is (or could be) an interactive session. */
 export const isSessionProcess = (p: ClaudeProcess): boolean => {
   const tokens = p.args.split(/\s+/);
   if (!tokens[0] || !isClaudeBinary(tokens[0])) return false;
   const first = tokens[1];
-  if (!first) return true;
-  if (first.startsWith('-')) return !NON_SESSION_FLAGS.has(first);
-  return !NON_SESSION_SUBCOMMANDS.has(first);
+  if (first && !first.startsWith('-') && NON_SESSION_SUBCOMMANDS.has(first)) {
+    return false;
+  }
+  // Walk the leading option sequence: a one-shot flag anywhere in it makes
+  // the whole invocation a one-shot (`claude -c -p "query"` is print mode).
+  // The first positional token — a prompt — ends the walk, so words inside
+  // a prompt can never be mistaken for flags.
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (!t.startsWith('-')) break;
+    if (NON_SESSION_FLAGS.has(t)) return false;
+    const next = tokens[i + 1];
+    if (VALUE_FLAGS.has(t) && next && !next.startsWith('-')) i++;
+  }
+  return true;
 };
 
 /** `--resume <id>` / `-r <id>` / `--session-id <id>` on the command line. */
