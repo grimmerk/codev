@@ -2471,8 +2471,14 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
 ipcMain.handle('reset-switcher-window-bounds', async () => {
   const window = getSwitcherWindow();
   if (!window) return;
-  // The setBounds below fires resize/move; their debounced save sees the
-  // default geometry and unsets rather than saves (saveSwitcherBounds).
+  // A save still pending from before the reset holds the pre-reset
+  // rectangle and would write it after the unset below: drop it. The
+  // setBounds that follows fires resize/move of its own, whose save sees
+  // the default geometry and unsets rather than saves (saveSwitcherBounds).
+  if (saveBoundsTimer) {
+    clearTimeout(saveBoundsTimer);
+    saveBoundsTimer = null;
+  }
   const position = getWindowPosition();
   window.setBounds(
     { x: position.x, y: position.y, width: WIN_WIDTH, height: WIN_HEIGHT },
