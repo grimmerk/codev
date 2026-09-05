@@ -4081,7 +4081,7 @@ function SwitcherApp() {
             margin: '0 6px',
             // Grows with the window now that normal mode is resizable (#148);
             // the old fixed 480px left a scrollbar floating mid-window.
-            maxHeight: 'calc(100vh - 150px)',
+            maxHeight: 'calc(100vh - 120px)',
             overflowX: 'hidden',
           }),
           option: (base) => ({
