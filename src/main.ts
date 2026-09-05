@@ -142,9 +142,16 @@ const applyMenubarGeometry = (window: BrowserWindow) => {
 const SWITCHER_BOUNDS_KEY = 'switcher-window-bounds';
 let pendingBoundsRestore: Promise<void> | null = null;
 let saveBoundsTimer: ReturnType<typeof setTimeout> | null = null;
-// Set by the reset: the setBounds it performs fires resize/move, whose
-// debounced save would otherwise write the default bounds straight back.
-let ignoreBoundsSavesUntil = 0;
+
+const isDefaultBounds = (b: Electron.Rectangle): boolean => {
+  const d = getWindowPosition();
+  return (
+    b.width === WIN_WIDTH &&
+    b.height === WIN_HEIGHT &&
+    b.x === d.x &&
+    b.y === d.y
+  );
+};
 
 const restoreSwitcherBounds = async (window: BrowserWindow): Promise<void> => {
   try {
@@ -184,6 +191,17 @@ const restoreSwitcherBounds = async (window: BrowserWindow): Promise<void> => {
   }
 };
 
+// Kept until it settles, so every show that lands while the read is in
+// flight waits for it; cleared only by the restore that set it, since a
+// newer one may have replaced it.
+const startBoundsRestore = (window: BrowserWindow) => {
+  const restore = restoreSwitcherBounds(window);
+  pendingBoundsRestore = restore;
+  void restore.finally(() => {
+    if (pendingBoundsRestore === restore) pendingBoundsRestore = null;
+  });
+};
+
 const saveSwitcherBounds = (window: BrowserWindow) => {
   if (saveBoundsTimer) clearTimeout(saveBoundsTimer);
   saveBoundsTimer = setTimeout(async () => {
@@ -191,15 +209,22 @@ const saveSwitcherBounds = (window: BrowserWindow) => {
     // Checked when the timer fires, not when the handler was attached: the
     // mode can change under a window that stays alive.
     if (window.isDestroyed() || appMode !== 'normal') return;
-    if (Date.now() < ignoreBoundsSavesUntil) return;
     const b = window.getBounds();
     try {
-      await settings.set(SWITCHER_BOUNDS_KEY, {
-        x: b.x,
-        y: b.y,
-        width: b.width,
-        height: b.height,
-      });
+      if (isDefaultBounds(b)) {
+        // At the default geometry there is nothing to remember — and the
+        // reset's own resize/move land here, so the key it just removed is
+        // not written back. A resize right after a reset is not at the
+        // default, and is saved like any other.
+        await settings.unset(SWITCHER_BOUNDS_KEY);
+      } else {
+        await settings.set(SWITCHER_BOUNDS_KEY, {
+          x: b.x,
+          y: b.y,
+          width: b.width,
+          height: b.height,
+        });
+      }
     } catch {
       // A failed save costs the next launch its position, nothing more.
     }
@@ -231,10 +256,10 @@ const showSwitcherWindow = () => {
     target.show();
     target.focus();
   };
-  // A restore still in flight (the window was created a moment ago)
-  // finishes before the first paint; otherwise show now.
+  // A restore still in flight (the window was created, or entered normal
+  // mode, a moment ago) finishes before the paint; otherwise show now.
+  // Revealing is idempotent, so every show during the flight may wait on it.
   const pending = pendingBoundsRestore;
-  pendingBoundsRestore = null;
   if (pending) void pending.finally(reveal);
   else reveal();
 };
@@ -564,7 +589,7 @@ const createSwitcherWindow = (initialMode?: string): BrowserWindow => {
 
   if (appMode === 'normal') {
     // Restore the last bounds before the window is first shown.
-    pendingBoundsRestore = restoreSwitcherBounds(window);
+    startBoundsRestore(window);
   }
   // Attached whatever the mode: the save checks the mode when it fires, so
   // a window created in menu-bar mode and switched to normal mode later is
@@ -2427,7 +2452,7 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
     const win = getSwitcherWindow();
     if (win) {
       win.setResizable(true);
-      void restoreSwitcherBounds(win);
+      startBoundsRestore(win);
     }
   }
   // Notify renderer to update drag region
@@ -2443,13 +2468,8 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
 ipcMain.handle('reset-switcher-window-bounds', async () => {
   const window = getSwitcherWindow();
   if (!window) return;
-  // The setBounds below fires resize/move; their debounced save must not
-  // write the default bounds back after the unset.
-  ignoreBoundsSavesUntil = Date.now() + 1000;
-  if (saveBoundsTimer) {
-    clearTimeout(saveBoundsTimer);
-    saveBoundsTimer = null;
-  }
+  // The setBounds below fires resize/move; their debounced save sees the
+  // default geometry and unsets rather than saves (saveSwitcherBounds).
   const position = getWindowPosition();
   window.setBounds(
     { x: position.x, y: position.y, width: WIN_WIDTH, height: WIN_HEIGHT },

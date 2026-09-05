@@ -132,6 +132,7 @@ export const invalidateSessionCache = () => {
   flushEnrichmentCache();
   cachedSessions = null;
   cachedActiveMap = null;
+  cachedGuessedPids = new Set();
   cachedVSCodeSessions = null;
   cachedEntrypoints = null;
   cachedCustomTitles = null;
@@ -1200,15 +1201,16 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
 
     // Fallback: if no account had a sessions/ dir (old Claude Code versions)
     if (!anySessionsDir) {
-      await detectActiveSessionsLegacy(activeMap);
+      await detectActiveSessionsLegacy(activeMap, exactPids);
     }
   } catch (err) {
     console.error('[detect-active] Error in detectActiveSessions:', err);
   }
 
   cachedActiveMap = activeMap;
-  // Whatever the cwd / title cross-reference or the legacy scan attached is
-  // a guess by construction; only the registration paths above are exact.
+  // Whatever the cwd / title cross-reference or the legacy cwd scan attached
+  // is a guess by construction; only a registration whose session the history
+  // knows, or a `--resume <id>` on the command line, is exact.
   cachedGuessedPids = new Set(
     [...activeMap.values()].filter((pid) => !exactPids.has(pid)),
   );
@@ -1222,7 +1224,10 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
  * Legacy detection for old Claude Code versions without ~/.claude/sessions/.
  * Uses ps aux + regex for --resume UUID, lsof for cwd matching.
  */
-const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promise<void> => {
+const detectActiveSessionsLegacy = async (
+  activeMap: Map<string, number>,
+  exactPids: Set<number>,
+): Promise<void> => {
   const { exec } = require('child_process');
   const execPromise = (cmd: string): Promise<string> =>
     new Promise((resolve) => {
@@ -1247,7 +1252,9 @@ const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promi
 
     const resumeMatch = line.match(/(?:--resume|-r)\s+([a-f0-9-]{36})/);
     if (resumeMatch) {
+      // The command line names the session: as exact as a registration.
       activeMap.set(resumeMatch[1], pid);
+      exactPids.add(pid);
       claimedSessionIds.add(resumeMatch[1]);
       continue;
     }

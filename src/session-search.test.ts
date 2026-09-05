@@ -772,6 +772,11 @@ describe('findPromptHits', () => {
     const before = 'x'.repeat(199) + '😀' + 'tail';
     const [hit] = findPromptHits([before, 'hit here'], [1, 2], ['hit']);
     expect(hit.before).toBe('x'.repeat(199) + '😀…');
+    // 150 emoji are 300 code units but 150 code points: nothing is cut, so
+    // nothing is marked as cut.
+    const emoji = '😀'.repeat(150);
+    const [fits] = findPromptHits([emoji, 'hit here'], [1, 2], ['hit']);
+    expect(fits.before).toBe(emoji);
   });
 
   it('has no neighbour past either end, caps long context, and honours the limit', () => {
@@ -837,6 +842,14 @@ describe('explainMatch', () => {
     ]);
     // The scope is respected: the word is in the recap, not the title.
     expect(explainMatch(target, parseQuery('title:needle', 0))).toEqual([]);
+    // `project:` is matched against name and path alike, so it names the
+    // path when only the path carries the term.
+    const proj = { ...target, project: 'codev', path: '/Users/g/git/codev' };
+    expect(explainMatch(proj, parseQuery('project:git', 0))).toEqual(['path']);
+    expect(explainMatch(proj, parseQuery('project:codev', 0)).sort()).toEqual([
+      'path',
+      'project',
+    ]);
   });
 
   it('reports the session id when a word is an id prefix', () => {

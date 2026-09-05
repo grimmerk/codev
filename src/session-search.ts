@@ -591,9 +591,14 @@ export interface PromptHit extends PromptMatch {
 
 const CONTEXT_CAP = 200;
 const capContext = (s: string | undefined): string | undefined => {
+  // Code units bound code points from above, so a short string needs no split.
   if (s === undefined || s.length <= CONTEXT_CAP) return s;
-  // Cut by code point: a cut inside a surrogate pair renders as U+FFFD.
-  return `${Array.from(s).slice(0, CONTEXT_CAP).join('')}…`;
+  // Count and cut by code point: a cut inside a surrogate pair renders as
+  // U+FFFD, and a code-unit count would put an ellipsis on text that fit.
+  const points = Array.from(s);
+  return points.length <= CONTEXT_CAP
+    ? s
+    : `${points.slice(0, CONTEXT_CAP).join('')}…`;
 };
 
 /**
@@ -667,12 +672,18 @@ export const explainMatch = (
     ['assistant', t.assistant],
     ['pr', t.prText],
   ];
-  // A scoped term names its field: `msg:` is the prompt index, the rest are
-  // the field of the same name (`account:` has no reason line — the account
-  // chip is always on the row).
+  // A scoped term names its field: `msg:` is the prompt index; `project:` is
+  // matched against the project name AND its path (the matcher's `project`
+  // field is both), so it can name either; the rest are the field of the
+  // same name (`account:` has no reason line — the account chip is always on
+  // the row).
   const scopedValuesFor = (name: MatchField): string[] =>
     q.fields
-      .filter(({ field }) => (field === 'msg' ? 'prompt' : field) === name)
+      .filter(
+        ({ field }) =>
+          (field === 'msg' ? 'prompt' : field) === name ||
+          (field === 'project' && name === 'path'),
+      )
       .map(({ value }) => value);
   const out = new Set<MatchField>();
   for (const [name, raw] of fields) {
