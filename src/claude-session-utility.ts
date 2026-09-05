@@ -228,8 +228,10 @@ export const searchClaudeSessions = (
 
   for (const s of allSessions) {
     const sessionPrompts = promptsBySession.get(s.sessionId) || [];
+    // sessionId included so the id shown in a terminal status line finds the
+    // session; the renderer's filterSessionsLocally matches the same field.
     const target =
-      `${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
+      `${s.sessionId} ${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
     if (!matchesAllWords(target, words)) continue;
 
     sessions.push(s);

@@ -196,6 +196,19 @@ describe('buildSessionListView — live scope', () => {
     expect(v.canGroupPins).toBe(false);
   });
 
+  it('never shows a synthetic row for a session a real row already covers', () => {
+    // The renderer synthesizes a row for a live id the list did not know;
+    // one render later the by-id fetch may have produced the real row.
+    const synthetic = { sessionId: 'active', lastTimestamp: 0, __live: {} };
+    const v = build({
+      sessions: [active, recent],
+      liveOnly: true,
+      liveOrphans: [synthetic, orphan],
+    });
+    expect(ids(v.displayedSessions)).toEqual(['active', 'pid:4242']);
+    expect(v.displayedSessions[0].messageCount).toBe(3); // the real row won
+  });
+
   it('recognises liveness from the live report, not only from the active map', () => {
     const v = build({
       sessions: [recent, middle],

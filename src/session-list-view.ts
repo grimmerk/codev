@@ -99,7 +99,12 @@ export interface BuildListViewArgs {
   liveOnly?: boolean;
   /** sessionId -> process facts, from the live-sessions report. */
   liveBySession?: Record<string, LiveRowInfo>;
-  /** Rows synthesized for running processes with no session (`__liveOrphan`). */
+  /**
+   * Rows synthesized for running processes that have no session row to carry
+   * them: no id at all (`__liveOrphan`, not resumable) or an id the loaded
+   * list does not know (resumable). The live scope must list every process
+   * the chip counted, so these are appended after the real rows.
+   */
   liveOrphans?: ListViewSession[];
   /** Saved-list scope (issue #145). */
   viewingList?: SessionList | null;
@@ -340,11 +345,18 @@ export const buildSessionListView = ({
       .filter((m) => !matched || matched.has(m.sessionId))
       .map((m) => resolveMemberRow(m, byId, activePids));
   } else if (liveOnlyActive) {
-    // Orphans have nothing a query could match, so they step aside while
-    // searching rather than sitting under every result as noise.
+    // Synthetic rows have nothing a query could match, so they step aside
+    // while searching rather than sitting under every result as noise. A
+    // synthetic row whose id a real row already covers is dropped — the
+    // renderer builds them from a snapshot that can lag the loaded list by
+    // one render.
+    const shown = new Set(majorSessions.map((s) => s.sessionId));
     displayedSessions = isSearching
       ? majorSessions
-      : [...majorSessions, ...liveOrphans];
+      : [
+          ...majorSessions,
+          ...liveOrphans.filter((s) => !shown.has(s.sessionId)),
+        ];
   } else if (pinnedOnlyActive && !isSearching) {
     // Same reason: scope to the resolved pin set rather than filtering
     // `sessions`, which would silently drop the out-of-window ones.
