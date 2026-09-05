@@ -357,6 +357,11 @@ describe('parsePrRef', () => {
     expect(parsePrRef('#147')).toEqual({ number: 147 });
     expect(parsePrRef('147')).toBeNull();
     expect(parsePrRef('#abc')).toBeNull();
+    // Leading zeros are not a PR number, here as in the miner.
+    expect(parsePrRef('#012')).toBeNull();
+    expect(parsePrRef('#0')).toBeNull();
+    expect(parsePrRef('o/r#012')).toBeNull();
+    expect(parsePrRef('https://github.com/o/r/pull/012')).toBeNull();
     expect(parsePrRef('https://github.com/grimmerk/codev')).toBeNull();
   });
 });
@@ -438,15 +443,25 @@ describe('parseQuery', () => {
   });
 
   it('reports an operator whose value is unusable instead of silently dropping it', () => {
-    const q = parseQuery('title: has:tea is:cold after:soon pr:abc ok', now);
+    const q = parseQuery(
+      'title: has:tea is:cold after:soon pr:abc pr:012 ok',
+      now,
+    );
     expect(q.ignored).toEqual([
       'title:',
       'has:tea',
       'is:cold',
       'after:soon',
       'pr:abc',
+      'pr:012',
     ]);
     expect(q.words).toEqual(['ok']);
+  });
+
+  it('keeps a leading-zero hash as a bare word rather than reading it as a PR', () => {
+    const q = parseQuery('#012', now);
+    expect(q.prRefs).toEqual([]);
+    expect(q.words).toEqual(['#012']);
   });
 
   it('accepts is:running and is:active as is:live', () => {
@@ -495,6 +510,12 @@ describe('findPrRef', () => {
     expect(findPrRef('#1475 and 15980 and 147', { number: 147 })).toBeNull();
     expect(findPrRef('/pull/1470', { number: 147 })).toBeNull();
     expect(findPrRef('a#147', { number: 147 })).toBeNull();
+    // The number must end there: an identifier or a longer number is not it.
+    expect(findPrRef('see #147abc', { number: 147 })).toBeNull();
+    expect(findPrRef('see #147_x', { number: 147 })).toBeNull();
+    expect(findPrRef('/pull/147abc', { number: 147 })).toBeNull();
+    expect(findPrRef('see #147, done', { number: 147 })).not.toBeNull();
+    expect(findPrRef('(see #147)', { number: 147 })).not.toBeNull();
   });
 
   it('honours the repo when the reference names one; a bare #N in the target still matches', () => {

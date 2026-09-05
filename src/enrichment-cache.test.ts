@@ -90,15 +90,27 @@ describe('serializeEnrichment / deserializeEnrichment', () => {
           prRefs: ['#1', 2, ''],
           prRefsScannedBytes: 'many',
         },
+        // A cursor past the file, or not a whole byte, cannot be resumed from.
+        tooFar: { mtimeMs: 1, size: 10, prRefsScannedBytes: 11 },
+        fractional: { mtimeMs: 1, size: 10, prRefsScannedBytes: 2.5 },
+        atEnd: { mtimeMs: 1, size: 10, prRefsScannedBytes: 10 },
         bad: { mtimeMs: 'one', size: 1 },
         alsoBad: null,
       },
     });
-    expect([...partial.fileState.keys()]).toEqual(['ok']);
+    expect([...partial.fileState.keys()]).toEqual([
+      'ok',
+      'tooFar',
+      'fractional',
+      'atEnd',
+    ]);
     expect(partial.titles.get('ok')).toBe('x');
     expect(partial.prLinks.has('ok')).toBe(false);
     expect(partial.prRefs.get('ok')).toEqual(['#1']);
     expect(partial.prRefBytes.has('ok')).toBe(false);
+    expect(partial.prRefBytes.has('tooFar')).toBe(false);
+    expect(partial.prRefBytes.has('fractional')).toBe(false);
+    expect(partial.prRefBytes.get('atEnd')).toBe(10);
   });
 });
 
@@ -138,7 +150,7 @@ describe('minePrRefs', () => {
         { type: 'thinking', thinking: 'maybe #99', signature: 'x' },
         {
           type: 'text',
-          text: 'opened #3, https://github.com/Grimmerk/CodeV/pull/147, o/r#5, again #3',
+          text: 'opened #3, https://GitHub.com/Grimmerk/CodeV/Pull/147, o/r#5, again #3',
         },
       ]),
       user([

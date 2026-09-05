@@ -2512,7 +2512,7 @@ function SwitcherApp() {
                 if (s && !s.__liveOrphan) {
                   // Arm before opening, in case the bridge triggers the focus cycle synchronously.
                   clearSessionSearchOnShowRef.current = true;
-                  window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId]);
+                  window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId], s.accountLabel);
                 }
               } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
                 // ⌘D toggles pin, ⇧⌘D toggles hide on the selected row.
@@ -3058,7 +3058,7 @@ function SwitcherApp() {
                     // A running process with no session id has nothing to resume.
                     if (session.__liveOrphan) return;
                     clearSessionSearchOnShowRef.current = true;
-                    window.electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId]);
+                    window.electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId], session.accountLabel);
                   }}
                   style={{
                     display: 'flex',

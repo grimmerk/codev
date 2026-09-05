@@ -109,6 +109,10 @@ export const invalidateSessionCache = () => {
   cachedPRLinks = null;
   cachedRecaps = null;
   cachedPRRefs = null;
+  // Persist what the last scan found BEFORE clearing it: a debounced write
+  // still pending would otherwise fire after the clear and replace the disk
+  // cache with `sessions: {}`. Flushing also cancels that timer.
+  flushEnrichmentCache();
   enrichedFileState.clear();
   prRefBytes.clear();
   // The disk cache is still valid (freshness is per file, by mtime+size);
@@ -1188,19 +1192,29 @@ const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promi
  * cached session list, which tags each session with its config dir) and return
  * the CLAUDE_CONFIG_DIR to prefix at resume — or null for the default account.
  */
-const getResumeConfigDirEnv = (sessionId: string): string | null => {
+const getResumeConfigDirEnv = (
+  sessionId: string,
+  accountLabel?: string,
+): string | null => {
   const s = readClaudeSessions(Number.MAX_SAFE_INTEGER).find(
     (x) => x.sessionId === sessionId,
   );
-  return s?.accountConfigDirEnv ?? null;
+  if (s) return s.accountConfigDirEnv;
+  // Not in any history (a /branch child, a pruned history): trust the label
+  // a saved list captured, or the resume lands under the anchor account and
+  // never finds its transcript.
+  return accountLabel ? getAccountByLabel(accountLabel).configDirEnv : null;
 };
 
 /**
  * Build `command claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the
  * session belongs to a non-default account so it resumes under the right account.
  */
-const buildResumeCommand = (sessionId: string): string => {
-  const configDir = getResumeConfigDirEnv(sessionId);
+const buildResumeCommand = (
+  sessionId: string,
+  accountLabel?: string,
+): string => {
+  const configDir = getResumeConfigDirEnv(sessionId, accountLabel);
   // Single-quote the value: some terminal injections (Ghostty `initial input`)
   // don't escape the command, so a double-quoted prefix would break their
   // AppleScript string. Single quotes are safe across all terminals + handle spaces.
@@ -1229,6 +1243,7 @@ export const openSession = async (
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
   customTitle?: string,
+  accountLabel?: string,
 ): Promise<void> => {
   let effectiveTerminal = terminalApp;
 
@@ -1259,17 +1274,17 @@ export const openSession = async (
       openSessionInCodeV(sessionId);
       break;
     case 'cmux':
-      openSessionInCmux(sessionId, projectPath, isActive, activePid, customTitle);
+      openSessionInCmux(sessionId, projectPath, isActive, activePid, customTitle, accountLabel);
       break;
     case 'ghostty':
-      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode, customTitle);
+      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode, customTitle, accountLabel);
       break;
     case 'terminal':
-      openSessionInTerminalApp(sessionId, projectPath, isActive, activePid, terminalMode, customTitle);
+      openSessionInTerminalApp(sessionId, projectPath, isActive, activePid, terminalMode, customTitle, accountLabel);
       break;
     case 'iterm2':
     default:
-      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode, customTitle);
+      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode, customTitle, accountLabel);
       break;
   }
 };
@@ -1707,6 +1722,7 @@ export const openSessionInITerm2 = (
   activePid?: number,
   terminalMode: string = 'tab',
   customTitle?: string,
+  accountLabel?: string,
 ): void => {
   const { exec } = require('child_process');
 
@@ -1762,7 +1778,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
   }
 };
@@ -2235,6 +2251,24 @@ export interface OpenListMembersResult {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+// Sessions a list-open is launching right now. A second invocation that
+// overlaps the first (the renderer disables the button, but the IPC does not
+// know that) must not launch the same session again before it registers.
+const membersInFlight = new Set<string>();
+
+const runningSessionIds = (): Set<string> => {
+  const running = new Set<string>();
+  for (const reg of readSessionRegistrations()) {
+    try {
+      process.kill(reg.pid, 0);
+      running.add(reg.sessionId);
+    } catch {
+      // dead pid: a stale registration, not a running session
+    }
+  }
+  return running;
+};
+
 /**
  * Resume the members of a saved list that are not running (issue #145:
  * after a reboot, after closing everything to reclaim memory, or to move the
@@ -2252,17 +2286,9 @@ export const openSessionListMembers = async (
   staggerMs = 700,
 ): Promise<OpenListMembersResult> => {
   const result: OpenListMembersResult = { opened: [], skipped: [] };
-  const running = new Set<string>();
-  for (const reg of readSessionRegistrations()) {
-    try {
-      process.kill(reg.pid, 0);
-      running.add(reg.sessionId);
-    } catch {
-      // dead pid: a stale registration, not a running session
-    }
-  }
   for (const m of members) {
-    if (running.has(m.sessionId)) {
+    // Re-read per launch: the previous launch may have registered by now.
+    if (runningSessionIds().has(m.sessionId) || membersInFlight.has(m.sessionId)) {
       result.skipped.push({ sessionId: m.sessionId, reason: 'already running' });
       continue;
     }
@@ -2275,7 +2301,22 @@ export const openSessionListMembers = async (
       continue;
     }
     if (result.opened.length > 0) await sleep(staggerMs);
-    await openSession(m.sessionId, m.project, false, undefined, terminalApp, terminalMode, m.title);
+    membersInFlight.add(m.sessionId);
+    try {
+      await openSession(
+        m.sessionId,
+        m.project,
+        false,
+        undefined,
+        terminalApp,
+        terminalMode,
+        m.title,
+        m.accountLabel,
+      );
+    } finally {
+      // Long enough for the new process to write its registration.
+      setTimeout(() => membersInFlight.delete(m.sessionId), 10000);
+    }
     result.opened.push(m.sessionId);
   }
   return result;
@@ -2345,6 +2386,7 @@ export const openSessionInGhostty = (
   isActive: boolean,
   terminalMode: string = 'tab',
   customTitle?: string,
+  accountLabel?: string,
 ): void => {
   const { exec } = require('child_process');
 
@@ -2393,7 +2435,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
   }
 };
@@ -2410,6 +2452,7 @@ export const openSessionInTerminalApp = (
   activePid?: number,
   terminalMode: string = 'tab',
   customTitle?: string,
+  accountLabel?: string,
 ): void => {
   const { exec } = require('child_process');
 
@@ -2455,7 +2498,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
   }
 };
@@ -2473,9 +2516,10 @@ export const openSessionInCmux = (
   isActive: boolean,
   activePid?: number,
   customTitle?: string,
+  accountLabel?: string,
 ): void => {
   const { exec } = require('child_process');
-  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel)}`;
 
   console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid, customTitle });
   if (isActive) {
@@ -2600,7 +2644,7 @@ export const openSessionInCmux = (
       exec('osascript -e \'tell application "cmux" to activate\'');
     })();
   } else {
-    const resumeCmd = buildResumeCommand(sessionId);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
     runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
   }
 };

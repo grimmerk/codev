@@ -126,11 +126,13 @@ export const tokenizeQuery = (query: string): string[] => {
 };
 
 const REPO = '[a-z0-9_.-]+\\/[a-z0-9_.-]+';
+// Numbers never start with a zero, matching the miner: `#012` is not PR 12.
+const NUMBER = '[1-9][0-9]*';
 const PR_URL_RE = new RegExp(
-  `^(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/(${REPO})\\/(?:pull|issues)\\/(\\d+)(?:[/?#].*)?$`,
+  `^(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/(${REPO})\\/(?:pull|issues)\\/(${NUMBER})(?:[/?#].*)?$`,
 );
-const REPO_HASH_RE = new RegExp(`^(${REPO})#(\\d+)$`);
-const BARE_HASH_RE = /^#(\d+)$/;
+const REPO_HASH_RE = new RegExp(`^(${REPO})#(${NUMBER})$`);
+const BARE_HASH_RE = new RegExp(`^#(${NUMBER})$`);
 
 /**
  * Read a token (lowercased) as a PR reference, or null. Forms: the GitHub
@@ -199,7 +201,7 @@ export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
     if (key === 'pr') {
       // `pr:147`, `pr:o/r#147`, `pr:<url>` — a number alone is allowed here
       // because the key already says what it is.
-      const ref = /^\d+$/.test(value)
+      const ref = /^[1-9][0-9]*$/.test(value)
         ? { number: Number(value) }
         : parsePrRef(value);
       if (ref) q.prRefs.push(ref);
@@ -271,9 +273,13 @@ const prRefPatterns = (ref: PrRef): PrRefPatterns => {
     n,
     // `#N` and `owner/repo#N`. The optional repo group is anchored by the
     // boundary before it, so `foo/bar#12` captures `foo/bar`, not `o/bar`.
-    hash: new RegExp(`(?:^|[^0-9a-z_./-])((?:${REPO})?)#${n}(?!\\d)`, 'g'),
+    // The number must END there too: `#147abc` is an identifier, not PR 147.
+    hash: new RegExp(
+      `(?:^|[^0-9a-z_./-])((?:${REPO})?)#${n}(?![0-9a-z_])`,
+      'g',
+    ),
     url: new RegExp(
-      `github\\.com\\/(${REPO})\\/(?:pull|issues)\\/${n}(?!\\d)`,
+      `github\\.com\\/(${REPO})\\/(?:pull|issues)\\/${n}(?![0-9a-z_])`,
       'g',
     ),
   };

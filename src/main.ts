@@ -2615,10 +2615,19 @@ ipcMain.handle('scan-closed-vscode-sessions', async (_event, activeSessionIds: s
   return scanClosedVSCodeSessions(new Set(activeSessionIds), vsCodeIndex);
 });
 
-ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => {
+ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string, accountLabel?: string) => {
   const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
   const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
-  openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode, customTitle);
+  openSession(
+    sessionId,
+    projectPath,
+    isActive,
+    activePid,
+    terminalApp,
+    terminalMode,
+    customTitle,
+    typeof accountLabel === 'string' ? accountLabel : undefined,
+  );
 });
 
 // Resume every member of a saved list that is not running (issue #145).

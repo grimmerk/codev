@@ -147,8 +147,16 @@ export const deserializeEnrichment = (raw: unknown): EnrichmentState => {
       );
       if (refs.length > 0) state.prRefs.set(id, refs);
     }
-    if (isFiniteNumber(e.prRefsScannedBytes) && e.prRefsScannedBytes > 0) {
-      state.prRefBytes.set(id, e.prRefsScannedBytes);
+    // A cursor is only usable as a whole-line byte offset inside the file
+    // it was recorded for: an integer in (0, size]. Anything else (a hand
+    // edit, a truncated write) is dropped so mining restarts at zero rather
+    // than skipping bytes or failing to allocate a chunk.
+    if (
+      Number.isInteger(e.prRefsScannedBytes) &&
+      (e.prRefsScannedBytes as number) > 0 &&
+      (e.prRefsScannedBytes as number) <= e.size
+    ) {
+      state.prRefBytes.set(id, e.prRefsScannedBytes as number);
     }
   }
   return state;
@@ -173,7 +181,7 @@ export const deserializeEnrichment = (raw: unknown): EnrichmentState => {
  * read as references; a leading zero is excluded so `#0` is not.
  */
 export const PR_REF_RE =
-  /github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(?:pull|issues)\/([1-9][0-9]*)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)|(?:^|[^A-Za-z0-9&#])#([1-9][0-9]*)/g;
+  /github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(?:pull|issues)\/([1-9][0-9]*)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)|(?:^|[^A-Za-z0-9&#])#([1-9][0-9]*)/gi;
 
 /**
  * The words the assistant actually wrote in one JSONL record, or null when
