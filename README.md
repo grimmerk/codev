@@ -32,9 +32,36 @@ Bare words search everything; **operators aim the query** (the `?` chip beside t
 | `has:pr` `has:title` `has:branch` `has:recap` | sessions that carry the thing |
 | `is:live` `is:pinned` | sessions with a running process (by the `ps` join below) / pinned ones |
 | `after:7d` `after:2026-09-01` `after:today` `before:…` | by the session's last activity (`Nh` `Nd` `Nw`, a date, `today`, `yesterday`) |
-| `#147` `pr:147` `owner/repo#147` `https://github.com/owner/repo/pull/147` | **a pull request in any spelling** — the query form and the form in the text no longer have to agree (measured: 80.6% of PR mentions in prompts used only one form). Three levels of strictness: `#147` is broad (any mention, any repo); `pr:147` counts only a session's own PR badge or a mention that names its repo (every repo has a #147 of its own); a repo in the query (`owner/repo#147`, the URL, `pr:owner/repo#147`) accepts a bare `#147` only in sessions whose own badge or references name that repo. Never a bare number: `#147` does not hit `1475` or `#1475`, and the `[Image #N]` marker of a pasted screenshot is not a reference |
+| `#137` `pr:137` `owner/repo#137` `owner/repo/pull/137` `https://github.com/owner/repo/pull/137` | **a pull request in any spelling** — the query form and the form in the text no longer have to agree (measured: 80.6% of PR mentions in prompts used only one form). Three levels of strictness; see *Finding a pull request* below |
 
-Every term must hold. The assistant's own replies are mined for the PRs it mentioned (its text and the commands it ran — not tool output, so a session that merely listed twenty PRs did not "work on" them), so "the PR you opened for me" is findable by number even when you never typed it. An operator with an unreadable value (`after:soon`) is reported under the box and ignored rather than silently matching nothing.
+Every term must hold. An operator with an unreadable value (`after:soon`) is reported under the box and ignored rather than silently matching nothing.
+
+#### Finding a pull request
+
+A PR can be found from two kinds of evidence, both indexed:
+
+- **(a) Claude Code's own record.** When a PR is created inside a session, Claude Code writes a `pr-link` record into that session's transcript — `{"type":"pr-link","prNumber":137,"prUrl":"https://github.com/grimmerk/codev/pull/137","prRepository":"grimmerk/codev"}` — and that is the `PR #137` badge on the row. Only a session that actually opened the PR has one (39 of 91 transcripts on the reference machine).
+- **(b) Mentions in the conversation.** The URL, `owner/repo#137` or a bare `#137` in **your prompts**, and the same forms in **the assistant's replies and the commands it ran**, mined from the transcript (never from tool output, so a session that ran `gh pr list` did not "work on" twenty PRs). So "the PR you opened for me" is findable by number even when you never typed it.
+
+A **bare mention** is a `#137` with nothing around it saying which repo it belongs to — "take a look at #137", or `Fixes #137` in a commit message. A **repo-qualified mention** is `owner/repo#137` or the URL; the badge counts as one too.
+
+The query form decides how much evidence is required:
+
+| What the session contains | `#137` | `pr:137` | `grimmerk/codev#137`, the URL, or `pr:` + either |
+|---|---|---|---|
+| The badge: this session opened codev PR #137 | ✓ | ✓ | ✓ |
+| You pasted `https://github.com/grimmerk/codev/pull/137` | ✓ | ✓ | ✓ |
+| The assistant wrote `grimmerk/codev#137` | ✓ | ✓ | ✓ |
+| A codev session where you typed "how is #137 going" — no badge, no URL anywhere | ✓ | ✗ | ✗ — nothing in the session proves which repo that 137 is; use `project:codev #137` |
+| A codev session whose badge is **PR #151**, and you typed "also check #137" | ✓ | ✗ (137 is neither the badge nor repo-qualified) | ✓ (the badge proves the session's repo is grimmerk/codev, so its bare #137 counts) |
+| A fred-service session where the assistant wrote `Fixes #137` | ✓ | ✗ | ✗ |
+| The assistant pasted `https://github.com/firefliesai/fred-service/pull/137` | ✓ | ✓ (any repo, as long as the mention names one) | ✗ |
+| Only `#137abc`, or the hex colour `#137e2b` | ✗ | ✗ | ✗ |
+| Only the paste marker `[Image #137]` | ✗ | ✗ | ✗ |
+
+In words: `#137` accepts any mention; `pr:137` requires that *someone said which repo's 137 it is* (badge, URL or `owner/repo#137`), in any repo; a repo in the query requires the same repo on qualified mentions and accepts a bare `#137` only in sessions whose own badge or references prove they belong to that repo. Never a bare number: `#137` does not hit `1375`, `#1375`, `#137abc` or `notgithub.com/…/pull/137`, and a leading zero (`#0137`) is not a reference.
+
+Practical rule: to find *the codev PR 137*, paste the URL or type `grimmerk/codev#137`; if that session never saw a URL and Claude did not open the PR there, use `project:codev #137`.
 
 **Pin** the sessions you keep coming back to (hover 📌 on a row, or `⌘D` on the selected row): they **move into** a **📌 Pinned** zone at the top, ordered by recency like the rest of the list — works even for old sessions found via deep search. **Hide** one-offs you never want in the main flow (hover ⊘, or `⇧⌘D`): they move into the minor-sessions fold, stay searchable, and can be unhidden from inside the fold (they carry a persistent ⊘ marker there). Pins and hides live in `~/.config/codev/session-marks.json`, shared across accounts.
 
