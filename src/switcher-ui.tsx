@@ -751,6 +751,20 @@ function SwitcherApp() {
   const [openingList, setOpeningList] = useState(false);
   // The query-language cheat sheet under the search box (issue #140).
   const [searchHelpOpen, setSearchHelpOpen] = useState(false);
+  // Width of the sessions list, for width-aware line caps (issue #148).
+  // 0 until measured, which the cap scale treats as the default width.
+  const sessionListRef = useRef<HTMLDivElement | null>(null);
+  const [sessionListWidth, setSessionListWidth] = useState(0);
+  useEffect(() => {
+    const el = sessionListRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      setSessionListWidth((prev) => (Math.abs(prev - w) > 8 ? w : prev));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
   const [listsNotice, setListsNotice] = useState<string | null>(null);
   // Set when the lists store exists but cannot be trusted as written — a
   // file an earlier build wrote, or hand-edited. Persistent until repaired
@@ -1085,10 +1099,17 @@ function SwitcherApp() {
   // One rule for every length-capped line in a row: while searching, the window
   // moves to the first match so you can see WHY the row is in the results;
   // otherwise it keeps both ends, because these titles put the newest step last.
-  const fitToRow = (text: string, max: number) =>
-    isSearchingSessions
-      ? windowAroundMatch(text, searchWordsLower, max)
-      : truncateMiddle(text, max);
+  // Issue #148 step 2: the caps are in characters, tuned for the default
+  // 800px window. A wider window scales them up (never down — the constants
+  // stay the floor), measured off the list container, so a resize actually
+  // shows more of each line instead of more empty space to its right.
+  const capScale = Math.max(1, sessionListWidth / 760);
+  const fitToRow = (text: string, max: number) => {
+    const cap = Math.round(max * capScale);
+    return isSearchingSessions
+      ? windowAroundMatch(text, searchWordsLower, cap)
+      : truncateMiddle(text, cap);
+  };
   const hiddenSet = new Set(sessionMarks.hidden);
   const hasPins = Object.keys(sessionMarks.pins).length > 0;
   const viewingList =
@@ -2695,7 +2716,7 @@ function SwitcherApp() {
               title={
                 liveOnlyActive
                   ? `Show every session again${liveReport ? ` · measured ${formatRelativeTime(liveReport.measuredAt)}; re-read on each open and on toggling${memorySummary ? ` · ${memorySummary}` : ''}` : ''}`
-                  : `Show only sessions with a running process${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}`
+                  : `Show only sessions with a running process${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}${memorySummary ? ` · ${memorySummary}` : ''}`
               }
               onMouseDown={(e) => e.preventDefault()}
               onClick={toggleLiveOnly}
@@ -2877,7 +2898,7 @@ function SwitcherApp() {
               ⚠ {listsNotice}
             </div>
           )}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
+          <div ref={sessionListRef} style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
             {/* A list being viewed: its header replaces every other zone. */}
             {listViewActive && viewingList && (
               <div style={LISTS_HEADER_STYLE}>
@@ -3977,7 +3998,10 @@ function SwitcherApp() {
             backgroundColor: 'transparent',
             padding: '0 6px',
             margin: '0 6px',
-            maxHeight: '480px', // Increased max height for more items
+            // Grows with the window now that normal mode is resizable (#148);
+            // the old fixed 480px left a scrollbar floating mid-window.
+            maxHeight: 'calc(100vh - 150px)',
+            overflowX: 'hidden',
           }),
           option: (base) => ({
             ...base,
