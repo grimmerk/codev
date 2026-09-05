@@ -768,6 +768,12 @@ describe('findPromptHits', () => {
     expect(hits[1].snippet).toContain('#147');
   });
 
+  it('caps context by code point, never splitting a surrogate pair', () => {
+    const before = 'x'.repeat(199) + '😀' + 'tail';
+    const [hit] = findPromptHits([before, 'hit here'], [1, 2], ['hit']);
+    expect(hit.before).toBe('x'.repeat(199) + '😀…');
+  });
+
   it('has no neighbour past either end, caps long context, and honours the limit', () => {
     const one = findPromptHits(['x'.repeat(300) + ' hit'], [9], ['hit']);
     expect(one[0].before).toBeUndefined();
@@ -810,6 +816,27 @@ describe('explainMatch', () => {
       'prompt',
       'title',
     ]);
+  });
+
+  it('names the field a scoped term hit, reporting msg: as prompt', () => {
+    const target = {
+      sessionId: 'abcd1234-0000',
+      text: '',
+      title: 'zeta',
+      recap: 'needle here',
+      prompts: ['open the vault'],
+    };
+    expect(explainMatch(target, parseQuery('recap:needle', 0))).toEqual([
+      'recap',
+    ]);
+    expect(explainMatch(target, parseQuery('msg:vault', 0))).toEqual([
+      'prompt',
+    ]);
+    expect(explainMatch(target, parseQuery('title:zeta', 0))).toEqual([
+      'title',
+    ]);
+    // The scope is respected: the word is in the recap, not the title.
+    expect(explainMatch(target, parseQuery('title:needle', 0))).toEqual([]);
   });
 
   it('reports the session id when a word is an id prefix', () => {

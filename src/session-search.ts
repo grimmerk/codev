@@ -590,12 +590,11 @@ export interface PromptHit extends PromptMatch {
 }
 
 const CONTEXT_CAP = 200;
-const capContext = (s: string | undefined): string | undefined =>
-  s === undefined
-    ? undefined
-    : s.length > CONTEXT_CAP
-      ? `${s.slice(0, CONTEXT_CAP)}…`
-      : s;
+const capContext = (s: string | undefined): string | undefined => {
+  if (s === undefined || s.length <= CONTEXT_CAP) return s;
+  // Cut by code point: a cut inside a surrogate pair renders as U+FFFD.
+  return `${Array.from(s).slice(0, CONTEXT_CAP).join('')}…`;
+};
 
 /**
  * EVERY prompt a query hits, in order, up to `limit` — `findPromptMatch`
@@ -668,12 +667,20 @@ export const explainMatch = (
     ['assistant', t.assistant],
     ['pr', t.prText],
   ];
+  // A scoped term names its field: `msg:` is the prompt index, the rest are
+  // the field of the same name (`account:` has no reason line — the account
+  // chip is always on the row).
+  const scopedValuesFor = (name: MatchField): string[] =>
+    q.fields
+      .filter(({ field }) => (field === 'msg' ? 'prompt' : field) === name)
+      .map(({ value }) => value);
   const out = new Set<MatchField>();
   for (const [name, raw] of fields) {
     if (!raw) continue;
     const lower = raw.toLowerCase();
     if (q.words.some((w) => lower.includes(w))) out.add(name);
     if (q.prRefs.some((r) => findPrRef(lower, r, t.repos))) out.add(name);
+    if (scopedValuesFor(name).some((v) => lower.includes(v))) out.add(name);
   }
   if (q.words.some((w) => matchesSessionId(t.sessionId, w))) out.add('id');
   return [...out];

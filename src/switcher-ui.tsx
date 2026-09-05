@@ -548,6 +548,18 @@ const dotStatus = (v: { status?: string; timestamp?: number } | string): string 
   return status;
 };
 
+/** Every status entry through `dotStatus`. */
+const deriveDotStatuses = (raw: Record<string, any>): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const [id, v] of Object.entries(raw)) out[id] = dotStatus(v);
+  return out;
+};
+
+const sameStatuses = (a: Record<string, string>, b: Record<string, string>): boolean => {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
+};
+
 const formatMb = (kb: number): string => {
   const mb = kb / 1024;
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)}GB` : `${Math.round(mb)}MB`;
@@ -724,6 +736,30 @@ function SwitcherApp() {
   const [searchSnippets, setSearchSnippets] = useState<Record<string, SearchHit>>({});
   // Mirrored for applySearchFilter (stale-closure trap, see sessionSearchRef2).
   const searchSnippetsRef = useRef<Record<string, SearchHit>>({});
+  // The hook statuses as last received. The dot colour is a function of the
+  // clock as well (the stale-working rule, #110), so it is re-derived from
+  // these on a timer — nothing else fires while a session just sits.
+  const rawStatusesRef = useRef<Record<string, any>>({});
+  const applyStatuses = (rawStatuses: Record<string, any>) => {
+    rawStatusesRef.current = rawStatuses;
+    setSessionStatuses(deriveDotStatuses(rawStatuses));
+  };
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const next = deriveDotStatuses(rawStatusesRef.current);
+      setSessionStatuses((prev) => (sameStatuses(prev, next) ? prev : next));
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  // The header's ⤢ (normal mode). `invoke` rejects when the main handler
+  // throws; neither activation path wants an unhandled rejection for it.
+  const resetWindowBounds = async () => {
+    try {
+      await window.electronAPI.resetSwitcherWindowBounds();
+    } catch (err) {
+      console.warn('[switcher] reset window bounds failed:', err);
+    }
+  };
   // Issue #146: order results by when the match happened instead of the
   // session's last activity. Off by default — "what was I just working on"
   // is the commoner question, and it wants last activity.
@@ -2050,19 +2086,10 @@ function SwitcherApp() {
     // Session status updates from hooks (fs.watch)
     window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
       if (!rawStatuses) return;
-      const statusStrings: Record<string, string> = {};
-      for (const [id, v] of Object.entries(rawStatuses)) {
-        statusStrings[id] = dotStatus(v);
-      }
-      setSessionStatuses(statusStrings);
+      applyStatuses(rawStatuses);
     });
     window.electronAPI.onSessionStatusesUpdated((_event: any, rawStatuses: Record<string, any>) => {
-      // Extract status strings for dots display
-      const statusStrings: Record<string, string> = {};
-      for (const [id, v] of Object.entries(rawStatuses)) {
-        statusStrings[id] = dotStatus(v);
-      }
-      setSessionStatuses(statusStrings);
+      applyStatuses(rawStatuses);
 
       // Auto-refresh preview (user msg + assistant msg + order) for idle sessions
       const currentSessions = allSessionsRef.current;
@@ -2217,11 +2244,7 @@ function SwitcherApp() {
       // Refresh session statuses on window focus
       window.electronAPI.getSessionStatuses().then((rawStatuses: Record<string, any>) => {
         if (!rawStatuses) return;
-        const statusStrings: Record<string, string> = {};
-        for (const [id, v] of Object.entries(rawStatuses)) {
-          statusStrings[id] = dotStatus(v);
-        }
-        setSessionStatuses(statusStrings);
+        applyStatuses(rawStatuses);
       });
       // Refresh display mode setting
       window.electronAPI.getSessionDisplayMode().then((mode: string) => {
@@ -2503,12 +2526,14 @@ function SwitcherApp() {
             <span
               role="button"
               tabIndex={0}
+              aria-label="Reset the window to its default size and position"
               data-tip="Reset the window to its default size and position"
-              onClick={() => window.electronAPI.resetSwitcherWindowBounds()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => void resetWindowBounds()}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  window.electronAPI.resetSwitcherWindowBounds();
+                  void resetWindowBounds();
                 }
               }}
               style={{ fontSize: '11px', color: '#555', cursor: 'pointer' }}
@@ -3632,41 +3657,67 @@ function SwitcherApp() {
                       const hit = hits[k];
                       const lineStyle = { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' } as const;
                       const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+                      // The small controls inside a row: a click must not open
+                      // the session, and must not pull focus off the search
+                      // box; Enter / Space activate them from the keyboard.
+                      const keepFocus = (e: React.MouseEvent) => { e.stopPropagation(); e.preventDefault(); };
+                      const onKeyActivate = (fn: () => void) => (e: React.KeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          fn();
+                        }
+                      };
                       const lines: React.ReactNode[] = [];
                       // Issue #146: the matched prompt, with the other hits one
                       // click away and the prompts around it unfoldable. The
                       // line is still suppressed when the only hit is already
                       // on screen (first/last prompt) — vertical space rule.
                       if (hit && words.some((w) => hit.snippet.toLowerCase().includes(w.toLowerCase()))) {
-                        const lastIndex = (session.messageCount ?? 0) - 1;
+                        // Against the prompt index, not messageCount: that
+                        // counts every history line, prompts or not.
+                        const lastIndex = m.promptCount - 1;
                         const dupFirst = hit.promptIndex === 0 && (sessionDisplayMode === 'first' || sessionDisplayMode === 'both');
                         const dupLast = hit.promptIndex === lastIndex && (sessionDisplayMode === 'last' || sessionDisplayMode === 'both');
                         const expanded = expandedHits.has(id);
                         const hasContext = !!(hit.before || hit.after);
+                        const prevHit = () => setHitIndex((h) => ({ ...h, [id]: (k - 1 + hits.length) % hits.length }));
+                        const nextHit = () => setHitIndex((h) => ({ ...h, [id]: (k + 1) % hits.length }));
+                        const toggleContext = () =>
+                          setExpandedHits((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          });
                         if (!(dupFirst || dupLast) || hits.length > 1 || expanded) {
                           lines.push(
                             <div key="hit" style={lineStyle}>
                               <span style={SNIPPET_LINE_STYLE}>
                                 <span style={SNIPPET_MARKER_STYLE}>match #{hit.promptIndex + 1}</span>
                                 {hits.length > 1 && (
-                                  <span style={{ color: '#777', fontSize: '10px' }} onClick={stop} onMouseDown={stop}>
+                                  <span style={{ color: '#777', fontSize: '10px' }} onClick={stop} onMouseDown={keepFocus}>
                                     {' '}
                                     <span
                                       role="button"
-                                      tabIndex={-1}
+                                      tabIndex={0}
+                                      aria-label="Previous hit in this session"
                                       data-tip="Previous hit in this session"
                                       style={{ cursor: 'pointer', padding: '0 2px' }}
-                                      onClick={() => setHitIndex((h) => ({ ...h, [id]: (k - 1 + hits.length) % hits.length }))}
+                                      onClick={prevHit}
+                                      onKeyDown={onKeyActivate(prevHit)}
                                     >
                                       ‹
                                     </span>
                                     {k + 1}/{hits.length}
                                     <span
                                       role="button"
-                                      tabIndex={-1}
+                                      tabIndex={0}
+                                      aria-label="Next hit in this session"
                                       data-tip="Next hit in this session"
                                       style={{ cursor: 'pointer', padding: '0 2px' }}
-                                      onClick={() => setHitIndex((h) => ({ ...h, [id]: (k + 1) % hits.length }))}
+                                      onClick={nextHit}
+                                      onKeyDown={onKeyActivate(nextHit)}
                                     >
                                       ›
                                     </span>
@@ -3675,19 +3726,17 @@ function SwitcherApp() {
                                 {hasContext && (
                                   <span
                                     role="button"
-                                    tabIndex={-1}
+                                    tabIndex={0}
+                                    aria-expanded={expanded}
+                                    aria-label={expanded ? 'Hide the prompts around this hit' : 'Show the prompts before and after this hit'}
                                     data-tip={expanded ? 'Hide the prompts around this hit' : 'Show the prompts before and after this hit'}
                                     style={{ color: '#777', fontSize: '10px', cursor: 'pointer', padding: '0 3px' }}
-                                    onMouseDown={stop}
+                                    onMouseDown={keepFocus}
                                     onClick={(e) => {
                                       stop(e);
-                                      setExpandedHits((prev) => {
-                                        const next = new Set(prev);
-                                        if (next.has(id)) next.delete(id);
-                                        else next.add(id);
-                                        return next;
-                                      });
+                                      toggleContext();
                                     }}
+                                    onKeyDown={onKeyActivate(toggleContext)}
                                   >
                                     {expanded ? '▾ hide' : '▸ context'}
                                   </span>

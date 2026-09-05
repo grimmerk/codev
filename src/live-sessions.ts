@@ -70,7 +70,11 @@ export interface LiveSession {
 export interface MemoryPressure {
   swapUsedMb: number;
   swapTotalMb: number;
-  /** `kern.memorystatus_vm_pressure_level`: 1 normal, 2 warn, 4 critical; 0 when unreadable. */
+  /**
+   * `kern.memorystatus_vm_pressure_level`: 1 normal, 2 warn, 4 critical.
+   * Never a placeholder: when either figure is unreadable the whole object
+   * is absent (`parseMemoryPressure` returns null).
+   */
   level: number;
 }
 

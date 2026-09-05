@@ -115,13 +115,95 @@ const WIN_HEIGHT = 600;
 let appMode: 'normal' | 'menubar' = 'normal'; // default to normal for new users
 
 const getWindowPosition = () => {
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width, height } = primaryDisplay.workAreaSize;
+  // Centred in the primary display's WORK AREA. Its origin is not (0, 0):
+  // the menu bar offsets it, and a display arrangement can too.
+  const { x, y, width, height } = screen.getPrimaryDisplay().workArea;
+  return {
+    x: x + Math.round((width - WIN_WIDTH) / 2),
+    y: y + Math.round((height - WIN_HEIGHT) / 2),
+  };
+};
 
-  const x = Math.round(width / 2 - WIN_WIDTH / 2);
-  const y = Math.round(height / 2 - WIN_HEIGHT / 2);
+// Menu-bar mode: always the default size, centred, not resizable — the
+// window may have been created (and resized, and remembered) in normal
+// mode, so this is enforced at every show and at every mode switch rather
+// than at creation.
+const applyMenubarGeometry = (window: BrowserWindow) => {
+  window.setResizable(false);
+  window.setSize(WIN_WIDTH, WIN_HEIGHT, false);
+  const position = getWindowPosition();
+  window.setPosition(position.x, position.y, false);
+};
 
-  return { x, y };
+// Normal mode remembers the window's bounds (issue #148). Restoring reads
+// the settings file, so a window created and shown in the same tick would
+// paint at the default size and then jump: `showSwitcherWindow` waits for
+// the restore that is in flight.
+const SWITCHER_BOUNDS_KEY = 'switcher-window-bounds';
+let pendingBoundsRestore: Promise<void> | null = null;
+let saveBoundsTimer: ReturnType<typeof setTimeout> | null = null;
+// Set by the reset: the setBounds it performs fires resize/move, whose
+// debounced save would otherwise write the default bounds straight back.
+let ignoreBoundsSavesUntil = 0;
+
+const restoreSwitcherBounds = async (window: BrowserWindow): Promise<void> => {
+  try {
+    const saved = (await settings.get(SWITCHER_BOUNDS_KEY)) as
+      | { x: number; y: number; width: number; height: number }
+      | null
+      | undefined;
+    if (
+      !saved ||
+      typeof saved.x !== 'number' ||
+      typeof saved.y !== 'number' ||
+      typeof saved.width !== 'number' ||
+      typeof saved.height !== 'number' ||
+      window.isDestroyed() ||
+      appMode !== 'normal'
+    ) {
+      return;
+    }
+    // Only if the rectangle still lands on a display that exists — a window
+    // remembered on an external monitor must not open off-screen after it
+    // is unplugged.
+    const area = screen.getDisplayMatching(saved).workArea;
+    const onScreen =
+      saved.x < area.x + area.width &&
+      saved.x + saved.width > area.x &&
+      saved.y < area.y + area.height &&
+      saved.y + saved.height > area.y;
+    if (onScreen) {
+      window.setBounds({
+        ...saved,
+        width: Math.max(saved.width, 640),
+        height: Math.max(saved.height, 420),
+      });
+    }
+  } catch {
+    // Unreadable settings: keep the default size.
+  }
+};
+
+const saveSwitcherBounds = (window: BrowserWindow) => {
+  if (saveBoundsTimer) clearTimeout(saveBoundsTimer);
+  saveBoundsTimer = setTimeout(async () => {
+    saveBoundsTimer = null;
+    // Checked when the timer fires, not when the handler was attached: the
+    // mode can change under a window that stays alive.
+    if (window.isDestroyed() || appMode !== 'normal') return;
+    if (Date.now() < ignoreBoundsSavesUntil) return;
+    const b = window.getBounds();
+    try {
+      await settings.set(SWITCHER_BOUNDS_KEY, {
+        x: b.x,
+        y: b.y,
+        width: b.width,
+        height: b.height,
+      });
+    } catch {
+      // A failed save costs the next launch its position, nothing more.
+    }
+  }, 400);
 };
 
 // ref: https://blog.logrocket.com/building-a-menu-bar-application-with-electron-and-react/
@@ -136,21 +218,25 @@ const showSwitcherWindow = () => {
   }
 
   if (appMode === 'menubar') {
-    // Menu bar mode: always the default size, centred, not resizable — the
-    // window may have been created (and resized, and remembered) in normal
-    // mode, so this is enforced at every show rather than at creation.
-    window.setResizable(false);
-    window.setSize(WIN_WIDTH, WIN_HEIGHT, false);
-    const position = getWindowPosition();
-    window.setPosition(position.x, position.y, false);
+    applyMenubarGeometry(window);
   } else {
     window.setResizable(true);
   }
-  if (window.isMinimized()) {
-    window.restore();
-  }
-  window.show();
-  window.focus();
+  const target = window;
+  const reveal = () => {
+    if (target.isDestroyed()) return;
+    if (target.isMinimized()) {
+      target.restore();
+    }
+    target.show();
+    target.focus();
+  };
+  // A restore still in flight (the window was created a moment ago)
+  // finishes before the first paint; otherwise show now.
+  const pending = pendingBoundsRestore;
+  pendingBoundsRestore = null;
+  if (pending) void pending.finally(reveal);
+  else reveal();
 };
 
 const showAIAssistantWindow = () => {
@@ -477,50 +563,14 @@ const createSwitcherWindow = (initialMode?: string): BrowserWindow => {
   window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY + hash);
 
   if (appMode === 'normal') {
-    // Restore the last bounds before the window is first shown. Only if
-    // they still land on a display that exists — a window remembered on an
-    // external monitor must not open off-screen after it is unplugged.
-    settings
-      .get('switcher-window-bounds')
-      .then((saved: unknown) => {
-        const b = saved as { x: number; y: number; width: number; height: number } | null;
-        if (
-          !b ||
-          typeof b.x !== 'number' ||
-          typeof b.y !== 'number' ||
-          typeof b.width !== 'number' ||
-          typeof b.height !== 'number' ||
-          window.isDestroyed() ||
-          appMode !== 'normal'
-        ) {
-          return;
-        }
-        const display = screen.getDisplayMatching(b);
-        const area = display.workArea;
-        const onScreen =
-          b.x < area.x + area.width &&
-          b.x + b.width > area.x &&
-          b.y < area.y + area.height &&
-          b.y + b.height > area.y;
-        if (onScreen) window.setBounds({ ...b, width: Math.max(b.width, 640), height: Math.max(b.height, 420) });
-      })
-      .catch(() => {});
-    let saveBoundsTimer: ReturnType<typeof setTimeout> | null = null;
-    const saveBounds = () => {
-      if (saveBoundsTimer) clearTimeout(saveBoundsTimer);
-      saveBoundsTimer = setTimeout(() => {
-        // Checked when the timer fires, not when the handler was attached:
-        // the mode can change under a window that stays alive.
-        if (window.isDestroyed() || appMode !== 'normal') return;
-        const b = window.getBounds();
-        settings
-          .set('switcher-window-bounds', { x: b.x, y: b.y, width: b.width, height: b.height })
-          .catch(() => {});
-      }, 400);
-    };
-    window.on('resize', saveBounds);
-    window.on('move', saveBounds);
+    // Restore the last bounds before the window is first shown.
+    pendingBoundsRestore = restoreSwitcherBounds(window);
   }
+  // Attached whatever the mode: the save checks the mode when it fires, so
+  // a window created in menu-bar mode and switched to normal mode later is
+  // remembered too — the mode changes under a window that stays alive.
+  window.on('resize', () => saveSwitcherBounds(window));
+  window.on('move', () => saveSwitcherBounds(window));
 
   // Open external links in default browser
   const { shell } = require('electron');
@@ -2364,23 +2414,26 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
   appMode = newMode;
   if (newMode === 'menubar') {
     app.setActivationPolicy('accessory');
-    // accessory mode hides all windows — re-show after short delay
-    const win = getSwitcherWindow();
-    if (win) {
-      setTimeout(() => { win.show(); win.focus(); }, 100);
+    // accessory mode hides all windows — re-show after a short delay, through
+    // the one path that enforces the menu-bar geometry (default size,
+    // centred, not resizable) on a window that may have been resized.
+    if (getSwitcherWindow()) {
+      setTimeout(() => showSwitcherWindow(), 100);
     }
   } else {
     app.setActivationPolicy('regular');
+    // Entering normal mode with a live window: resizable, and the remembered
+    // bounds restored once, as creation in this mode would have done.
+    const win = getSwitcherWindow();
+    if (win) {
+      win.setResizable(true);
+      void restoreSwitcherBounds(win);
+    }
   }
   // Notify renderer to update drag region
   const window = getSwitcherWindow();
   if (window) {
     window.webContents.send('app-mode-changed', newMode);
-    // Re-center when switching to menu bar mode
-    if (newMode === 'menubar') {
-      const position = getWindowPosition();
-      window.setPosition(position.x, position.y, false);
-    }
   }
 });
 
@@ -2390,9 +2443,23 @@ ipcMain.on('set-app-mode', async (_event, mode: string) => {
 ipcMain.handle('reset-switcher-window-bounds', async () => {
   const window = getSwitcherWindow();
   if (!window) return;
+  // The setBounds below fires resize/move; their debounced save must not
+  // write the default bounds back after the unset.
+  ignoreBoundsSavesUntil = Date.now() + 1000;
+  if (saveBoundsTimer) {
+    clearTimeout(saveBoundsTimer);
+    saveBoundsTimer = null;
+  }
   const position = getWindowPosition();
-  window.setBounds({ x: position.x, y: position.y, width: WIN_WIDTH, height: WIN_HEIGHT }, false);
-  await settings.unset('switcher-window-bounds').catch(() => {});
+  window.setBounds(
+    { x: position.x, y: position.y, width: WIN_WIDTH, height: WIN_HEIGHT },
+    false,
+  );
+  try {
+    await settings.unset(SWITCHER_BOUNDS_KEY);
+  } catch {
+    // Nothing to forget, or unwritable settings: the window is reset either way.
+  }
 });
 
 ipcMain.handle('get-session-terminal-app', async () => {

@@ -60,7 +60,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAppModeChanged: (callback: any) => ipcRenderer.on('app-mode-changed', callback),
   onShortcutsUpdated: (callback: any) => ipcRenderer.on('shortcuts-updated', callback),
   getSessionTerminalApp: () => ipcRenderer.invoke('get-session-terminal-app'),
-  resetSwitcherWindowBounds: () => ipcRenderer.invoke('reset-switcher-window-bounds'),
+  resetSwitcherWindowBounds: () =>
+    ipcRenderer.invoke('reset-switcher-window-bounds'),
   setSessionTerminalApp: (app: string) => ipcRenderer.send('set-session-terminal-app', app),
   getSessionTerminalMode: () => ipcRenderer.invoke('get-session-terminal-mode'),
   setSessionTerminalMode: (mode: string) => ipcRenderer.send('set-session-terminal-mode', mode),

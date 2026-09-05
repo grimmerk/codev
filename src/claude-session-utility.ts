@@ -35,6 +35,11 @@ import {
   writeEnrichmentCacheFile,
 } from './enrichment-cache';
 import { readSessionRegistrations } from './live-sessions';
+import {
+  buildITerm2SwitchScript,
+  buildTerminalAppSwitchScript,
+  switchOrderFor,
+} from './terminal-switch';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -100,6 +105,16 @@ let promptTimesBySession: Map<string, number[]> = new Map();
 
 // Cache for active session detection to avoid spawning processes on every keystroke
 let cachedActiveMap: Map<string, number> | null = null;
+// Pids the last detection attached to a row by GUESSING — a same-cwd match or
+// a terminal-tab title, for a process whose registration named a session the
+// history does not know (or, on old Claude Code, no registration at all).
+// Everything else in the map came from `~/.claude/sessions/<pid>.json` and
+// is exact. The switch scripts read this to pick their matching order.
+let cachedGuessedPids: Set<number> = new Set();
+
+/** Was this pid attached to its session row by a guess rather than a registration? */
+export const isGuessedPid = (pid: number): boolean =>
+  cachedGuessedPids.has(pid);
 let cachedVSCodeSessions: ClaudeSession[] | null = null;
 let cachedEntrypoints: Map<string, string> | null = null;
 let activeCacheTimestamp = 0;
@@ -238,6 +253,13 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
 
 export interface SessionSearchMatch extends PromptMatch {
   isLastPrompt: boolean;
+  /**
+   * How many prompts the index holds for this session — what a hit's
+   * `promptIndex` counts against. NOT `messageCount`: that counts every
+   * history line, including ones with no `display`, so "is this the last
+   * prompt" must be judged against this figure.
+   */
+  promptCount: number;
   /** Every hit (up to 20), first one mirrored in the fields above. */
   hits: PromptHit[];
   /** Epoch ms of the latest hit — what "sort by match" orders on. */
@@ -349,7 +371,9 @@ export const searchClaudeSessions = (
       snippets[id] = {
         promptIndex: first?.promptIndex ?? -1,
         snippet: first?.snippet ?? '',
-        isLastPrompt: !!first && first.promptIndex === sessionPrompts.length - 1,
+        isLastPrompt:
+          !!first && first.promptIndex === sessionPrompts.length - 1,
+        promptCount: sessionPrompts.length,
         hits,
         matchedAt: hits.reduce((m, h) => Math.max(m, h.at), 0),
         reasons,
@@ -1066,6 +1090,8 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
   }
 
   const activeMap = new Map<string, number>();
+  // Pids whose registration named a session we know: exact, not guessed.
+  const exactPids = new Set<number>();
   const entrypoints = new Map<string, string>();
   const vscodeSessions: ClaudeSession[] = [];
   const vscodeReadPromises: Promise<void>[] = [];
@@ -1113,6 +1139,7 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
           if (entrypoint === 'claude-vscode') {
             // VS Code sessions: not in history.jsonl, add directly
             activeMap.set(sessionId, pid);
+            exactPids.add(pid);
             // Queue async JSONL read (head/tail in parallel)
             const startedAt = data.startedAt;
             vscodeReadPromises.push(
@@ -1137,6 +1164,7 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
             const knownSession = allSessions.find(s => s.sessionId === sessionId);
             if (knownSession) {
               activeMap.set(sessionId, pid);
+              exactPids.add(pid);
             } else if (cwd) {
               // sessionId not in history — find session by cwd
               console.log(`[detect-active] PID ${pid} sessionId ${sessionId} not in history.jsonl, trying cwd match (${cwd})`);
@@ -1179,6 +1207,11 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
   }
 
   cachedActiveMap = activeMap;
+  // Whatever the cwd / title cross-reference or the legacy scan attached is
+  // a guess by construction; only the registration paths above are exact.
+  cachedGuessedPids = new Set(
+    [...activeMap.values()].filter((pid) => !exactPids.has(pid)),
+  );
   cachedVSCodeSessions = vscodeSessions;
   cachedEntrypoints = entrypoints;
   activeCacheTimestamp = now;
@@ -1845,56 +1878,15 @@ export const openSessionInITerm2 = async (
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
-    // Three-layer matching for iTerm2 switch:
-    // 1. tty matching (most precise — works when PID-session mapping is correct)
-    // 2. title matching (works when session has /rename title)
-    // 3. fallback: just activate iTerm2
-    const titleMatch = customTitle
-      ? `
-        -- Layer 2: title matching (fallback for same-cwd sessions)
-        repeat with w in windows
-          repeat with t in tabs of w
-            repeat with s in sessions of t
-              if name of s contains "${customTitle.replace(/"/g, '\\"')}" then
-                select s
-                select t
-                set index of w to 1
-                return "found-by-title"
-              end if
-            end repeat
-          end repeat
-        end repeat`
-      : '';
-
+    // tty and title, in the order the pid's provenance calls for (see
+    // terminal-switch.ts): exact pid → tty first; guessed → title first.
+    // Neither found → iTerm2 is merely activated.
+    const order = switchOrderFor(!isGuessedPid(activePid));
     const tmpScript = '/tmp/codev-iterm-switch.scpt';
-    // TTY first: a process has exactly one controlling terminal, so this is
-    // the only match that cannot pick a sibling. Title matching is the
-    // fallback, and it is exactly what went wrong before (issue #142 C0):
-    // three `/branch` siblings share a name on purpose, and the title layer
-    // sent every row to the same tab.
-    const switchScript = `tell application "iTerm2"
-  activate
-  -- Layer 1: tty matching (exact)
-  set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
-  if targetTty is not "" then
-    repeat with w in windows
-      repeat with t in tabs of w
-        repeat with s in sessions of t
-          if tty of s ends with targetTty then
-            select s
-            select t
-            set index of w to 1
-            return "found-by-tty"
-          end if
-        end repeat
-      end repeat
-    end repeat
-  end if
-  ${titleMatch ? `-- Layer 2: title matching (fallback; not unique across /branch siblings)
-  ${titleMatch.trim()}` : ''}
-  return "not found"
-end tell`;
-    console.log(`[iTerm2] switch: pid=${activePid}, customTitle=${customTitle || 'none'}`);
+    const switchScript = buildITerm2SwitchScript(activePid, customTitle, order);
+    console.log(
+      `[iTerm2] switch: pid=${activePid}, order=${order}, customTitle=${customTitle || 'none'}`,
+    );
     fs.writeFileSync(tmpScript, switchScript);
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8' }, (error: any, stdout: string) => {
       console.log(`[iTerm2] switch result: ${(stdout || '').trim()}`, error?.message || '');
@@ -2598,41 +2590,17 @@ export const openSessionInTerminalApp = async (
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
-    // TTY first (exact), title as the fallback — see the iTerm2 switch for why.
-    const titleMatch = customTitle
-      ? `
-  -- Layer 2: title matching (fallback; not unique across /branch siblings)
-  repeat with w in windows
-    repeat with t in tabs of w
-      if custom title of t contains "${customTitle.replace(/"/g, '\\"')}" then
-        set selected tab of w to t
-        set index of w to 1
-        return "found-by-title"
-      end if
-    end repeat
-  end repeat`
-      : '';
-
+    // Same two keys and the same provenance rule as the iTerm2 switch.
+    const order = switchOrderFor(!isGuessedPid(activePid));
     const tmpScript = '/tmp/codev-terminal-switch.scpt';
-    const switchScript = `tell application "Terminal"
-  activate
-  -- Layer 1: tty matching (exact)
-  set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
-  if targetTty is not "" then
-    repeat with w in windows
-      repeat with t in tabs of w
-        if tty of t ends with targetTty then
-          set selected tab of w to t
-          set index of w to 1
-          return "found-by-tty"
-        end if
-      end repeat
-    end repeat
-  end if
-  ${titleMatch}
-  return "not found"
-end tell`;
-    console.log(`[Terminal.app] switch: pid=${activePid}, customTitle=${customTitle || 'none'}`);
+    const switchScript = buildTerminalAppSwitchScript(
+      activePid,
+      customTitle,
+      order,
+    );
+    console.log(
+      `[Terminal.app] switch: pid=${activePid}, order=${order}, customTitle=${customTitle || 'none'}`,
+    );
     fs.writeFileSync(tmpScript, switchScript);
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
       console.log(`[Terminal.app] switch result: ${(stdout || '').trim()}`, error?.message || '');
