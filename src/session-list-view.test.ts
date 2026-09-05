@@ -199,14 +199,61 @@ describe('buildSessionListView — live scope', () => {
   it('never shows a synthetic row for a session a real row already covers', () => {
     // The renderer synthesizes a row for a live id the list did not know;
     // one render later the by-id fetch may have produced the real row.
-    const synthetic = { sessionId: 'active', lastTimestamp: 0, __live: {} };
+    // Same id AND same pid as the real row: the same process, twice.
+    const real = { ...active, activePid: 1 };
+    const synthetic = {
+      sessionId: 'active',
+      lastTimestamp: 0,
+      __live: { pid: 1, rssKb: 1, tty: null, uptimeSec: 1, registered: true },
+    };
     const v = build({
-      sessions: [active, recent],
+      sessions: [real, recent],
       liveOnly: true,
       liveOrphans: [synthetic, orphan],
     });
     expect(ids(v.displayedSessions)).toEqual(['active', 'pid:4242']);
     expect(v.displayedSessions[0].messageCount).toBe(3); // the real row won
+  });
+
+  it('keeps a synthetic row for a SECOND process on a session a real row shows', () => {
+    // Same id, different pid: a resumed copy, or a /branch parent and child.
+    // The chip counts both; the list must show both.
+    const real = { ...active, activePid: 1 };
+    const second = {
+      sessionId: 'active',
+      lastTimestamp: 0,
+      activePid: 2,
+      __live: {
+        pid: 2,
+        rssKb: 1,
+        tty: 'ttys002',
+        uptimeSec: 1,
+        registered: true,
+      },
+      __liveExtra: true,
+    };
+    const v = build({
+      sessions: [real],
+      liveOnly: true,
+      liveOrphans: [second],
+    });
+    expect(v.displayedSessions.map((s) => s.activePid)).toEqual([1, 2]);
+  });
+
+  it('does not fold junk under a saved list', () => {
+    // `junk` is in the browse list and would fold; the list scope renders
+    // members, so the fold must be empty there.
+    const v = build({
+      viewingList: {
+        id: 'L',
+        name: 'l',
+        createdAt: '2026-09-05T00:00:00Z',
+        members: [],
+      },
+    });
+    expect(v.listViewActive).toBe(true);
+    expect(v.minorSessions).toEqual([]);
+    expect(v.displayedSessions).toEqual([]);
   });
 
   it('recognises liveness from the live report, not only from the active map', () => {

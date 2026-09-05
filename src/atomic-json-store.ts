@@ -80,9 +80,13 @@ export const readStoreResult = <T>(
 
 export const writeStoreFile = (filePath: string, value: unknown): void => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  // temp + rename so a crash mid-write can't corrupt the store
+  // temp + rename so a crash mid-write can't corrupt the store. Owner-only
+  // permissions: the lists store carries conversation snippets.
   const tmp = `${filePath}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
   fs.renameSync(tmp, filePath);
 };
 

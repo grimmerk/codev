@@ -87,7 +87,11 @@ const capText = (value: unknown, max: number): string | undefined => {
   if (typeof value !== 'string') return undefined;
   const t = value.trim();
   if (!t) return undefined;
-  const capped = t.length > max ? t.slice(0, max).trim() : t;
+  // Cap in code points, not UTF-16 units: a cut inside a surrogate pair
+  // (an emoji at the boundary) would store a lone surrogate that renders
+  // as a broken glyph forever.
+  const points = Array.from(t);
+  const capped = points.length > max ? points.slice(0, max).join('').trim() : t;
   return capped || undefined;
 };
 
@@ -102,7 +106,7 @@ export const normalizeMember = (raw: unknown): SessionListMember | null => {
     project,
     projectName:
       capText(m.projectName, LIST_TEXT_CAPS.title) ||
-      project.split('/').filter(Boolean).pop() ||
+      capText(project.split('/').filter(Boolean).pop(), LIST_TEXT_CAPS.title) ||
       m.sessionId.slice(0, 8),
     pinned: m.pinned === true,
     lastTimestamp:

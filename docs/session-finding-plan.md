@@ -374,8 +374,9 @@ sessions is ~3GB of processes — the very problem the feature exists to relieve
 per-row (the existing click-to-resume), and a whole-set restore, if it ever comes, has to
 show the projected cost first.
 
-**Drift across `/branch` is shared with pins.** A list stores sessionIds, so §4.7 applies
-unchanged: after a branch, the member points at the ancestor. That is one more consumer of
+**Drift across `/branch` is shared with pins.** A list's members are keyed by sessionId
+(each carrying the captured title, branch, pin state, messages and recap), so §4.7 applies
+unchanged: after a branch, the member's key points at the ancestor. That is one more consumer of
 the stable-task-identity decision in #142 (C1), and an argument for making it rather than
 routing around it.
 

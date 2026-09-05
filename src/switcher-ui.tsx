@@ -14,7 +14,19 @@ import {
 } from './session-list-view';
 
 type LiveReport = Awaited<ReturnType<Window['electronAPI']['getLiveSessions']>>;
-import { truncateMiddle, windowAroundMatch } from './session-search';
+type ListsResponse = Awaited<ReturnType<Window['electronAPI']['getSessionLists']>>;
+/** Shape every list mutation returns (save / delete / rename). */
+type ListsWriteResult = {
+  ok: boolean;
+  error?: string;
+  lists?: { lists: SessionList[] };
+};
+import {
+  matchesAllWordsOrId,
+  matchesSessionId,
+  truncateMiddle,
+  windowAroundMatch,
+} from './session-search';
 import TerminalTab from './terminal-tab';
 
 type SwitcherMode = 'projects' | 'sessions' | 'terminal';
@@ -716,12 +728,12 @@ function SwitcherApp() {
     return allItems.filter((s) => {
       const prInfo = prLinks[s.sessionId];
       const terminalBadge = terminalApps[s.sessionId] || ((s as any).entrypoint === 'claude-vscode' ? 'vscode' : '');
-      // sessionId is searchable so a session can be found from the id a
-      // terminal status line shows — the one field that is unique when
-      // several sessions share a name (#142). Must stay in step with the
-      // main-side target in searchClaudeSessions.
-      const searchTarget = `${s.sessionId} ${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''} ${terminalBadge}`.toLowerCase();
-      return words.every((w: string) => searchTarget.includes(w));
+      // The session id is searchable too — by the prefix rule in
+      // matchesSessionId, shared with the main-side searchClaudeSessions so
+      // both paths agree on what an id query is (#142: the id is the one
+      // field that stays unique when several sessions share a name).
+      const searchTarget = `${s.projectName} ${s.project} ${s.firstUserMessage} ${s.lastUserMessage} ${customTitles[s.sessionId] || ''} ${branches[s.sessionId] || ''} ${prInfo ? `PR #${prInfo.prNumber} ${prInfo.prUrl}` : ''} ${assistantResponses[s.sessionId] || ''} ${terminalBadge}`.toLowerCase();
+      return matchesAllWordsOrId(searchTarget, s.sessionId, words);
     });
   };
 
@@ -881,9 +893,11 @@ function SwitcherApp() {
   // first live test caught "33 live" beside a 32-row list.
   const liveBySession: Record<string, LiveRowInfo> = {};
   const liveOrphans: ListViewSession[] = [];
-  const knownIds = new Set<string>();
-  for (const s of allSessions) knownIds.add(s.sessionId);
-  for (const s of extraScopeSessions) knownIds.add(s.sessionId);
+  const knownById = new Map<string, ListViewSession>();
+  for (const s of allSessions) knownById.set(s.sessionId, s);
+  for (const s of extraScopeSessions) {
+    if (!knownById.has(s.sessionId)) knownById.set(s.sessionId, s);
+  }
   for (const p of liveReport?.live ?? []) {
     const info: LiveRowInfo = {
       pid: p.pid,
@@ -892,19 +906,42 @@ function SwitcherApp() {
       uptimeSec: p.uptimeSec,
       registered: p.registered,
     };
-    if (p.sessionId) liveBySession[p.sessionId] = info;
-    if (p.sessionId && knownIds.has(p.sessionId)) continue;
+    const id = p.sessionId;
+    const known = id ? knownById.get(id) : undefined;
+    if (id && known) {
+      // A real row represents ONE process: the pid the registration-based
+      // detection mapped to this id, else the first one seen. Any other
+      // process on the same id (a resumed copy, a /branch parent and child)
+      // gets a row of its own — the chip counts processes, so the list must
+      // show processes, and the memory total must add every one of them.
+      const representative = activeStateRef.current[id] ?? liveBySession[id]?.pid;
+      if (representative === undefined || representative === p.pid) {
+        liveBySession[id] = info;
+        continue;
+      }
+      liveOrphans.push({
+        ...known,
+        isActive: true,
+        activePid: p.pid,
+        __live: info,
+        __liveExtra: true,
+      });
+      continue;
+    }
+    if (id) liveBySession[id] ??= info;
     liveOrphans.push({
-      sessionId: p.sessionId || `pid:${p.pid}`,
+      sessionId: id || `pid:${p.pid}`,
       project: p.cwd || '',
       projectName: (p.cwd || '').split('/').filter(Boolean).pop() || `pid ${p.pid}`,
+      accountLabel: p.accountLabel,
+      accountIsAnchor: p.accountIsAnchor,
       firstUserMessage: '',
       lastUserMessage: '',
       lastTimestamp: 0,
       messageCount: undefined,
       isActive: true,
       activePid: p.pid,
-      __liveOrphan: !p.sessionId,
+      __liveOrphan: !id,
       __live: info,
     });
   }
@@ -957,7 +994,7 @@ function SwitcherApp() {
   // beside a search result describes the result.
   const displayedRssKb = liveOnlyActive
     ? displayedSessions.reduce((sum, s) => {
-        const live = liveBySession[s.sessionId] || (s.__live as LiveRowInfo | undefined);
+        const live = s.__live || liveBySession[s.sessionId];
         return sum + (live?.rssKb ?? 0);
       }, 0)
     : 0;
@@ -1075,13 +1112,14 @@ function SwitcherApp() {
       // Best effort, same as the pinned toggles.
     }
   }, [liveStats]);
-  const refreshLiveReport = () => {
-    window.electronAPI
-      .getLiveSessions()
-      .then((r) => {
-        if (r) setLiveReport(r);
-      })
-      .catch(() => {});
+  const refreshLiveReport = async () => {
+    try {
+      // null = "could not look" (a failed ps); keep the last good report.
+      const r = await window.electronAPI.getLiveSessions();
+      if (r) setLiveReport(r);
+    } catch {
+      // Same: never replace a good report with nothing.
+    }
   };
   const toggleLiveOnly = () => {
     const next = !liveOnly;
@@ -1110,7 +1148,7 @@ function SwitcherApp() {
     if (listsNoticeTimerRef.current) clearTimeout(listsNoticeTimerRef.current);
     listsNoticeTimerRef.current = setTimeout(() => setListsNotice(null), 6000);
   };
-  const applyListsResult = (r: any) => {
+  const applyListsResult = (r: ListsWriteResult | undefined) => {
     if (r?.ok && r.lists) {
       setSessionLists(r.lists.lists || []);
       setListsLoaded(true);
@@ -1138,15 +1176,15 @@ function SwitcherApp() {
     setViewingListId(null);
     setSelectedSessionIndex(0);
   };
-  const deleteList = (id: string) => {
-    window.electronAPI
-      .deleteSessionList(id)
-      .then((r) => {
-        applyListsResult(r);
-        setConfirmDeleteListId(null);
-        if (r?.ok && viewingListId === id) setViewingListId(null);
-      })
-      .catch(() => showListsNotice('delete failed'));
+  const deleteList = async (id: string) => {
+    try {
+      const r = await window.electronAPI.deleteSessionList(id);
+      applyListsResult(r);
+      setConfirmDeleteListId(null);
+      if (r?.ok && viewingListId === id) setViewingListId(null);
+    } catch {
+      showListsNotice('delete failed');
+    }
   };
   // What gets saved is exactly what is on screen, minus rows that are not
   // sessions (orphan processes have no id to resume). Every field is what the
@@ -1186,7 +1224,7 @@ function SwitcherApp() {
     if (!current) return;
     setSaveListPrompt({ name: current.name, count: current.members.length, renameId: id });
   };
-  const saveList = () => {
+  const saveList = async () => {
     if (!saveListPrompt) return;
     if (saveListPrompt.renameId) {
       // Rename: an empty name keeps the old one (the store does the same).
@@ -1194,23 +1232,24 @@ function SwitcherApp() {
       const name = saveListPrompt.name.trim();
       closeSaveListPrompt();
       if (!name) return;
-      window.electronAPI
-        .renameSessionList(id, name)
-        .then(applyListsResult)
-        .catch(() => showListsNotice('rename failed'));
+      try {
+        applyListsResult(await window.electronAPI.renameSessionList(id, name));
+      } catch {
+        showListsNotice('rename failed');
+      }
       return;
     }
     const members = captureDisplayedSessions();
     const name =
       saveListPrompt.name.trim() || nextListName(sessionLists.map((l) => l.name));
     closeSaveListPrompt();
-    window.electronAPI
-      .saveSessionList(name, members)
-      .then((r) => {
-        applyListsResult(r);
-        if (r?.ok) setListsExpanded(true);
-      })
-      .catch(() => showListsNotice('save failed'));
+    try {
+      const r = await window.electronAPI.saveSessionList(name, members);
+      applyListsResult(r);
+      if (r?.ok) setListsExpanded(true);
+    } catch {
+      showListsNotice('save failed');
+    }
   };
 
   // Load lists once + subscribe to main-side pushes — the same shape, and the
@@ -1219,7 +1258,7 @@ function SwitcherApp() {
   useEffect(() => {
     window.electronAPI
       .getSessionLists()
-      .then((r: any) => {
+      .then((r: ListsResponse | undefined) => {
         if (!r || listsPushSeenRef.current) return;
         if (r.known === false) {
           // Do not apply the (empty) value — but do say why the list is
@@ -1241,7 +1280,7 @@ function SwitcherApp() {
       })
       .catch(() => {});
     const unsubscribe = window.electronAPI.onSessionListsUpdated(
-      (_event: any, r: any) => {
+      (_event: unknown, r: { lists?: SessionList[] } | undefined) => {
         if (!r) return;
         listsPushSeenRef.current = true;
         setSessionLists(r.lists || []);
@@ -2256,7 +2295,8 @@ function SwitcherApp() {
                 e.preventDefault();
                 if (selectedSessionIndex < 0) return;
                 const s = displayedSessions[selectedSessionIndex];
-                if (s) {
+                // A process with no session id has nothing to pin or hide.
+                if (s && !s.__liveOrphan) {
                   // ⇧⌘D on a zone row = unpin + fold (pin/hide are exclusive)
                   if (e.shiftKey) {
                     toggleHide(s);
@@ -2288,8 +2328,8 @@ function SwitcherApp() {
               aria-pressed={liveOnlyActive}
               title={
                 liveOnlyActive
-                  ? 'Show every session again'
-                  : `Show only sessions with a running process, with memory and uptime${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}`
+                  ? `Show every session again${liveReport ? ` · measured ${formatRelativeTime(liveReport.measuredAt)}; re-read on each open and on toggling` : ''}`
+                  : `Show only sessions with a running process${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}`
               }
               onMouseDown={(e) => e.preventDefault()}
               onClick={toggleLiveOnly}
@@ -2465,19 +2505,14 @@ function SwitcherApp() {
                   </div>
                 )}
                 {sessionLists.map((l) => (
+                  // A plain clickable row, like the session rows: the
+                  // rename / delete controls inside it are the buttons, and
+                  // a button nested in a button is invalid ARIA.
                   <div
                     key={l.id}
-                    role="button"
-                    tabIndex={0}
                     title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click to view`}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => openList(l.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        openList(l.id);
-                      }
-                    }}
                     className="codev-list-row"
                     style={LIST_ROW_STYLE}
                   >
@@ -2615,7 +2650,7 @@ function SwitcherApp() {
                 // A synthetic live row is keyed by pid: two processes can
                 // share one sessionId (a resumed copy, a /branch parent and
                 // child), and duplicate keys leave stale rows on screen.
-                <Fragment key={`${session.__pinnedRow ? 'pin:' : ''}${session.__live ? `live:${(session.__live as LiveRowInfo).pid}:` : ''}${session.sessionId}`}>
+                <Fragment key={`${session.__pinnedRow ? 'pin:' : ''}${session.__live ? `live:${session.__live.pid}:` : ''}${session.sessionId}`}>
                 {visiblePinnedRows.length > 0 && index === visiblePinnedRows.length && (
                   <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 2px 3px' }} />
                 )}
@@ -2734,7 +2769,7 @@ function SwitcherApp() {
                         )}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
-                        {index === selectedSessionIndex && (
+                        {index === selectedSessionIndex && !session.__liveOrphan && (
                           <>
                             <span
                               title={sessionMarks.pins[session.sessionId] ? 'Unpin (⌘D)' : 'Pin (⌘D)'}
@@ -2762,9 +2797,7 @@ function SwitcherApp() {
                           // A synthetic row carries its own process; a real
                           // row looks its process up by id. Own facts first,
                           // or two processes on one id would show one set.
-                          const live =
-                            (session.__live as LiveRowInfo | undefined) ||
-                            liveBySession[session.sessionId];
+                          const live = session.__live || liveBySession[session.sessionId];
                           if (!live) return null;
                           // Figures only behind the `stats` toggle; the
                           // warning below is not a figure and always shows.
@@ -2789,6 +2822,14 @@ function SwitcherApp() {
                                   ⚠ unregistered
                                 </span>
                               )}
+                              {session.__liveExtra && (
+                                <span
+                                  style={LIVE_WARN_STYLE}
+                                  title={`A second process is running this same session (pid ${live.pid}) — a resumed copy, or a /branch parent and child`}
+                                >
+                                  ⚠ 2nd process
+                                </span>
+                              )}
                             </>
                           );
                         })()}
@@ -2798,7 +2839,7 @@ function SwitcherApp() {
                             on when the match is not already visible). */}
                         {isSearchingSessions &&
                           !session.__liveOrphan &&
-                          searchWordsLower.some((w) => session.sessionId.toLowerCase().includes(w)) && (
+                          searchWordsLower.some((w) => matchesSessionId(session.sessionId, w)) && (
                             <span
                               style={{
                                 fontSize: '10px',

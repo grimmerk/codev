@@ -15,7 +15,7 @@ import {
 } from './accounts';
 import {
   findPromptMatch,
-  matchesAllWords,
+  matchesAllWordsOrId,
   PromptMatch,
 } from './session-search';
 
@@ -228,11 +228,12 @@ export const searchClaudeSessions = (
 
   for (const s of allSessions) {
     const sessionPrompts = promptsBySession.get(s.sessionId) || [];
-    // sessionId included so the id shown in a terminal status line finds the
-    // session; the renderer's filterSessionsLocally matches the same field.
+    // The id shown in a terminal status line finds the session too — by the
+    // prefix rule in matchesSessionId, shared with the renderer's
+    // filterSessionsLocally so the two paths agree on what an id query is.
     const target =
-      `${s.sessionId} ${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
-    if (!matchesAllWords(target, words)) continue;
+      `${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
+    if (!matchesAllWordsOrId(target, s.sessionId, words)) continue;
 
     sessions.push(s);
     const match = findPromptMatch(sessionPrompts, words);
@@ -1927,7 +1928,10 @@ export const loadSessionEnrichment = async (
                 at: typeof parsed.timestamp === 'string' ? parsed.timestamp : '',
               });
             }
-          } catch {}
+          } catch {
+            // A malformed recap line is skipped; the session keeps its
+            // previous recap, if any.
+          }
         }
 
         // Mark fresh ONLY when every read succeeded — a timed-out or failed

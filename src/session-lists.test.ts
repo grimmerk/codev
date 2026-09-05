@@ -63,6 +63,21 @@ describe('normalizeMember', () => {
     expect(m?.lastAssistantMessage).toBeUndefined();
   });
 
+  it('never cuts a character in half, and caps the derived projectName too', () => {
+    // 499 ASCII chars then an emoji (two UTF-16 units): a unit-based cap
+    // would keep only the high surrogate.
+    const emojiAtCap = 'a'.repeat(LIST_TEXT_CAPS.message - 1) + '🙂 and more';
+    const m = normalizeMember(member('s1', { lastUserMessage: emojiAtCap }));
+    expect(m?.lastUserMessage?.endsWith('🙂')).toBe(true);
+    expect(Array.from(m?.lastUserMessage ?? '').length).toBe(
+      LIST_TEXT_CAPS.message,
+    );
+
+    const longDir = '/x/' + 'd'.repeat(LIST_TEXT_CAPS.title + 50);
+    const p = normalizeMember({ sessionId: 's2', project: longDir });
+    expect(p?.projectName.length).toBe(LIST_TEXT_CAPS.title);
+  });
+
   it('derives projectName from the path when it is missing', () => {
     const m = normalizeMember({
       sessionId: 's1',

@@ -210,6 +210,7 @@ interface IElectronAPI {
       registered: boolean;
       entrypoint?: string;
       accountLabel?: string;
+      accountIsAnchor?: boolean;
     }[];
     staleRegistrations: { pid: number; sessionId: string; cwd: string }[];
     totalRssKb: number;

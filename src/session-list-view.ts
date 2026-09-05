@@ -57,6 +57,10 @@ export interface ListViewSession {
   __listMember?: SessionListMember;
   /** A running `claude` process that no session row explains (live scope only). */
   __liveOrphan?: boolean;
+  /** Process facts carried by a synthetic live row (its own process, not a lookup by id). */
+  __live?: LiveRowInfo;
+  /** A second process on a session the list already shows (a resumed copy, a /branch pair). */
+  __liveExtra?: boolean;
   [key: string]: unknown;
 }
 
@@ -285,6 +289,10 @@ export const buildSessionListView = ({
       // A running session is never junk, whatever its stats say — and a
       // scope that asked for running sessions must show every one of them.
       !liveOnlyActive &&
+      // A saved list renders its members, not `sessions`; a fold computed
+      // from `sessions` would render under members it has nothing to do
+      // with, and hide the "this list is empty" message.
+      !listViewActive &&
       // An ungrouped pin must never fold into the minor group: pinning is an
       // explicit "keep this", and a pinned session can still be a short
       // untitled one that the junk predicate would happily fold away.
@@ -368,16 +376,19 @@ export const buildSessionListView = ({
   } else if (liveOnlyActive) {
     // Synthetic rows have nothing a query could match, so they step aside
     // while searching rather than sitting under every result as noise. A
-    // synthetic row whose id a real row already covers is dropped — the
-    // renderer builds them from a snapshot that can lag the loaded list by
-    // one render.
-    const shown = new Set(majorSessions.map((s) => s.sessionId));
+    // synthetic row is dropped only when a real row already represents the
+    // SAME process — same id and same pid (or no pid at all): the renderer
+    // builds them from a snapshot that can lag the loaded list by one
+    // render. A second process on the same id is a different row and stays.
+    const shownPid = new Map<string, number | undefined>();
+    for (const s of majorSessions) shownPid.set(s.sessionId, s.activePid);
+    const covered = (s: ListViewSession) =>
+      shownPid.has(s.sessionId) &&
+      (s.__live?.pid === undefined ||
+        s.__live.pid === shownPid.get(s.sessionId));
     displayedSessions = isSearching
       ? majorSessions
-      : [
-          ...majorSessions,
-          ...liveOrphans.filter((s) => !shown.has(s.sessionId)),
-        ];
+      : [...majorSessions, ...liveOrphans.filter((s) => !covered(s))];
   } else if (pinnedOnlyActive && !isSearching) {
     // Same reason: scope to the resolved pin set rather than filtering
     // `sessions`, which would silently drop the out-of-window ones.

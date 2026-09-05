@@ -88,10 +88,31 @@ describe('isSessionProcess', () => {
     }
   });
 
-  it('rejects the daemon family and non-claude processes', () => {
-    for (const pid of [22140, 22197, 22211, 1447]) {
+  it('rejects the daemon family, the app helper, and non-claude processes', () => {
+    for (const pid of [22140, 22197, 22211, 22198, 1447]) {
       expect(isSessionProcess(by(pid))).toBe(false);
     }
+  });
+
+  it('rejects flag-style one-shots that run in a terminal but open no session', () => {
+    const procs = parsePsOutput(
+      [
+        ' 1 1 ttys001 00:01 claude --version',
+        ' 2 1 ttys001 00:01 claude -v',
+        ' 3 1 ttys001 00:01 claude --help',
+        ' 4 1 ttys001 00:01 claude --mcp-serve',
+        ' 5 1 ttys001 00:01 claude --resume f339c186-ba82-4362-a901-2938323c0198',
+        ' 6 1 ttys001 00:01 claude -n branch-test-a',
+      ].join('\n'),
+    );
+    expect(procs.map((p) => isSessionProcess(p))).toEqual([
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+    ]);
   });
 });
 
@@ -177,6 +198,24 @@ describe('joinLiveSessions', () => {
     expect(report.measuredAt).toBe(1_000);
     // Heaviest first — that is the question this view answers.
     expect(report.live[0].pid).toBe(19560);
+  });
+});
+
+describe('readSessionRegistrations (via collectLiveSessions deps)', () => {
+  it('passes the anchor flag through so a synthetic row can hide the account badge', async () => {
+    const report = await collectLiveSessions({
+      ps: async () => ' 19560 1 ttys033 00:01 claude -r',
+      readRegistrations: () => [
+        reg(19560, 'aaaa0000-0000-4000-8000-000000000001', {
+          accountIsAnchor: true,
+        }),
+      ],
+      cwdOf: async () => null,
+    });
+    expect(report.live[0]).toMatchObject({
+      accountLabel: 'main',
+      accountIsAnchor: true,
+    });
   });
 });
 

@@ -41,6 +41,8 @@ export interface SessionRegistration {
   entrypoint: string;
   accountLabel: string;
   accountDir: string;
+  /** The anchor (~/.claude) account shows no account badge. */
+  accountIsAnchor?: boolean;
 }
 
 export interface LiveSession {
@@ -55,6 +57,7 @@ export interface LiveSession {
   registered: boolean;
   entrypoint?: string;
   accountLabel?: string;
+  accountIsAnchor?: boolean;
 }
 
 export interface LiveSessionsReport {
@@ -120,6 +123,23 @@ const NON_SESSION_SUBCOMMANDS = new Set([
   'agents',
 ]);
 
+/**
+ * Flag-style invocations that run the `claude` binary without opening a
+ * session: version / help / updater / MCP serving / the app helper. They
+ * run in a terminal (so they have a tty) and exit within seconds, but a
+ * `ps` taken in that window would otherwise count them as live.
+ */
+const NON_SESSION_FLAGS = new Set([
+  '--version',
+  '-v',
+  '--help',
+  '-h',
+  '--update',
+  '--install',
+  '--mcp-serve',
+  '--helper',
+]);
+
 const isClaudeBinary = (token: string): boolean =>
   path.basename(token) === 'claude' ||
   /\/share\/claude\/versions\/[^/]+$/.test(token) ||
@@ -130,10 +150,9 @@ export const isSessionProcess = (p: ClaudeProcess): boolean => {
   const tokens = p.args.split(/\s+/);
   if (!tokens[0] || !isClaudeBinary(tokens[0])) return false;
   const first = tokens[1];
-  if (first && !first.startsWith('-') && NON_SESSION_SUBCOMMANDS.has(first)) {
-    return false;
-  }
-  return true;
+  if (!first) return true;
+  if (first.startsWith('-')) return !NON_SESSION_FLAGS.has(first);
+  return !NON_SESSION_SUBCOMMANDS.has(first);
 };
 
 /** `--resume <id>` / `-r <id>` / `--session-id <id>` on the command line. */
@@ -177,6 +196,7 @@ export const joinLiveSessions = (
       registered: !!reg,
       entrypoint: reg?.entrypoint,
       accountLabel: reg?.accountLabel,
+      accountIsAnchor: reg?.accountIsAnchor,
     });
   }
   live.sort((a, b) => b.rssKb - a.rssKb);
@@ -213,6 +233,11 @@ export const readSessionRegistrations = (): SessionRegistration[] => {
         ) {
           continue;
         }
+        // The filename is the pid Claude Code keys the registration by. A
+        // body that names a different pid is a file that does not describe
+        // the process it is filed under — skip it rather than attribute a
+        // live process to the wrong session.
+        if (data.pid !== Number(file.slice(0, -5))) continue;
         regs.push({
           pid: data.pid,
           sessionId: data.sessionId,
@@ -221,6 +246,7 @@ export const readSessionRegistrations = (): SessionRegistration[] => {
             typeof data.entrypoint === 'string' ? data.entrypoint : 'cli',
           accountLabel: account.label,
           accountDir: account.dir,
+          accountIsAnchor: account.isAnchor,
         });
       } catch {
         // one unreadable registration must not hide the others
