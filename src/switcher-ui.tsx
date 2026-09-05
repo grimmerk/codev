@@ -228,6 +228,11 @@ const globalStyles = `
     padding: 0;
     margin: 0;
   }
+
+  /* The whole saved-list row is the click target; say so on hover. */
+  .codev-list-row:hover {
+    background-color: #2a2a2a;
+  }
 `;
 
 // Apply global styles
@@ -467,10 +472,20 @@ const formatMb = (kb: number): string => {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)}GB` : `${Math.round(mb)}MB`;
 };
 
-/** Default name for a saved list: the date, the way the user names them. */
-const defaultListName = (): string => {
+/**
+ * Default name for a saved list: today's `MMDD`, the way the user names
+ * them, and `MMDD-2`, `MMDD-3`… once that is taken. A name is a label, not
+ * an identity (lists are keyed by a generated id), so duplicates are legal —
+ * they are just not what a second save in one day usually means.
+ */
+const nextListName = (existing: string[]): string => {
   const d = new Date();
-  return `${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const base = `${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  const taken = new Set(existing);
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+  }
 };
 
 /** Caution it will be invoked twice due to <React.StrictMode> !! */
@@ -625,6 +640,7 @@ function SwitcherApp() {
   });
   const [viewingListId, setViewingListId] = useState<string | null>(null);
   const [confirmDeleteListId, setConfirmDeleteListId] = useState<string | null>(null);
+  const [listsNotice, setListsNotice] = useState<string | null>(null);
   const [saveListPrompt, setSaveListPrompt] = useState<{ name: string; count: number } | null>(null);
   // Rows a scope needs that are outside the loaded list (list members, live
   // sessions older than the window), fetched by id — same mechanism as pins.
@@ -1050,10 +1066,25 @@ function SwitcherApp() {
       // Best effort, same as the pinned toggles.
     }
   }, [listsExpanded]);
+  // A refused write must be visible. The store refuses (rather than
+  // overwrites) when it cannot trust what is on disk; the first live test
+  // hit that and saw nothing at all, which read as "the button is broken".
+  const listsNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showListsNotice = (text: string) => {
+    setListsNotice(text);
+    if (listsNoticeTimerRef.current) clearTimeout(listsNoticeTimerRef.current);
+    listsNoticeTimerRef.current = setTimeout(() => setListsNotice(null), 6000);
+  };
   const applyListsResult = (r: any) => {
     if (r?.ok && r.lists) {
       setSessionLists(r.lists.lists || []);
       setListsLoaded(true);
+    } else if (r && !r.ok) {
+      showListsNotice(
+        r.error === 'lists store unreadable'
+          ? 'Not saved: ~/.config/codev/session-lists.json could not be read — fix or remove it'
+          : `Not saved: ${r.error || 'unknown error'}`,
+      );
     }
   };
   const openList = (id: string) => {
@@ -1062,6 +1093,11 @@ function SwitcherApp() {
     setViewingListId(id);
     setConfirmDeleteListId(null);
     setSelectedSessionIndex(0);
+    // Members resolve their running state from the ps join as well as the
+    // registration map (see activeFrom in session-list-view.ts), so viewing a
+    // list refreshes the report too — one `ps`, and a click switches instead
+    // of resuming a second copy.
+    refreshLiveReport();
   };
   const closeList = () => {
     setViewingListId(null);
@@ -1073,9 +1109,9 @@ function SwitcherApp() {
       .then((r) => {
         applyListsResult(r);
         setConfirmDeleteListId(null);
-        if (viewingListId === id) setViewingListId(null);
+        if (r?.ok && viewingListId === id) setViewingListId(null);
       })
-      .catch(() => {});
+      .catch(() => showListsNotice('delete failed'));
   };
   // What gets saved is exactly what is on screen, minus rows that are not
   // sessions (orphan processes have no id to resume). Every field is what the
@@ -1100,12 +1136,13 @@ function SwitcherApp() {
   const openSaveListPrompt = () => {
     const count = displayedSessions.filter((s) => !s.__liveOrphan).length;
     if (count === 0) return;
-    setSaveListPrompt({ name: defaultListName(), count });
+    setSaveListPrompt({ name: nextListName(sessionLists.map((l) => l.name)), count });
   };
   const saveList = () => {
     if (!saveListPrompt) return;
     const members = captureDisplayedSessions();
-    const name = saveListPrompt.name.trim() || defaultListName();
+    const name =
+      saveListPrompt.name.trim() || nextListName(sessionLists.map((l) => l.name));
     setSaveListPrompt(null);
     window.electronAPI
       .saveSessionList(name, members)
@@ -1113,7 +1150,7 @@ function SwitcherApp() {
         applyListsResult(r);
         if (r?.ok) setListsExpanded(true);
       })
-      .catch(() => {});
+      .catch(() => showListsNotice('save failed'));
   };
 
   // Load lists once + subscribe to main-side pushes — the same shape, and the
@@ -2254,6 +2291,11 @@ function SwitcherApp() {
                   : `${pinnedOnlyActive ? displayedSessions.length : sessions.length} sessions`}
             </span>
           </div>
+          {listsNotice && (
+            <div style={{ margin: '4px 15px 0', color: '#e07a5f', fontSize: '11px' }}>
+              ⚠ {listsNotice}
+            </div>
+          )}
           <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 8px' }}>
             {/* A list being viewed: its header replaces every other zone. */}
             {listViewActive && viewingList && (
@@ -2305,6 +2347,7 @@ function SwitcherApp() {
                         openList(l.id);
                       }
                     }}
+                    className="codev-list-row"
                     style={LIST_ROW_STYLE}
                   >
                     <span style={{ color: '#9DC8E0', fontWeight: 500, flexShrink: 0 }}>{l.name}</span>
@@ -2418,7 +2461,10 @@ function SwitcherApp() {
               </div>
             ) : (<>
               {displayedSessions.map((session, index) => (
-                <Fragment key={`${session.__pinnedRow ? 'pin:' : ''}${session.sessionId}`}>
+                // A synthetic live row is keyed by pid: two processes can
+                // share one sessionId (a resumed copy, a /branch parent and
+                // child), and duplicate keys leave stale rows on screen.
+                <Fragment key={`${session.__pinnedRow ? 'pin:' : ''}${session.__live ? `live:${(session.__live as LiveRowInfo).pid}:` : ''}${session.sessionId}`}>
                 {visiblePinnedRows.length > 0 && index === visiblePinnedRows.length && (
                   <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 2px 3px' }} />
                 )}
@@ -2562,10 +2608,16 @@ function SwitcherApp() {
                             registered — the case that hides from every other view. */}
                         {(() => {
                           if (!liveOnlyActive) return null;
+                          // A synthetic row carries its own process; a real
+                          // row looks its process up by id. Own facts first,
+                          // or two processes on one id would show one set.
                           const live =
-                            liveBySession[session.sessionId] ||
-                            (session.__live as LiveRowInfo | undefined);
+                            (session.__live as LiveRowInfo | undefined) ||
+                            liveBySession[session.sessionId];
                           if (!live) return null;
+                          // The tty is for the app (window switching, #142) and
+                          // for the tooltip; on the row it was width spent on
+                          // something a person cannot act on.
                           return (
                             <>
                               <span
@@ -2573,7 +2625,6 @@ function SwitcherApp() {
                                 title={`pid ${live.pid}${live.tty ? ` on ${live.tty}` : ' (no terminal)'} · resident memory · time since the process started`}
                               >
                                 {formatMb(live.rssKb)} · {formatUptime(live.uptimeSec)}
-                                {live.tty ? ` · ${live.tty}` : ''}
                               </span>
                               {!live.registered && (
                                 <span
@@ -3225,7 +3276,7 @@ function SwitcherApp() {
               value={saveListPrompt.name}
               onChange={(e) => setSaveListPrompt({ ...saveListPrompt, name: e.target.value })}
               onFocus={(e) => e.target.select()}
-              placeholder={defaultListName()}
+              placeholder={nextListName(sessionLists.map((l) => l.name))}
               style={{
                 width: '100%',
                 boxSizing: 'border-box',

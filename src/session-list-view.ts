@@ -159,6 +159,7 @@ const resolvePinnedRow = (
   info: PinRecord,
   pinnedById: Map<string, ListViewSession>,
   activePids: Record<string, number>,
+  liveBySession: Record<string, LiveRowInfo>,
 ): ListViewSession => {
   // A pin can be momentarily unresolvable (VS Code sessions are absent from
   // history.jsonl until the closed-scan merges them in) or permanently so
@@ -182,10 +183,28 @@ const resolvePinnedRow = (
     ...s,
     __pinnedRow: true,
     __pinnedAt: info.pinnedAt || '',
-    isActive: s.sessionId in activePids || s.isActive,
-    activePid: activePids[s.sessionId] ?? s.activePid,
+    ...activeFrom(s, activePids, liveBySession),
   };
 };
+
+/**
+ * Is this session running, and under which pid? Two sources, either wins:
+ * the registration-based detection (`activePids`) and the `ps` join
+ * (`liveBySession`). The second exists because the first cannot see a running
+ * session that has no history row yet — a fresh `/branch` child before its
+ * first prompt — and a row wrongly marked inactive RESUMES on click, spawning
+ * a second process for the same session. Seen live.
+ */
+const activeFrom = (
+  s: ListViewSession,
+  activePids: Record<string, number>,
+  liveBySession: Record<string, LiveRowInfo>,
+): { isActive: boolean; activePid: number | undefined } => ({
+  isActive:
+    s.sessionId in activePids || s.sessionId in liveBySession || !!s.isActive,
+  activePid:
+    activePids[s.sessionId] ?? liveBySession[s.sessionId]?.pid ?? s.activePid,
+});
 
 /**
  * Resolve one saved-list member to a real row, or synthesize one from what
@@ -197,6 +216,7 @@ const resolveMemberRow = (
   member: SessionListMember,
   byId: Map<string, ListViewSession>,
   activePids: Record<string, number>,
+  liveBySession: Record<string, LiveRowInfo>,
 ): ListViewSession => {
   const s = byId.get(member.sessionId) ?? {
     sessionId: member.sessionId,
@@ -212,8 +232,7 @@ const resolveMemberRow = (
   return {
     ...s,
     __listMember: member,
-    isActive: s.sessionId in activePids || s.isActive,
-    activePid: activePids[s.sessionId] ?? s.activePid,
+    ...activeFrom(s, activePids, liveBySession),
   };
 };
 
@@ -296,7 +315,9 @@ export const buildSessionListView = ({
     }
   }
   const pinnedRows = Object.entries(pins)
-    .map(([id, info]) => resolvePinnedRow(id, info, pinnedById, activePids))
+    .map(([id, info]) =>
+      resolvePinnedRow(id, info, pinnedById, activePids, liveBySession),
+    )
     // Recency first, like every other list in the app. The previous pinnedAt
     // ASC order (chosen so a new pin appended at the bottom instead of
     // reshuffling rows under the cursor) buried the session touched five
@@ -343,7 +364,7 @@ export const buildSessionListView = ({
       : null;
     displayedSessions = viewingList.members
       .filter((m) => !matched || matched.has(m.sessionId))
-      .map((m) => resolveMemberRow(m, byId, activePids));
+      .map((m) => resolveMemberRow(m, byId, activePids, liveBySession));
   } else if (liveOnlyActive) {
     // Synthetic rows have nothing a query could match, so they step aside
     // while searching rather than sitting under every result as noise. A

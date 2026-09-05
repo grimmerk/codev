@@ -244,6 +244,16 @@ const execFileP = (
     );
   });
 
+/**
+ * `ps -A` on a machine deep in swap took 250–500ms in measurement and can
+ * exceed a short timeout right after the app returns from the background —
+ * and a timed-out `ps` looks exactly like "no processes at all", which the
+ * join would then report as every session dead and every registration stale
+ * (seen live as "● 0 live ⚠33"). Generous timeout, and an empty result is
+ * treated as a failure, never as an answer.
+ */
+const PS_TIMEOUT_MS = 15000;
+
 /** Working directory of one process, for the unregistered ones only. */
 const lsofCwd = async (pid: number): Promise<string | null> => {
   const out = await execFileP(
@@ -266,11 +276,17 @@ export const collectLiveSessions = async (
 ): Promise<LiveSessionsReport> => {
   const ps =
     deps.ps ??
-    (() => execFileP('ps', ['-Ao', 'pid=,rss=,tty=,etime=,args='], 3000));
+    (() =>
+      execFileP('ps', ['-Ao', 'pid=,rss=,tty=,etime=,args='], PS_TIMEOUT_MS));
   const readRegs = deps.readRegistrations ?? readSessionRegistrations;
   const cwdOf = deps.cwdOf ?? lsofCwd;
 
-  const report = joinLiveSessions(parsePsOutput(await ps()), readRegs());
+  const procs = parsePsOutput(await ps());
+  // A process table is never empty — `ps` lists at least itself — so an empty
+  // parse means the call failed or timed out. Report that rather than a
+  // fabricated "nothing is running".
+  if (procs.length === 0) throw new Error('ps returned no processes');
+  const report = joinLiveSessions(procs, readRegs());
   // `lsof` costs a spawn per process, so only the unregistered ones pay it —
   // a handful at most, and without a cwd their row would name nothing.
   await Promise.all(

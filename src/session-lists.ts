@@ -74,11 +74,20 @@ export interface SessionLists {
 
 export const emptyLists = (): SessionLists => ({ version: 1, lists: [] });
 
+/**
+ * Trim, cap, and trim AGAIN. The second trim is load-bearing: a cap that
+ * lands on a space leaves trailing whitespace, and a store written with it
+ * then reads back as "normalization would change this" — non-authoritative —
+ * so every later write is refused. The first live test hit exactly that:
+ * the first save worked (no file yet), the second save and every delete were
+ * silently refused. Normalization must be a fixed point of itself.
+ */
 const capText = (value: unknown, max: number): string | undefined => {
   if (typeof value !== 'string') return undefined;
   const t = value.trim();
   if (!t) return undefined;
-  return t.length > max ? t.slice(0, max) : t;
+  const capped = t.length > max ? t.slice(0, max).trim() : t;
+  return capped || undefined;
 };
 
 /** Coerce one unknown member record; null when it cannot be a member at all. */

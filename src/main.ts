@@ -2558,8 +2558,10 @@ ipcMain.handle('get-live-sessions', async () => {
   try {
     return await collectLiveSessions();
   } catch (err) {
+    // null, not an empty report: "we could not look" must never render as
+    // "nothing is running" — the renderer keeps its last good report.
     console.error('[live-sessions] collect failed:', err);
-    return { live: [], staleRegistrations: [], totalRssKb: 0, measuredAt: Date.now() };
+    return null;
   }
 });
 

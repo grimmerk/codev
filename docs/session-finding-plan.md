@@ -382,7 +382,25 @@ routing around it.
 **Store.** `~/.config/codev/session-lists.json`, beside the marks store, on the same
 authoritative-read / atomic-write / directory-watch machinery — extracted into
 `src/atomic-json-store.ts` so the read-authority invariant PR #137 spent four rounds on has
-exactly one implementation.
+exactly one implementation. **That invariant has a corollary the first live test paid for:
+the store's normalizer must be a fixed point of itself.** A cap that landed on a space wrote
+a trailing blank that the next read trimmed away, so the file the app had just written read
+back as "normalization would change this" — non-authoritative — and every later write was
+refused, silently. Two rules follow: normalize → serialize → normalize must be byte-stable
+(tested), and a refused write must be shown, never swallowed.
+
+**The `ps` join is also what makes "is it running" right for rows the registration-based
+detection cannot see.** A session with no history row yet (a `/branch` child before its
+first prompt) is invisible to `detectActiveSessions`, so a row for it reads as not running and
+a click *resumes* it — a second process for the same id. Saved-list members and pin
+placeholders now take their running state from the join as well, and viewing a list refreshes
+it. The general fix — feeding the join into active detection itself — is #142 C0 territory.
+
+**What the row shows.** Memory and uptime, not the tty: a person cannot act on a tty name,
+and the width was coming out of the title. The tty stays in the tooltip and in the data, where
+the future window-switching (#142 C0) needs it. A pure "running sessions only" browse with no
+figures at all is a different scope, and the cheap form of it is a `is:live` term in #140's
+field-scoped search, not a second chip.
 
 ## 5. Batch 2 — structural investments
 

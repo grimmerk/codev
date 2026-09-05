@@ -107,6 +107,31 @@ describe('normalizeLists', () => {
     expect(isAuthoritativeRead(raw, normalizeLists(raw))).toBe(true);
   });
 
+  it('is a fixed point of itself, even when a cap lands on whitespace', () => {
+    // A 500-char message whose 500th character is a space: the first pass
+    // caps it, and the result must survive a second pass byte-for-byte —
+    // otherwise the store the app just wrote is refused by the next write.
+    const onSpace =
+      'a'.repeat(LIST_TEXT_CAPS.message - 1) + ' tail of the message';
+    const raw = {
+      version: 1,
+      lists: [
+        list('a', [
+          member('s1', {
+            lastUserMessage: onSpace,
+            lastAssistantMessage:
+              'x'.repeat(LIST_TEXT_CAPS.message - 3) + '   end',
+            title: 'y'.repeat(LIST_TEXT_CAPS.title - 1) + ' z',
+          }),
+        ]),
+      ],
+    };
+    const once = normalizeLists(raw);
+    const twice = normalizeLists(JSON.parse(JSON.stringify(once)));
+    expect(isAuthoritativeRead(once, twice)).toBe(true);
+    expect(once.lists[0].members[0].lastUserMessage?.endsWith(' ')).toBe(false);
+  });
+
   it('is NOT a no-op when it had to coerce — so such a read is not authoritative', () => {
     // A member that normalization would rewrite (missing pinned, capped title).
     const raw = {

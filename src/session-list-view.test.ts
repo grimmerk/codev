@@ -305,6 +305,33 @@ describe('buildSessionListView — saved-list scope', () => {
     expect(g?.isActive).toBe(true);
     expect(g?.activePid).toBe(99);
   });
+
+  it('marks a member as active from the ps join when the active map missed it', () => {
+    // A running session with no history row is invisible to the
+    // registration-based detection; a click on it would RESUME (a second
+    // process) instead of switching. The live report knows better.
+    const live = {
+      pid: 4242,
+      rssKb: 1,
+      tty: 'ttys009',
+      uptimeSec: 5,
+      registered: true,
+    };
+    const v = build({ viewingList: list, liveBySession: { gone: live } });
+    const g = v.displayedSessions.find((s) => s.sessionId === 'gone');
+    expect(g?.isActive).toBe(true);
+    expect(g?.activePid).toBe(4242);
+    // Same rule for a pinned placeholder.
+    const p = build({
+      pins: { ghost: at('2026-01-01T00:00:00Z') },
+      liveBySession: { ghost: live },
+    });
+    expect(p.pinnedRows[0]).toMatchObject({
+      sessionId: 'ghost',
+      isActive: true,
+      activePid: 4242,
+    });
+  });
 });
 
 describe('mergeSessionsById', () => {
