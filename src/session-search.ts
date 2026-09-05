@@ -279,6 +279,17 @@ const prRefPatterns = (ref: PrRef): PrRefPatterns => {
   };
 };
 
+/**
+ * Is the `#` at `hashIndex` the one in Claude Code's `[Image #N]` marker for
+ * a pasted screenshot? Those are numbered per session from 1 — exactly the
+ * range small PR numbers live in. Seen in the first live test: `pr:151`
+ * listed a session whose only "#151" was `[Image #151]`. One rule for the
+ * query matcher and the transcript miner, so they cannot disagree about it.
+ */
+export const isImageMarkerHash = (text: string, hashIndex: number): boolean =>
+  hashIndex >= 7 &&
+  text.slice(hashIndex - 7, hashIndex).toLowerCase() === '[image ';
+
 const findPrRefWith = (
   textLower: string,
   p: PrRefPatterns,
@@ -294,6 +305,7 @@ const findPrRefWith = (
     const repo = m[1];
     if (ref.repo && repo && repo !== ref.repo) continue;
     const at = m.index + m[0].length - n.length - 1 - repo.length;
+    if (!repo && isImageMarkerHash(textLower, at)) continue;
     return { index: at, length: repo.length + 1 + n.length };
   }
   url.lastIndex = 0;

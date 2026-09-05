@@ -8,6 +8,7 @@ import {
   findPromptMatch,
   highlightNeedles,
   isEmptyQuery,
+  isImageMarkerHash,
   isMinorSession,
   matchesAllWords,
   matchesAllWordsOrId,
@@ -514,6 +515,22 @@ describe('findPrRef', () => {
       index: 24,
       length: 18,
     });
+  });
+
+  // Live finding: `pr:151` listed a session whose only "#151" was the marker
+  // Claude Code writes for a pasted screenshot.
+  it('does not read the [Image #N] paste marker as a reference, but still finds a real one after it', () => {
+    expect(
+      findPrRef('[image #151] 我剛測試打包版', { number: 151 }),
+    ).toBeNull();
+    expect(findPrRef('[Image #151]'.toLowerCase(), { number: 151 })).toBeNull();
+    expect(findPrRef('[image #151] then see #151', { number: 151 })).toEqual({
+      index: 22,
+      length: 4,
+    });
+    expect(isImageMarkerHash('[Image #3]', 7)).toBe(true);
+    expect(isImageMarkerHash('image #3', 6)).toBe(false);
+    expect(isImageMarkerHash('#3', 0)).toBe(false);
   });
 });
 

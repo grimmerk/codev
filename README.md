@@ -32,7 +32,7 @@ Bare words search everything; **operators aim the query** (the `?` chip beside t
 | `has:pr` `has:title` `has:branch` `has:recap` | sessions that carry the thing |
 | `is:live` `is:pinned` | sessions with a running process (by the `ps` join below) / pinned ones |
 | `after:7d` `after:2026-09-01` `after:today` `before:…` | by the session's last activity (`Nh` `Nd` `Nw`, a date, `today`, `yesterday`) |
-| `#147` `pr:147` `owner/repo#147` `https://github.com/owner/repo/pull/147` | **a pull request in any spelling** — the query form and the form in the text no longer have to agree (measured: 80.6% of PR mentions in prompts used only one form). A repo in the query rules out the same number in another repo's URL. Never a bare number: `#147` does not hit `1475` or `#1475` |
+| `#147` `pr:147` `owner/repo#147` `https://github.com/owner/repo/pull/147` | **a pull request in any spelling** — the query form and the form in the text no longer have to agree (measured: 80.6% of PR mentions in prompts used only one form). A repo in the query rules out the same number in another repo's URL. Never a bare number: `#147` does not hit `1475` or `#1475`, and the `[Image #N]` marker of a pasted screenshot is not a reference |
 
 Every term must hold. The assistant's own replies are mined for the PRs it mentioned (its text and the commands it ran — not tool output, so a session that merely listed twenty PRs did not "work on" them), so "the PR you opened for me" is findable by number even when you never typed it. An operator with an unreadable value (`after:soon`) is reported under the box and ignored rather than silently matching nothing.
 

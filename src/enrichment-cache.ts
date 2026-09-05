@@ -24,6 +24,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { writeStoreFile } from './atomic-json-store';
+import { isImageMarkerHash } from './session-search';
 
 export const ENRICHMENT_CACHE_VERSION = 1;
 
@@ -240,6 +241,9 @@ export const minePrRefs = (
     if (!said) continue;
     PR_REF_RE.lastIndex = 0;
     for (let m = PR_REF_RE.exec(said); m; m = PR_REF_RE.exec(said)) {
+      // The bare form's match starts at the delimiter before the `#` (if any).
+      if (m[5] && isImageMarkerHash(said, m.index + m[0].indexOf('#')))
+        continue;
       const canonical = (
         m[1] ? `${m[1]}#${m[2]}` : m[3] ? `${m[3]}#${m[4]}` : `#${m[5]}`
       ).toLowerCase();

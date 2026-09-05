@@ -171,12 +171,14 @@ describe('minePrRefs', () => {
     expect([...seen]).toEqual(['#3', '#4']);
   });
 
-  it('never reads a bare number, an HTML entity, a leading zero, or a hex-looking anchor', () => {
+  it('never reads a bare number, an HTML entity, a leading zero, a hex-looking anchor, or a paste marker', () => {
     expect(
       minePrRefs(
-        assistant('15980 and &#38; and #0 and #012 and a#9 and x/y#1a'),
+        assistant(
+          '15980 and &#38; and #0 and #012 and a#9 and x/y#1a and [Image #4] but #5',
+        ),
       ),
-    ).toEqual(['x/y#1']);
+    ).toEqual(['x/y#1', '#5']);
   });
 
   it('assistantTextOfLine joins text and tool inputs, and rejects everything else', () => {
