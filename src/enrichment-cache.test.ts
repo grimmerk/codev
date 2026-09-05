@@ -195,14 +195,17 @@ describe('minePrRefs', () => {
 
   // The matcher had these boundaries and the miner did not: `#147abc` was
   // persisted as `#147`, and `notgithub.com/…/pull/9` as `o/r#9`.
+  // Every invalid form carries its own number, so a boundary that stops
+  // working shows up as an extra entry rather than being masked by a valid
+  // mention of the same number.
   it('applies the same right-side and host boundaries as the query matcher', () => {
     expect(
       minePrRefs(
         assistant(
-          '#147abc #147_x /pull/147abc o/r#12abc https://notgithub.com/o/r/pull/9 then #147, and https://github.com/o/r/pull/9',
+          '#141abc #142_x /pull/143abc o/r#144abc https://notgithub.com/o/r/pull/145 https://evil.github.com/o/r/pull/146 then #151, and https://github.com/o/r/pull/152 and https://www.github.com/o/r/issues/153',
         ),
       ),
-    ).toEqual(['#147', 'o/r#9']);
+    ).toEqual(['#151', 'o/r#152', 'o/r#153']);
   });
 
   it('assistantTextOfLine joins text and tool inputs, and rejects everything else', () => {

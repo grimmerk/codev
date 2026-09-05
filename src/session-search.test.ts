@@ -369,6 +369,15 @@ describe('parsePrRef', () => {
     expect(parsePrRef('o/r#012')).toBeNull();
     expect(parsePrRef('https://github.com/o/r/pull/012')).toBeNull();
     expect(parsePrRef('https://github.com/grimmerk/codev')).toBeNull();
+    // A scheme must be followed by the GitHub host; a dotted owner is not an
+    // owner; a subdomain is not github.com.
+    expect(parsePrRef('https://example.com/o/pull/1')).toBeNull();
+    expect(parsePrRef('example.com/o/pull/1')).toBeNull();
+    expect(parsePrRef('https://evil.github.com/o/r/pull/1')).toBeNull();
+    expect(parsePrRef('https://www.github.com/o/r/pull/1')).toEqual({
+      number: 1,
+      repo: 'o/r',
+    });
   });
 });
 
@@ -527,6 +536,9 @@ describe('findPrRef', () => {
     expect(
       findPrRef('https://www.github.com/o/r/pull/147', { number: 147 }),
     ).not.toBeNull();
+    expect(
+      findPrRef('https://evil.github.com/o/r/pull/147', { number: 147 }),
+    ).toBeNull();
     expect(findPrRef('see #147, done', { number: 147 })).not.toBeNull();
     expect(findPrRef('(see #147)', { number: 147 })).not.toBeNull();
   });
@@ -580,6 +592,7 @@ describe('findPrRef', () => {
     ).toEqual(['grimmerk/codev', 'o/r']);
     expect(sessionRepos(undefined, undefined)).toEqual([]);
     expect(sessionRepos('not a url', ['#1'])).toEqual([]);
+    expect(sessionRepos('https://evil.github.com/o/r/pull/1')).toEqual([]);
   });
 
   // Live finding: `pr:151` listed a session whose only "#151" was the marker

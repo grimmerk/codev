@@ -131,13 +131,21 @@ export const tokenizeQuery = (query: string): string[] => {
   return out;
 };
 
-const REPO = '[a-z0-9_.-]+\\/[a-z0-9_.-]+';
+// A GitHub owner is alphanumerics and hyphens only — no dot — which is what
+// keeps `example.com/o/pull/1` from reading as owner `example.com`.
+const OWNER = '[a-z0-9-]+';
+const REPO = `${OWNER}\\/[a-z0-9_.-]+`;
+// `github.com` or `www.github.com`, never `evil.github.com` (the lookbehind
+// refuses a dot before the host) and never the tail of `notgithub.com`.
+const HOST = '(?<![a-z0-9.-])(?:www\\.)?github\\.com';
 // Numbers never start with a zero, matching the miner: `#012` is not PR 12.
 const NUMBER = '[1-9][0-9]*';
 // The host is optional: `owner/repo/pull/N` is unambiguous on its own, and it
-// is what people type when they shorten a URL by hand.
+// is what people type when they shorten a URL by hand. A scheme, when
+// present, must be followed by the GitHub host — `https://example.com/o/pull/1`
+// is a URL to search for as a word, not a PR reference.
 const PR_URL_RE = new RegExp(
-  `^(?:https?:\\/\\/)?(?:www\\.)?(?:github\\.com\\/)?(${REPO})\\/(?:pull|issues)\\/(${NUMBER})(?:[/?#].*)?$`,
+  `^(?:(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/)?(${REPO})\\/(?:pull|issues)\\/(${NUMBER})(?:[/?#].*)?$`,
 );
 const REPO_HASH_RE = new RegExp(`^(${REPO})#(${NUMBER})$`);
 const BARE_HASH_RE = new RegExp(`^#(${NUMBER})$`);
@@ -168,7 +176,7 @@ export const sessionRepos = (
 ): string[] => {
   const out = new Set<string>();
   if (prUrl) {
-    const m = /github\.com\/([^/\s]+\/[^/\s#]+)\//i.exec(prUrl);
+    const m = new RegExp(`${HOST}\\/(${REPO})\\/`, 'i').exec(prUrl);
     if (m) out.add(m[1].toLowerCase());
   }
   for (const r of refs ?? []) {
@@ -314,9 +322,8 @@ const prRefPatterns = (ref: PrRef): PrRefPatterns => {
       `(?:^|[^0-9a-z_./-])((?:${REPO})?)#${n}(?![0-9a-z_])`,
       'g',
     ),
-    // The host must not be the tail of a longer name: `notgithub.com`.
     url: new RegExp(
-      `(?<![a-z0-9-])github\\.com\\/(${REPO})\\/(?:pull|issues)\\/${n}(?![0-9a-z_])`,
+      `${HOST}\\/(${REPO})\\/(?:pull|issues)\\/${n}(?![0-9a-z_])`,
       'g',
     ),
   };

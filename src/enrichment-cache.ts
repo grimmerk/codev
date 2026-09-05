@@ -188,8 +188,11 @@ export const deserializeEnrichment = (raw: unknown): EnrichmentState => {
 // sides drifted once — the matcher had the suffix rule and the miner did
 // not, so `#147abc` was persisted as `#147` — which is why the cache
 // version below moved to 2.
+// Host: `github.com` or `www.github.com`, never a subdomain (`evil.github.com`)
+// and never the tail of another name (`notgithub.com`). Owner: alphanumerics
+// and hyphens only, as on GitHub. Same rules as `session-search.ts`.
 export const PR_REF_RE =
-  /(?<![a-z0-9-])github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(?:pull|issues)\/([1-9][0-9]*)(?![A-Za-z0-9_])|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)(?![A-Za-z0-9_])|(?:^|[^A-Za-z0-9&#])#([1-9][0-9]*)(?![A-Za-z0-9_])/gi;
+  /(?<![a-z0-9.-])(?:www\.)?github\.com\/([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+)\/(?:pull|issues)\/([1-9][0-9]*)(?![A-Za-z0-9_])|([A-Za-z0-9-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)(?![A-Za-z0-9_])|(?:^|[^A-Za-z0-9&#])#([1-9][0-9]*)(?![A-Za-z0-9_])/gi;
 
 /**
  * The words the assistant actually wrote in one JSONL record, or null when
