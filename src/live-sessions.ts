@@ -130,6 +130,9 @@ const NON_SESSION_SUBCOMMANDS = new Set([
  * `ps` taken in that window would otherwise count them as live.
  */
 const NON_SESSION_FLAGS = new Set([
+  // Print mode: a non-interactive one-shot, not something to list or save.
+  '--print',
+  '-p',
   '--version',
   '-v',
   '--help',

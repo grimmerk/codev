@@ -103,6 +103,8 @@ describe('isSessionProcess', () => {
         ' 4 1 ttys001 00:01 claude --mcp-serve',
         ' 5 1 ttys001 00:01 claude --resume f339c186-ba82-4362-a901-2938323c0198',
         ' 6 1 ttys001 00:01 claude -n branch-test-a',
+        ' 7 1 ttys001 00:01 claude -p summarize this',
+        ' 8 1 ttys001 00:01 claude --print --output-format json',
       ].join('\n'),
     );
     expect(procs.map((p) => isSessionProcess(p))).toEqual([
@@ -112,6 +114,8 @@ describe('isSessionProcess', () => {
       false,
       true,
       true,
+      false,
+      false,
     ]);
   });
 });

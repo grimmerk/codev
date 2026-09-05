@@ -898,6 +898,24 @@ function SwitcherApp() {
   for (const s of extraScopeSessions) {
     if (!knownById.has(s.sessionId)) knownById.set(s.sessionId, s);
   }
+  // Which process represents a session that has several? The one the
+  // registration-based detection mapped to it — IF that pid is still in the
+  // live report; the detection's map is cached and can name a process that
+  // has since been replaced. Otherwise the first live process on that id.
+  // Choosing from the report, not the cache, is what keeps a stale map from
+  // classifying every current process as an "extra" row.
+  const livePidsById = new Map<string, number[]>();
+  for (const p of liveReport?.live ?? []) {
+    if (!p.sessionId) continue;
+    const pids = livePidsById.get(p.sessionId) ?? [];
+    pids.push(p.pid);
+    livePidsById.set(p.sessionId, pids);
+  }
+  const representativeOf = (id: string): number | undefined => {
+    const pids = livePidsById.get(id) ?? [];
+    const mapped = activeStateRef.current[id];
+    return mapped !== undefined && pids.includes(mapped) ? mapped : pids[0];
+  };
   for (const p of liveReport?.live ?? []) {
     const info: LiveRowInfo = {
       pid: p.pid,
@@ -909,13 +927,11 @@ function SwitcherApp() {
     const id = p.sessionId;
     const known = id ? knownById.get(id) : undefined;
     if (id && known) {
-      // A real row represents ONE process: the pid the registration-based
-      // detection mapped to this id, else the first one seen. Any other
-      // process on the same id (a resumed copy, a /branch parent and child)
-      // gets a row of its own — the chip counts processes, so the list must
-      // show processes, and the memory total must add every one of them.
-      const representative = activeStateRef.current[id] ?? liveBySession[id]?.pid;
-      if (representative === undefined || representative === p.pid) {
+      // A real row represents ONE process. Any other process on the same id
+      // (a resumed copy, a /branch parent and child) gets a row of its own —
+      // the chip counts processes, so the list must show processes, and the
+      // memory total must add every one of them.
+      if (representativeOf(id) === p.pid) {
         liveBySession[id] = info;
         continue;
       }
@@ -928,7 +944,7 @@ function SwitcherApp() {
       });
       continue;
     }
-    if (id) liveBySession[id] ??= info;
+    if (id && representativeOf(id) === p.pid) liveBySession[id] = info;
     liveOrphans.push({
       sessionId: id || `pid:${p.pid}`,
       project: p.cwd || '',
@@ -2505,14 +2521,23 @@ function SwitcherApp() {
                   </div>
                 )}
                 {sessionLists.map((l) => (
-                  // A plain clickable row, like the session rows: the
-                  // rename / delete controls inside it are the buttons, and
-                  // a button nested in a button is invalid ARIA.
+                  // Keyboard-activatable row (Tab to it, Enter / Space opens)
+                  // without role="button": the rename / delete controls inside
+                  // it are the buttons, and a button nested in a button is
+                  // invalid ARIA.
                   <div
                     key={l.id}
-                    title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click to view`}
+                    tabIndex={0}
+                    title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => openList(l.id)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return; // a control inside handled it
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openList(l.id);
+                      }
+                    }}
                     className="codev-list-row"
                     style={LIST_ROW_STYLE}
                   >

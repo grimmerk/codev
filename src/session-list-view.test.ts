@@ -240,6 +240,57 @@ describe('buildSessionListView — live scope', () => {
     expect(v.displayedSessions.map((s) => s.activePid)).toEqual([1, 2]);
   });
 
+  it('gives a timeline row its running state from the ps join, and the join pid wins over a stale map', () => {
+    // `middle` is not in the active map at all; `recent` is, but the map's
+    // pid is stale — the join says the session now runs under pid 9.
+    const v = build({
+      sessions: [recent, middle],
+      activePids: { recent: 1 },
+      liveOnly: true,
+      liveBySession: {
+        middle: {
+          pid: 5,
+          rssKb: 1,
+          tty: 'ttys005',
+          uptimeSec: 1,
+          registered: true,
+        },
+        recent: {
+          pid: 9,
+          rssKb: 1,
+          tty: 'ttys009',
+          uptimeSec: 1,
+          registered: true,
+        },
+      },
+    });
+    expect(
+      v.displayedSessions.map((s) => [s.sessionId, s.isActive, s.activePid]),
+    ).toEqual([
+      ['recent', true, 9],
+      ['middle', true, 5],
+    ]);
+    // …and a synthetic row for the SAME process as such a row is dropped.
+    const dup = {
+      sessionId: 'middle',
+      lastTimestamp: 0,
+      __live: {
+        pid: 5,
+        rssKb: 1,
+        tty: 'ttys005',
+        uptimeSec: 1,
+        registered: true,
+      },
+    };
+    const w = build({
+      sessions: [middle],
+      liveOnly: true,
+      liveBySession: { middle: dup.__live },
+      liveOrphans: [dup],
+    });
+    expect(ids(w.displayedSessions)).toEqual(['middle']);
+  });
+
   it('does not fold junk under a saved list', () => {
     // `junk` is in the browse list and would fold; the list scope renders
     // members, so the fold must be empty there.

@@ -87,6 +87,9 @@ export const writeStoreFile = (filePath: string, value: unknown): void => {
     encoding: 'utf-8',
     mode: 0o600,
   });
+  // `mode` applies only when the file is created; a leftover temp from a
+  // crashed write keeps whatever mode it had. Set it explicitly.
+  fs.chmodSync(tmp, 0o600);
   fs.renameSync(tmp, filePath);
 };
 

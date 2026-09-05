@@ -192,12 +192,16 @@ const resolvePinnedRow = (
 };
 
 /**
- * Is this session running, and under which pid? Two sources, either wins:
- * the registration-based detection (`activePids`) and the `ps` join
- * (`liveBySession`). The second exists because the first cannot see a running
- * session that has no history row yet — a fresh `/branch` child before its
- * first prompt — and a row wrongly marked inactive RESUMES on click, spawning
- * a second process for the same session. Seen live.
+ * Is this session running, and under which pid? Two sources: the
+ * registration-based detection (`activePids`) and the `ps` join
+ * (`liveBySession`). Either marks it running; for the PID the join wins,
+ * because it is the fresher of the two — the detection's pid map is cached
+ * and can name a process that has since been replaced by another on the
+ * same session, and switching to a dead pid fails. The join exists in the
+ * first place because the detection cannot see a running session that has
+ * no history row yet — a fresh `/branch` child before its first prompt — and
+ * a row wrongly marked inactive RESUMES on click, spawning a second process
+ * for the same session. Seen live.
  */
 const activeFrom = (
   s: ListViewSession,
@@ -207,8 +211,21 @@ const activeFrom = (
   isActive:
     s.sessionId in activePids || s.sessionId in liveBySession || !!s.isActive,
   activePid:
-    activePids[s.sessionId] ?? liveBySession[s.sessionId]?.pid ?? s.activePid,
+    liveBySession[s.sessionId]?.pid ?? activePids[s.sessionId] ?? s.activePid,
 });
+
+/** Apply `activeFrom` to a timeline row, allocating only when it changes something. */
+const withLiveState = (
+  s: ListViewSession,
+  activePids: Record<string, number>,
+  liveBySession: Record<string, LiveRowInfo>,
+): ListViewSession => {
+  if (!(s.sessionId in liveBySession) && !(s.sessionId in activePids)) return s;
+  const next = activeFrom(s, activePids, liveBySession);
+  if (next.isActive === !!s.isActive && next.activePid === s.activePid)
+    return s;
+  return { ...s, ...next };
+};
 
 /**
  * Resolve one saved-list member to a real row, or synthesize one from what
@@ -277,7 +294,11 @@ export const buildSessionListView = ({
   // A user-hidden session is forced into the fold regardless of its stats.
   const majorSessions: ListViewSession[] = [];
   const minorSessions: ListViewSession[] = [];
-  for (const s of sessions) {
+  for (const raw of sessions) {
+    // Timeline rows get the same running-state rule as pins and list
+    // members, so a row that is live only per the ps join shows its dot and
+    // switches (rather than resumes) on click.
+    const s = withLiveState(raw, activePids, liveBySession);
     const isPinned = !!pins[s.sessionId];
     if (pinnedOnlyActive && !isPinned) continue;
     if (liveOnlyActive && !isLive(s)) continue;
