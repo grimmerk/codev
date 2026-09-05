@@ -149,26 +149,19 @@ const isClaudeBinary = (token: string): boolean =>
   /ClaudeCode\.app\/Contents\/MacOS\/claude$/.test(token);
 
 /**
- * Options that take a value, so the token after them is not an option even
- * when the walk below is looking for one. A value that itself starts with
- * `-` is not consumed — `-r -p x` is a print run, not a resume of "-p".
+ * A `claude` process that is (or could be) an interactive session.
+ *
+ * A one-shot flag ANYWHERE on the command line makes it a one-shot. An
+ * earlier version walked only the leading options and stopped at the first
+ * positional, which needed a list of every value-taking flag to stay right
+ * and still broke on `ps` output, which drops shell quoting — `--add-dir
+ * "/tmp/my dir" -p query` tokenises with the path split in two, and the
+ * walk stopped before ever seeing `-p`. Scanning every token has one known
+ * cost instead: an interactive session launched with an inline prompt that
+ * contains a token exactly equal to a flag (`claude "explain -p"`) is
+ * hidden from the live scope while it runs. That is rare, temporary, and
+ * visible; a one-shot leaking into a saved list is a stale member forever.
  */
-const VALUE_FLAGS = new Set([
-  '-n',
-  '--name',
-  '-r',
-  '--resume',
-  '--session-id',
-  '--model',
-  '--add-dir',
-  '--settings',
-  '--mcp-config',
-  '--permission-mode',
-  '--agent',
-  '--effort',
-]);
-
-/** A `claude` process that is (or could be) an interactive session. */
 export const isSessionProcess = (p: ClaudeProcess): boolean => {
   const tokens = p.args.split(/\s+/);
   if (!tokens[0] || !isClaudeBinary(tokens[0])) return false;
@@ -176,18 +169,7 @@ export const isSessionProcess = (p: ClaudeProcess): boolean => {
   if (first && !first.startsWith('-') && NON_SESSION_SUBCOMMANDS.has(first)) {
     return false;
   }
-  // Walk the leading option sequence: a one-shot flag anywhere in it makes
-  // the whole invocation a one-shot (`claude -c -p "query"` is print mode).
-  // The first positional token — a prompt — ends the walk, so words inside
-  // a prompt can never be mistaken for flags.
-  for (let i = 1; i < tokens.length; i++) {
-    const t = tokens[i];
-    if (!t.startsWith('-')) break;
-    if (NON_SESSION_FLAGS.has(t)) return false;
-    const next = tokens[i + 1];
-    if (VALUE_FLAGS.has(t) && next && !next.startsWith('-')) i++;
-  }
-  return true;
+  return !tokens.slice(1).some((t) => NON_SESSION_FLAGS.has(t));
 };
 
 /** `--resume <id>` / `-r <id>` / `--session-id <id>` on the command line. */

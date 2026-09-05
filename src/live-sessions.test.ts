@@ -109,11 +109,14 @@ describe('isSessionProcess', () => {
         ' 9 1 ttys001 00:01 claude -c -p query',
         ' 10 1 ttys001 00:01 claude --model opus -p query',
         ' 11 1 ttys001 00:01 claude -r -p query',
+        // …including after a value that `ps` split on its space (quoting is gone),
+        ' 12 1 ttys001 00:01 claude --add-dir "/tmp/my dir" -p query',
+        ' 13 1 ttys001 00:01 claude --max-turns 3 -p query',
         // …while interactive invocations with the same leading options stay sessions,
-        ' 12 1 ttys001 00:01 claude -c',
-        ' 13 1 ttys001 00:01 claude --model opus --resume f339c186-ba82-4362-a901-2938323c0198',
-        // and a prompt that merely mentions a flag is not parsed as one.
-        ' 14 1 ttys001 00:01 claude explain the -p flag',
+        ' 14 1 ttys001 00:01 claude -c',
+        ' 15 1 ttys001 00:01 claude --model opus --resume f339c186-ba82-4362-a901-2938323c0198',
+        // and a prompt that talks about print mode without the exact flag token is one too.
+        ' 16 1 ttys001 00:01 claude explain the print flag',
       ].join('\n'),
     );
     expect(procs.map((p) => isSessionProcess(p))).toEqual([
@@ -123,6 +126,8 @@ describe('isSessionProcess', () => {
       false,
       true,
       true,
+      false,
+      false,
       false,
       false,
       false,

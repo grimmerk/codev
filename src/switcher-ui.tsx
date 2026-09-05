@@ -761,9 +761,8 @@ function SwitcherApp() {
     // query on a captured field keeps them, the way the list view itself
     // renders them. mergeSessionsById keeps the first occurrence, so resolved
     // members are untouched.
-    const listPlaceholders: ListViewSession[] = (
-      viewingListRef.current?.members ?? []
-    ).map((m) => ({
+    const members = viewingListRef.current?.members ?? [];
+    const listPlaceholders: ListViewSession[] = members.map((m) => ({
       sessionId: m.sessionId,
       project: m.project,
       projectName: m.projectName,
@@ -775,11 +774,25 @@ function SwitcherApp() {
       accountLabel: m.accountLabel,
       __listMember: m,
     }));
+    // A member that DID resolve to a real row must search its captured
+    // fields too (the list view shows the captured recap on that row), so
+    // the captured record is attached to the resolved candidate as well.
+    const memberById = new Map(members.map((m) => [m.sessionId, m]));
+    const withCaptured = (rows: ListViewSession[]) =>
+      memberById.size === 0
+        ? rows
+        : rows.map((s) =>
+            memberById.has(s.sessionId) && !s.__listMember
+              ? { ...s, __listMember: memberById.get(s.sessionId) }
+              : s,
+          );
     const candidates = query.trim()
       ? mergeSessionsById(
-          mergeSessionsById(
-            mergeSessionsById(allItems, extraPinnedSessionsRef.current),
-            extraScopeSessionsRef.current,
+          withCaptured(
+            mergeSessionsById(
+              mergeSessionsById(allItems, extraPinnedSessionsRef.current),
+              extraScopeSessionsRef.current,
+            ),
           ),
           listPlaceholders,
         )
@@ -2557,37 +2570,41 @@ function SwitcherApp() {
                   </div>
                 )}
                 {sessionLists.map((l) => (
-                  // The clickable part is a real button with a name; the
-                  // rename / delete controls are its SIBLINGS, so nothing is
-                  // nested in a button and every control is reachable by
-                  // keyboard and announced by a screen reader.
-                  <div key={l.id} className="codev-list-row" style={LIST_ROW_STYLE}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Open list ${l.name}, ${l.members.length} sessions`}
-                      title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => openList(l.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          openList(l.id);
-                        }
-                      }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, cursor: 'pointer' }}
-                    >
-                      <span style={{ color: '#9DC8E0', fontWeight: 500, flexShrink: 0 }}>{l.name}</span>
-                      <span style={{ color: THEME.text.secondary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {l.members.length} sessions · {formatRelativeTime(l.createdAt)}
-                        {' · '}
-                        {l.members.slice(0, 4).map((m) => m.title || m.projectName).join(' · ')}
-                        {l.members.length > 4 ? ' …' : ''}
-                      </span>
-                    </div>
+                  // Final shape, after three rounds of contradictory review
+                  // on this row: the WHOLE row is the button (role, name, Tab
+                  // stop, Enter/Space, click anywhere including the padding),
+                  // and the rename / delete controls inside it are focusable,
+                  // labelled spans WITHOUT a button role — reachable and
+                  // announced, but not a button nested in a button. The row
+                  // ignores key events that originated in those controls.
+                  <div
+                    key={l.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open list ${l.name}, ${l.members.length} sessions`}
+                    title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => openList(l.id)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return; // a control inside handles its own keys
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openList(l.id);
+                      }
+                    }}
+                    className="codev-list-row"
+                    style={LIST_ROW_STYLE}
+                  >
+                    <span style={{ color: '#9DC8E0', fontWeight: 500, flexShrink: 0 }}>{l.name}</span>
+                    <span style={{ color: THEME.text.secondary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {l.members.length} sessions · {formatRelativeTime(l.createdAt)}
+                      {' · '}
+                      {l.members.slice(0, 4).map((m) => m.title || m.projectName).join(' · ')}
+                      {l.members.length > 4 ? ' …' : ''}
+                    </span>
                     <span
-                      role="button"
                       tabIndex={0}
+                      aria-label={`Rename list ${l.name}`}
                       title="Rename this list"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={(e) => {
@@ -2606,8 +2623,8 @@ function SwitcherApp() {
                       ✎
                     </span>
                     <span
-                      role="button"
                       tabIndex={0}
+                      aria-label={`Delete list ${l.name}`}
                       title={confirmDeleteListId === l.id ? 'Click again to delete this list' : 'Delete this list'}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={(e) => {
