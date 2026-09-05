@@ -34,7 +34,11 @@ import {
   readEnrichmentCacheFile,
   writeEnrichmentCacheFile,
 } from './enrichment-cache';
-import { readSessionRegistrations } from './live-sessions';
+import {
+  isSessionArgs,
+  readSessionRegistrations,
+  sessionIdFromArgs,
+} from './live-sessions';
 import {
   buildITerm2SwitchScript,
   buildTerminalAppSwitchScript,
@@ -1222,7 +1226,8 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
 
 /**
  * Legacy detection for old Claude Code versions without ~/.claude/sessions/.
- * Uses ps aux + regex for --resume UUID, lsof for cwd matching.
+ * Uses ps aux (the live view's session rule, then `--resume <id>` from the
+ * arguments), lsof for cwd matching.
  */
 const detectActiveSessionsLegacy = async (
   activeMap: Map<string, number>,
@@ -1250,18 +1255,23 @@ const detectActiveSessionsLegacy = async (
     const pid = parseInt(parts[1], 10);
     if (!pid) continue;
 
-    const resumeMatch = line.match(/(?:--resume|-r)\s+([a-f0-9-]{36})/);
-    if (resumeMatch) {
+    // `ps aux` columns: USER PID %CPU %MEM VSZ RSS TT STAT STARTED TIME, then
+    // the command. The live view's rule decides what is a session at all —
+    // a `-p` one-shot whose prompt happens to mention `--resume <id>` is not
+    // one, and must not become an exact pid for the switch.
+    const args = parts.slice(10).join(' ');
+    if (!isSessionArgs(args)) continue;
+
+    const resumed = sessionIdFromArgs(args);
+    if (resumed) {
       // The command line names the session: as exact as a registration.
-      activeMap.set(resumeMatch[1], pid);
+      activeMap.set(resumed, pid);
       exactPids.add(pid);
-      claimedSessionIds.add(resumeMatch[1]);
+      claimedSessionIds.add(resumed);
       continue;
     }
 
-    if (line.includes('claude')) {
-      cwdProcesses.push({ pid, line });
-    }
+    cwdProcesses.push({ pid, line });
   }
 
   const allSessions = readClaudeSessions(500);

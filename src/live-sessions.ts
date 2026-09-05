@@ -204,8 +204,12 @@ const isClaudeBinary = (token: string): boolean =>
  * hidden from the live scope while it runs. That is rare, temporary, and
  * visible; a one-shot leaking into a saved list is a stale member forever.
  */
-export const isSessionProcess = (p: ClaudeProcess): boolean => {
-  const tokens = p.args.split(/\s+/);
+export const isSessionProcess = (p: ClaudeProcess): boolean =>
+  isSessionArgs(p.args);
+
+/** The same rule on a bare command line (`ps` COMMAND column). */
+export const isSessionArgs = (args: string): boolean => {
+  const tokens = args.split(/\s+/);
   if (!tokens[0] || !isClaudeBinary(tokens[0])) return false;
   const first = tokens[1];
   if (first && !first.startsWith('-') && NON_SESSION_SUBCOMMANDS.has(first)) {

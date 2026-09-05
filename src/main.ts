@@ -203,13 +203,16 @@ const startBoundsRestore = (window: BrowserWindow) => {
 };
 
 const saveSwitcherBounds = (window: BrowserWindow) => {
+  // Only a normal-mode event carries bounds worth remembering. Checked when
+  // the event fires, not when the handler was attached: the mode can change
+  // under a window that stays alive — and the menu-bar geometry applied by
+  // that switch fires resize/move of its own, which must neither be saved
+  // nor replace a normal-mode save still pending from a moment before.
+  if (window.isDestroyed() || appMode !== 'normal') return;
+  const b = window.getBounds();
   if (saveBoundsTimer) clearTimeout(saveBoundsTimer);
   saveBoundsTimer = setTimeout(async () => {
     saveBoundsTimer = null;
-    // Checked when the timer fires, not when the handler was attached: the
-    // mode can change under a window that stays alive.
-    if (window.isDestroyed() || appMode !== 'normal') return;
-    const b = window.getBounds();
     try {
       if (isDefaultBounds(b)) {
         // At the default geometry there is nothing to remember — and the

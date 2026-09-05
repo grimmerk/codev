@@ -36,7 +36,7 @@ Bare words search everything; **operators aim the query** (the `?` chip beside t
 
 Every term must hold. An operator with an unreadable value (`after:soon`) is reported under the box and ignored rather than silently matching nothing.
 
-A result also says **why and when**: the `match #N` line steps through every prompt hit in a session (`‹ 2/12 ›`) and unfolds (`▸`) the prompt before and after the hit; a `by match` chip orders results by when the match happened rather than by the session's last activity; and when the matching field is not on the row — the project path, something the assistant said, a recap the row is not showing — a `match path` / `match assistant` / `match recap` / `match reply` line names it. Fields that are on the row (title, branch, project name, PR badge, first/last prompt) already carry the highlight and add no line.
+A result also says **why and when**: the `match #N` line steps through a session's prompt hits, up to 20 of them (`‹ 2/12 ›`) and unfolds (`▸`) the prompt before and after the hit; a `by match` chip orders results by when the match happened rather than by the session's last activity; and when the matching field is not on the row — the project path, something the assistant said, a recap the row is not showing — a `match path` / `match assistant` / `match recap` / `match reply` line names it. Fields that are on the row (title, branch, project name, PR badge, first/last prompt) already carry the highlight and add no line.
 
 #### Finding a pull request
 

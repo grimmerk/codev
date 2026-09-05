@@ -410,7 +410,7 @@ History: title-first was the order from 2026-03-21 to PR #152 because *every* pi
 | Action | Method |
 |--------|--------|
 | **Detect** | Process tree walk → `commLower === 'terminal'` or `commLower.includes('terminal.app')` |
-| **Switch** | Two-layer AppleScript matching: (1) TTY match → (2) title fallback (PR #152) |
+| **Switch** | Two-layer AppleScript matching, ordered by pid provenance like iTerm2 (PR #152): exact pid → TTY then title; guessed pid → title then TTY |
 | **Launch (tab)** | AppleScript: `do script "cmd" in front window` |
 | **Launch (window)** | AppleScript: `do script "cmd"` (standalone) |
 
@@ -494,10 +494,10 @@ Session-related settings are only visible when in Sessions mode (fixes popup int
 
 | Terminal | Detect | Switch | Launch | External Access |
 |----------|--------|--------|--------|----------------|
-| iTerm2 ✅ | `ps` + `lsof` + tty | Title match → TTY fallback | AppleScript: new tab/window + execute | No restriction |
+| iTerm2 ✅ | `ps` + `lsof` + tty | Exact pid: TTY match → title fallback; guessed pid: title → TTY (PR #152) | AppleScript: new tab/window + execute | No restriction |
 | Ghostty ✅ | `ps` + parent tree | Title match → cwd fallback | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
-| cmux ✅ | `ps` + `lsof` | Title match → cwd fallback → project name fallback (surface-level) | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll` |
-| Terminal.app ✅ | `ps` + tty | Title match → TTY fallback | AppleScript: new tab/window + execute | No restriction |
+| cmux ✅ | `ps` + `lsof` | Title match → surface TTY → cwd fallback → project name fallback (surface-level) | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll` |
+| Terminal.app ✅ | `ps` + tty | Same order rule as iTerm2 | AppleScript: new tab/window + execute | No restriction |
 | Custom | — | — | User command template / clipboard | — |
 
 ### Same-CWD Session Matching
