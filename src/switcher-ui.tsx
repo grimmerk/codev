@@ -3608,13 +3608,13 @@ function SwitcherApp() {
                                       });
                                     }}
                                   >
-                                    {expanded ? '▾' : '▸'}
+                                    {expanded ? '▾ hide' : '▸ context'}
                                   </span>
                                 )}{' '}
                                 <Highlighter
                                   searchWords={words}
                                   autoEscape
-                                  textToHighlight={hit.snippet.slice(0, 120)}
+                                  textToHighlight={fitToRow(hit.snippet, 120)}
                                   highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                                 />
                               </span>

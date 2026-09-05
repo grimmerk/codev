@@ -554,6 +554,7 @@ export const findPromptMatch = (
   wordsLower: string[],
   prRefs: PrRef[] = [],
   repos?: string[],
+  radius = 40,
 ): PromptMatch | null => {
   for (let i = 0; i < prompts.length; i++) {
     const lower = prompts[i].toLowerCase();
@@ -562,7 +563,7 @@ export const findPromptMatch = (
       if (idx !== -1) {
         return {
           promptIndex: i,
-          snippet: extractSnippet(prompts[i], idx, w.length),
+          snippet: extractSnippet(prompts[i], idx, w.length, radius),
         };
       }
     }
@@ -571,7 +572,7 @@ export const findPromptMatch = (
       if (hit) {
         return {
           promptIndex: i,
-          snippet: extractSnippet(prompts[i], hit.index, hit.length),
+          snippet: extractSnippet(prompts[i], hit.index, hit.length, radius),
         };
       }
     }
@@ -613,7 +614,9 @@ export const findPromptHits = (
 ): PromptHit[] => {
   const hits: PromptHit[] = [];
   for (let i = 0; i < prompts.length && hits.length < limit; i++) {
-    const one = findPromptMatch([prompts[i]], wordsLower, prRefs, repos);
+    // A wide snippet: the row caps it to its width (#148), so a wider
+    // window shows more of the sentence rather than the same 80 characters.
+    const one = findPromptMatch([prompts[i]], wordsLower, prRefs, repos, 160);
     if (!one) continue;
     hits.push({
       promptIndex: i,
