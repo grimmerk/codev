@@ -12,7 +12,7 @@
   - A session with **two running processes** (a resumed copy, or a `/branch` parent and child) shows both in the live scope, the second marked `⚠ 2nd process`, so the chip's count and the list agree and the memory total adds every process
   - The marks and lists stores are now written with owner-only permissions (`0600`); the lists store carries conversation snippets
   - Deliberately absent: an "open all" button. Reopening 22 browser tabs is cheap; resuming 22 sessions is ~3GB of processes, which is the problem this feature exists to relieve
-  - Under the hood: the marks store and the new lists store share one atomic-JSON-store module (`src/atomic-json-store.ts`) — the read-authority invariant PR #137 spent four review rounds on now has exactly one implementation. 44 new unit tests (lists normalize / transitions / file roundtrip / normalizer fixed point / untrusted-file inspection, `ps` parsing and the live join, list-view scopes) — 129 total
+  - Under the hood: the marks store and the new lists store share one atomic-JSON-store module (`src/atomic-json-store.ts`) — the read-authority invariant PR #137 spent four review rounds on now has exactly one implementation. 53 new unit tests (lists normalize / transitions / file roundtrip / normalizer fixed point / untrusted-file inspection, `ps` parsing and the live join, list-view scopes, session-id prefix search) — 138 total
 
 ## 1.0.86
 

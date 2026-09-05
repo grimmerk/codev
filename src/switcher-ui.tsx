@@ -178,6 +178,33 @@ const LIST_ROW_STYLE = {
   color: THEME_TEXT_PRIMARY,
 } as const;
 
+// A saved-list row is three SIBLINGS in a plain wrapper: the opener (a
+// labelled button that fills the row, so a click on the padding opens it and
+// it is the row's first Tab stop) and the rename / delete controls beside it.
+// Nothing interactive sits inside a button — interactive descendants of a
+// button are not reliably exposed by assistive tech.
+const LIST_WRAPPER_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  paddingRight: '10px',
+  margin: '1px 0',
+  borderRadius: '3px',
+  fontSize: '12px',
+  color: THEME_TEXT_PRIMARY,
+} as const;
+
+const LIST_OPENER_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  flex: 1,
+  minWidth: 0,
+  padding: '4px 10px 4px 24px',
+  cursor: 'pointer',
+  outlineOffset: '-2px',
+} as const;
+
 // Per-row process facts in the live scope: memory, uptime, terminal. Muted —
 // the row is still a session row first.
 const LIVE_INFO_STYLE = {
@@ -2570,39 +2597,33 @@ function SwitcherApp() {
                   </div>
                 )}
                 {sessionLists.map((l) => (
-                  // Final shape, after three rounds of contradictory review
-                  // on this row: the WHOLE row is the button (role, name, Tab
-                  // stop, Enter/Space, click anywhere including the padding),
-                  // and the rename / delete controls inside it are focusable,
-                  // labelled spans WITHOUT a button role — reachable and
-                  // announced, but not a button nested in a button. The row
-                  // ignores key events that originated in those controls.
-                  <div
-                    key={l.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Open list ${l.name}, ${l.members.length} sessions`}
-                    title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => openList(l.id)}
-                    onKeyDown={(e) => {
-                      if (e.target !== e.currentTarget) return; // a control inside handles its own keys
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        openList(l.id);
-                      }
-                    }}
-                    className="codev-list-row"
-                    style={LIST_ROW_STYLE}
-                  >
-                    <span style={{ color: '#9DC8E0', fontWeight: 500, flexShrink: 0 }}>{l.name}</span>
-                    <span style={{ color: THEME.text.secondary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {l.members.length} sessions · {formatRelativeTime(l.createdAt)}
-                      {' · '}
-                      {l.members.slice(0, 4).map((m) => m.title || m.projectName).join(' · ')}
-                      {l.members.length > 4 ? ' …' : ''}
-                    </span>
+                  // See LIST_WRAPPER_STYLE: opener + two controls as siblings.
+                  <div key={l.id} className="codev-list-row" style={LIST_WRAPPER_STYLE}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open list ${l.name}, ${l.members.length} sessions`}
+                      title={`${l.members.length} sessions · saved ${new Date(l.createdAt).toLocaleString()} · click or Enter to view`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => openList(l.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          openList(l.id);
+                        }
+                      }}
+                      style={LIST_OPENER_STYLE}
+                    >
+                      <span style={{ color: '#9DC8E0', fontWeight: 500, flexShrink: 0 }}>{l.name}</span>
+                      <span style={{ color: THEME.text.secondary, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {l.members.length} sessions · {formatRelativeTime(l.createdAt)}
+                        {' · '}
+                        {l.members.slice(0, 4).map((m) => m.title || m.projectName).join(' · ')}
+                        {l.members.length > 4 ? ' …' : ''}
+                      </span>
+                    </div>
                     <span
+                      role="button"
                       tabIndex={0}
                       aria-label={`Rename list ${l.name}`}
                       title="Rename this list"
@@ -2623,6 +2644,7 @@ function SwitcherApp() {
                       ✎
                     </span>
                     <span
+                      role="button"
                       tabIndex={0}
                       aria-label={`Delete list ${l.name}`}
                       title={confirmDeleteListId === l.id ? 'Click again to delete this list' : 'Delete this list'}
