@@ -277,13 +277,15 @@ Detection Flow:
 | Action | Method |
 |--------|--------|
 | **Detect** | `ps aux` → extract `--resume <id>` from args, or `lsof` for cwd |
-| **Switch** | Three-layer AppleScript matching: (1) title match → (2) TTY fallback → (3) not found |
+| **Switch** | Three-layer AppleScript matching: (1) TTY match → (2) title fallback → (3) not found (order flipped in PR #152, see below) |
 | **Launch (tab)** | AppleScript: `create tab with default profile` + `write text` |
 | **Launch (window)** | AppleScript: `create window with default profile` + `write text` |
 
-**Switch matching order (title first for same-cwd accuracy):**
-1. **Title match** — if session has `/rename` custom title, match against iTerm2 tab `name of s contains "title"`. Most precise for same-cwd sessions.
-2. **TTY match** — match process TTY against iTerm2 session TTYs. Precise when PID-session mapping is correct.
+**Switch matching order (TTY first since PR #152; title first before it):** title-first was a 2026-03-21 workaround (`868db59`) for the era when a same-cwd session's pid was *guessed* from its cwd, so the wrong pid's tty could pick the wrong tab. Since PR #147 the pid comes from Claude Code's own `~/.claude/sessions/<pid>.json` registration validated against `ps` (and from `--resume <id>` args), so it is exact — and titles are the thing that is NOT unique (three `/branch` siblings under 2.1.260 shared one; a manual rename or one session opened twice still does). Remaining gap: an *unregistered* process still gets a guessed pid, where title-first was safer — the order should follow pid provenance (registered → tty first; guessed → title first); not done yet.
+1. **TTY match** — match the process TTY against iTerm2 session TTYs. Exact when the pid is exact (registration + `ps` join).
+2. **Title match** — fallback: if the session has a `/rename` custom title, match `name of s contains "title"`. Not unique across same-named sessions.
+
+**Where TTY is relied on** (the list to revisit when Ghostty exposes a per-tab tty, #63): the iTerm2 and Terminal.app switch scripts above, `detectTerminalApp` (parent-process walk), the live view's `·ttysNNN` tag for same-titled rows (`live-sessions.ts`, PR #152), and `openSessionInGhostty`, which today has only title → cwd and would gain the same TTY-first layer.
 3. **Not found** — activates iTerm2 without switching.
 
 **Workarounds discovered:**
@@ -295,7 +297,7 @@ Detection Flow:
 | Action | Method |
 |--------|--------|
 | **Detect** | Process tree walk → `commLower === 'terminal'` or `commLower.includes('terminal.app')` |
-| **Switch** | Two-layer AppleScript matching: (1) title match → (2) TTY fallback |
+| **Switch** | Two-layer AppleScript matching: (1) TTY match → (2) title fallback (PR #152) |
 | **Launch (tab)** | AppleScript: `do script "cmd" in front window` |
 | **Launch (window)** | AppleScript: `do script "cmd"` (standalone) |
 
