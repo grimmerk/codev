@@ -52,6 +52,12 @@ export interface PrRef {
   number: number;
   /** `owner/repo`, lowercased. */
   repo?: string;
+  /**
+   * `pr:N` with no repo: only a session's own PR badge or a repo-qualified
+   * mention counts, never a bare `#N` — every repo has its own N. A bare
+   * `#N` in the query stays broad on purpose.
+   */
+  strict?: boolean;
 }
 
 export interface ScopedTerm {
@@ -128,8 +134,10 @@ export const tokenizeQuery = (query: string): string[] => {
 const REPO = '[a-z0-9_.-]+\\/[a-z0-9_.-]+';
 // Numbers never start with a zero, matching the miner: `#012` is not PR 12.
 const NUMBER = '[1-9][0-9]*';
+// The host is optional: `owner/repo/pull/N` is unambiguous on its own, and it
+// is what people type when they shorten a URL by hand.
 const PR_URL_RE = new RegExp(
-  `^(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/(${REPO})\\/(?:pull|issues)\\/(${NUMBER})(?:[/?#].*)?$`,
+  `^(?:https?:\\/\\/)?(?:www\\.)?(?:github\\.com\\/)?(${REPO})\\/(?:pull|issues)\\/(${NUMBER})(?:[/?#].*)?$`,
 );
 const REPO_HASH_RE = new RegExp(`^(${REPO})#(${NUMBER})$`);
 const BARE_HASH_RE = new RegExp(`^#(${NUMBER})$`);
@@ -147,6 +155,27 @@ export const parsePrRef = (tokenLower: string): PrRef | null => {
   m = BARE_HASH_RE.exec(tokenLower);
   if (m) return { number: Number(m[1]) };
   return null;
+};
+
+/**
+ * The repos a session is known to be about, for `QueryTarget.repos`: the
+ * `owner/repo` of its PR badge URL and of every repo-qualified reference
+ * (`owner/repo#N`) it carries. One derivation for both search paths.
+ */
+export const sessionRepos = (
+  prUrl?: string,
+  refs?: readonly string[],
+): string[] => {
+  const out = new Set<string>();
+  if (prUrl) {
+    const m = /github\.com\/([^/\s]+\/[^/\s#]+)\//i.exec(prUrl);
+    if (m) out.add(m[1].toLowerCase());
+  }
+  for (const r of refs ?? []) {
+    const hash = r.indexOf('#');
+    if (hash > 0) out.add(r.slice(0, hash).toLowerCase());
+  }
+  return [...out];
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -202,7 +231,7 @@ export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
       // `pr:147`, `pr:o/r#147`, `pr:<url>` — a number alone is allowed here
       // because the key already says what it is.
       const ref = /^[1-9][0-9]*$/.test(value)
-        ? { number: Number(value) }
+        ? { number: Number(value), strict: true }
         : parsePrRef(value);
       if (ref) q.prRefs.push(ref);
       else q.ignored.push(raw);
@@ -250,6 +279,13 @@ export interface QueryTarget {
   isLive?: boolean;
   isPinned?: boolean;
   lastTimestamp?: number;
+  /**
+   * The repos this session is known to be about (`owner/repo`, any case):
+   * its PR badge's URL and any repo-qualified reference it carries. A
+   * repo-qualified query accepts a bare `#N` in the text only when the
+   * session's own context names that repo.
+   */
+  repos?: string[];
 }
 
 /**
@@ -278,8 +314,9 @@ const prRefPatterns = (ref: PrRef): PrRefPatterns => {
       `(?:^|[^0-9a-z_./-])((?:${REPO})?)#${n}(?![0-9a-z_])`,
       'g',
     ),
+    // The host must not be the tail of a longer name: `notgithub.com`.
     url: new RegExp(
-      `github\\.com\\/(${REPO})\\/(?:pull|issues)\\/${n}(?![0-9a-z_])`,
+      `(?<![a-z0-9-])github\\.com\\/(${REPO})\\/(?:pull|issues)\\/${n}(?![0-9a-z_])`,
       'g',
     ),
   };
@@ -296,9 +333,25 @@ export const isImageMarkerHash = (text: string, hashIndex: number): boolean =>
   hashIndex >= 7 &&
   text.slice(hashIndex - 7, hashIndex).toLowerCase() === '[image ';
 
+/**
+ * Which occurrences count, by how much the QUERY said:
+ *
+ * | query form              | qualified `o/r#N` / URL in text | bare `#N` in text                    |
+ * |-------------------------|----------------------------------|--------------------------------------|
+ * | `#N`                    | any repo                         | yes                                  |
+ * | `pr:N`                  | any repo                         | no                                   |
+ * | `o/r#N`, URL, `pr:o/r#N`| same repo only                   | only if the session's own repos include `o/r` |
+ *
+ * The first live test of a bare `pr:151` listed eight sessions, and
+ * `pr:grimmerk/codev#151` still listed them because a bare `#151` used to
+ * count regardless — hence the two strict rows. (Most of the eight were the
+ * miner's missing right boundary reading `#151e2b` as `#151`; the rows stay
+ * because every repo has its own N.)
+ */
 const findPrRefWith = (
   textLower: string,
   p: PrRefPatterns,
+  reposLower?: string[],
 ): { index: number; length: number } | null => {
   const { ref, n, hash, url } = p;
   // Most sessions never mention the number at all; a substring check is far
@@ -306,12 +359,19 @@ const findPrRefWith = (
   // over 560 sessions: a PR-reference keystroke cost ~20ms without this,
   // against ~8ms for a bare word.
   if (!textLower.includes(n)) return null;
+  const bareAllowed = ref.repo
+    ? !!reposLower && reposLower.includes(ref.repo)
+    : !ref.strict;
   hash.lastIndex = 0;
   for (let m = hash.exec(textLower); m; m = hash.exec(textLower)) {
     const repo = m[1];
-    if (ref.repo && repo && repo !== ref.repo) continue;
     const at = m.index + m[0].length - n.length - 1 - repo.length;
-    if (!repo && isImageMarkerHash(textLower, at)) continue;
+    if (repo) {
+      if (ref.repo && repo !== ref.repo) continue;
+    } else {
+      if (!bareAllowed) continue;
+      if (isImageMarkerHash(textLower, at)) continue;
+    }
     return { index: at, length: repo.length + 1 + n.length };
   }
   url.lastIndex = 0;
@@ -325,8 +385,13 @@ const findPrRefWith = (
 export const findPrRef = (
   textLower: string,
   ref: PrRef,
+  repos?: string[],
 ): { index: number; length: number } | null =>
-  findPrRefWith(textLower, prRefPatterns(ref));
+  findPrRefWith(
+    textLower,
+    prRefPatterns(ref),
+    repos?.map((r) => r.toLowerCase()),
+  );
 
 export interface QueryMatcher {
   test: (target: QueryTarget) => boolean;
@@ -343,12 +408,13 @@ export const compileQuery = (query: ParsedQuery): QueryMatcher => {
   const prPatterns = query.prRefs.map(prRefPatterns);
   const test = (t: QueryTarget): boolean => {
     const textLower = t.text.toLowerCase();
+    const reposLower = t.repos?.map((r) => r.toLowerCase());
     for (const w of query.words) {
       if (!textLower.includes(w) && !matchesSessionId(t.sessionId, w))
         return false;
     }
     for (const p of prPatterns) {
-      if (!findPrRefWith(textLower, p)) return false;
+      if (!findPrRefWith(textLower, p, reposLower)) return false;
     }
     for (const { field, value } of query.fields) {
       if (field === 'msg') {
@@ -475,6 +541,7 @@ export const findPromptMatch = (
   prompts: string[],
   wordsLower: string[],
   prRefs: PrRef[] = [],
+  repos?: string[],
 ): PromptMatch | null => {
   for (let i = 0; i < prompts.length; i++) {
     const lower = prompts[i].toLowerCase();
@@ -488,7 +555,7 @@ export const findPromptMatch = (
       }
     }
     for (const ref of prRefs) {
-      const hit = findPrRef(lower, ref);
+      const hit = findPrRef(lower, ref, repos);
       if (hit) {
         return {
           promptIndex: i,

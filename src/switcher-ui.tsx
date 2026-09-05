@@ -19,6 +19,7 @@ import {
   isEmptyQuery,
   matchesSessionId,
   parseQuery,
+  sessionRepos,
   truncateMiddle,
   windowAroundMatch,
 } from './session-search';
@@ -832,6 +833,8 @@ function SwitcherApp() {
         recap,
         prompts,
         hasPr: !!prInfo,
+        // This side has no mined references; the badge is the repo context.
+        repos: sessionRepos(prInfo?.prUrl),
         isLive: isRunning(s, liveIds),
         isPinned: id in sessionMarks.pins,
         lastTimestamp: s.lastTimestamp,
@@ -2512,7 +2515,15 @@ function SwitcherApp() {
                 if (s && !s.__liveOrphan) {
                   // Arm before opening, in case the bridge triggers the focus cycle synchronously.
                   clearSessionSearchOnShowRef.current = true;
-                  window.electronAPI.openClaudeSession(s.sessionId, s.project, s.isActive, s.activePid, customTitles[s.sessionId], s.accountLabel);
+                  window.electronAPI.openClaudeSession(
+                    s.sessionId,
+                    s.project,
+                    s.isActive,
+                    s.activePid,
+                    customTitles[s.sessionId],
+                    // A list member's captured account, when the row itself has none.
+                    s.accountLabel ?? s.__listMember?.accountLabel,
+                  );
                 }
               } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
                 // ⌘D toggles pin, ⇧⌘D toggles hide on the selected row.
@@ -2716,7 +2727,8 @@ function SwitcherApp() {
                 <span style={{ color: '#ddd' }}>pr:147</span>{'  '}
                 <span style={{ color: '#ddd' }}>owner/repo#147</span>{'  '}
                 <span style={{ color: '#ddd' }}>https://github.com/…/pull/147</span>
-                {'  '}— any spelling finds the others, in prompts and in what the assistant said
+                {'  '}— any spelling finds the others, in prompts and in what the assistant said;
+                #N is broad, pr:N and a repo are strict (badge or a mention naming the repo)
               </div>
               <div>
                 bare words search everything; a session id matches by prefix (4+ hex chars); every term must hold
@@ -3058,7 +3070,14 @@ function SwitcherApp() {
                     // A running process with no session id has nothing to resume.
                     if (session.__liveOrphan) return;
                     clearSessionSearchOnShowRef.current = true;
-                    window.electronAPI.openClaudeSession(session.sessionId, session.project, session.isActive, session.activePid, customTitles[session.sessionId], session.accountLabel);
+                    window.electronAPI.openClaudeSession(
+                      session.sessionId,
+                      session.project,
+                      session.isActive,
+                      session.activePid,
+                      customTitles[session.sessionId],
+                      session.accountLabel ?? session.__listMember?.accountLabel,
+                    );
                   }}
                   style={{
                     display: 'flex',

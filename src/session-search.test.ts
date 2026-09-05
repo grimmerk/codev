@@ -17,6 +17,8 @@ import {
   parseQuery,
   parseQueryDate,
   promptNeedles,
+  QueryTarget,
+  sessionRepos,
   tokenizeQuery,
   truncateMiddle,
   windowAroundMatch,
@@ -346,6 +348,10 @@ describe('parsePrRef', () => {
     expect(
       parsePrRef('https://github.com/grimmerk/codev/issues/144#issuecomment-1'),
     ).toEqual({ number: 144, repo: 'grimmerk/codev' });
+    expect(parsePrRef('grimmerk/codev/pull/137')).toEqual({
+      number: 137,
+      repo: 'grimmerk/codev',
+    });
     expect(parsePrRef('github.com/o/r/pull/9/files')).toEqual({
       number: 9,
       repo: 'o/r',
@@ -412,7 +418,7 @@ describe('parseQuery', () => {
     expect(q.is).toEqual(['live']);
     expect(q.after).toBe(now - 7 * 86400000);
     expect(q.before).toBe(new Date(2026, 8, 1).getTime());
-    expect(q.prRefs).toEqual([{ number: 147 }]);
+    expect(q.prRefs).toEqual([{ number: 147, strict: true }]);
     expect(q.words).toEqual([]);
   });
 
@@ -514,11 +520,18 @@ describe('findPrRef', () => {
     expect(findPrRef('see #147abc', { number: 147 })).toBeNull();
     expect(findPrRef('see #147_x', { number: 147 })).toBeNull();
     expect(findPrRef('/pull/147abc', { number: 147 })).toBeNull();
+    // The host must be github.com itself, not the tail of another name.
+    expect(
+      findPrRef('https://notgithub.com/o/r/pull/147', { number: 147 }),
+    ).toBeNull();
+    expect(
+      findPrRef('https://www.github.com/o/r/pull/147', { number: 147 }),
+    ).not.toBeNull();
     expect(findPrRef('see #147, done', { number: 147 })).not.toBeNull();
     expect(findPrRef('(see #147)', { number: 147 })).not.toBeNull();
   });
 
-  it('honours the repo when the reference names one; a bare #N in the target still matches', () => {
+  it("honours the repo when the reference names one; a bare #N counts only inside that repo's own sessions", () => {
     const ref = { number: 147, repo: 'grimmerk/codev' };
     expect(
       findPrRef('https://github.com/fireflies/fred/pull/147', ref),
@@ -528,7 +541,14 @@ describe('findPrRef', () => {
       findPrRef('https://github.com/grimmerk/codev/pull/147', ref),
     ).not.toBeNull();
     expect(findPrRef('grimmerk/codev#147', ref)).not.toBeNull();
-    expect(findPrRef('opened #147 today', ref)).not.toBeNull();
+    // Live finding: `pr:grimmerk/codev#151` listed eight sessions because a
+    // bare `#151` counted regardless of repo. It counts only when the
+    // session's own repo context (badge URL, qualified refs) names the repo.
+    expect(findPrRef('opened #147 today', ref)).toBeNull();
+    expect(findPrRef('opened #147 today', ref, ['fireflies/fred'])).toBeNull();
+    expect(
+      findPrRef('opened #147 today', ref, ['fireflies/fred', 'Grimmerk/CodeV']),
+    ).not.toBeNull();
     // A wrong-repo hit does not hide a right one further on.
     expect(
       findPrRef('fireflies/fred#147 then grimmerk/codev#147', ref),
@@ -536,6 +556,30 @@ describe('findPrRef', () => {
       index: 24,
       length: 18,
     });
+  });
+
+  it('pr:N is strict: a badge URL or a qualified mention counts, a bare #N does not', () => {
+    const strict = { number: 147, strict: true };
+    expect(findPrRef('opened #147 today', strict)).toBeNull();
+    expect(findPrRef('opened #147 today', strict, ['o/r'])).toBeNull();
+    expect(
+      findPrRef('pr #147 https://github.com/o/r/pull/147', strict),
+    ).not.toBeNull();
+    expect(findPrRef('o/r#147', strict)).not.toBeNull();
+    // The bare query form stays broad.
+    expect(findPrRef('opened #147 today', { number: 147 })).not.toBeNull();
+  });
+
+  it('sessionRepos derives the repo context from the badge URL and qualified refs', () => {
+    expect(
+      sessionRepos('https://github.com/Grimmerk/CodeV/pull/151', [
+        '#3',
+        'o/r#5',
+        'grimmerk/codev#151',
+      ]),
+    ).toEqual(['grimmerk/codev', 'o/r']);
+    expect(sessionRepos(undefined, undefined)).toEqual([]);
+    expect(sessionRepos('not a url', ['#1'])).toEqual([]);
   });
 
   // Live finding: `pr:151` listed a session whose only "#151" was the marker
@@ -557,7 +601,7 @@ describe('findPrRef', () => {
 
 describe('compileQuery', () => {
   const now = new Date(2026, 8, 5, 15, 30).getTime();
-  const target = {
+  const target: QueryTarget = {
     sessionId: '4ed7505a-eae6-43a5-827b-465c8b5eb759',
     text: 'codev /Users/g/git/codev open the PR for me #147 harden again',
     title: 'agentic-fred harden again - pr2-1533',
@@ -616,9 +660,26 @@ describe('compileQuery', () => {
 
   it('PR references match any spelling in the text, and every term must hold', () => {
     expect(matches('#147')).toBe(true);
-    expect(matches('pr:147 title:pr2')).toBe(true);
-    expect(matches('pr:148')).toBe(false);
     expect(matches('#147 title:nope')).toBe(false);
+    // The fixture text carries only a bare `#147`: broad finds it, strict
+    // needs the badge URL (what both callers append when a badge exists) or
+    // the session's own repo context.
+    expect(matches('pr:147')).toBe(false);
+    const badged = {
+      ...target,
+      text: `${target.text} PR #147 https://github.com/grimmerk/codev/pull/147`,
+    };
+    expect(matches('pr:147 title:pr2', badged)).toBe(true);
+    expect(matches('pr:148', badged)).toBe(false);
+    expect(matches('grimmerk/codev#147', badged)).toBe(true);
+    expect(matches('fireflies/fred#147', badged)).toBe(false);
+    expect(matches('grimmerk/codev#147')).toBe(false);
+    expect(
+      matches('grimmerk/codev#147', { ...target, repos: ['grimmerk/codev'] }),
+    ).toBe(true);
+    expect(
+      matches('pr:https://github.com/grimmerk/codev/pull/147', badged),
+    ).toBe(true);
   });
 
   it('an ignored operator does not constrain the match', () => {

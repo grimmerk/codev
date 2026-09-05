@@ -26,7 +26,9 @@ import * as path from 'path';
 import { writeStoreFile } from './atomic-json-store';
 import { isImageMarkerHash } from './session-search';
 
-export const ENRICHMENT_CACHE_VERSION = 1;
+// 2: references mined under version 1 could carry a `#147` taken from
+// `#147abc`; a version bump re-mines everything on the next launch.
+export const ENRICHMENT_CACHE_VERSION = 2;
 
 export interface CachedSessionEnrichment {
   mtimeMs: number;
@@ -180,8 +182,14 @@ export const deserializeEnrichment = (raw: unknown): EnrichmentState => {
  * non-word character before it. `&#N` is excluded so HTML entities are not
  * read as references; a leading zero is excluded so `#0` is not.
  */
+// Boundaries on both sides, the same ones the query matcher applies: the
+// host must not be the tail of a longer name (`notgithub.com`), and the
+// number must END there (`#147abc` is an identifier, not PR 147). The two
+// sides drifted once — the matcher had the suffix rule and the miner did
+// not, so `#147abc` was persisted as `#147` — which is why the cache
+// version below moved to 2.
 export const PR_REF_RE =
-  /github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(?:pull|issues)\/([1-9][0-9]*)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)|(?:^|[^A-Za-z0-9&#])#([1-9][0-9]*)/gi;
+  /(?<![a-z0-9-])github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/(?:pull|issues)\/([1-9][0-9]*)(?![A-Za-z0-9_])|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)(?![A-Za-z0-9_])|(?:^|[^A-Za-z0-9&#])#([1-9][0-9]*)(?![A-Za-z0-9_])/gi;
 
 /**
  * The words the assistant actually wrote in one JSONL record, or null when

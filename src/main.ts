@@ -31,7 +31,9 @@ import {
   launchNewClaudeSession,
   scanClosedVSCodeSessions,
   getSessionsByIds,
+  findAccountByLabel,
   flushEnrichmentCache,
+  isSafeLaunchPath,
   openSessionListMembers,
   runBackgroundEnrichmentScan,
 } from './claude-session-utility';
@@ -2615,20 +2617,44 @@ ipcMain.handle('scan-closed-vscode-sessions', async (_event, activeSessionIds: s
   return scanClosedVSCodeSessions(new Set(activeSessionIds), vsCodeIndex);
 });
 
-ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string, accountLabel?: string) => {
-  const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
-  const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
-  openSession(
-    sessionId,
-    projectPath,
-    isActive,
-    activePid,
-    terminalApp,
-    terminalMode,
-    customTitle,
-    typeof accountLabel === 'string' ? accountLabel : undefined,
-  );
-});
+ipcMain.on(
+  'open-claude-session',
+  async (
+    _event,
+    sessionId: string,
+    projectPath: string,
+    isActive: boolean,
+    activePid?: number,
+    customTitle?: string,
+    accountLabel?: string,
+  ) => {
+    // The path is embedded in shell and AppleScript strings by every
+    // launcher; refuse one that could end either literal (see isSafeLaunchPath).
+    if (!isSafeLaunchPath(projectPath)) {
+      console.warn('[open-claude-session] refusing unsafe project path:', projectPath);
+      return;
+    }
+    const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
+    const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+    // A label no account carries is dropped, not trusted: history decides the
+    // account for any session it knows, and the anchor is the documented
+    // fallback for one it does not.
+    const label =
+      typeof accountLabel === 'string' && findAccountByLabel(accountLabel)
+        ? accountLabel
+        : undefined;
+    openSession(
+      sessionId,
+      projectPath,
+      isActive,
+      activePid,
+      terminalApp,
+      terminalMode,
+      customTitle,
+      label,
+    );
+  },
+);
 
 // Resume every member of a saved list that is not running (issue #145).
 ipcMain.handle(

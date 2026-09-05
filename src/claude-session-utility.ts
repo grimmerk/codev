@@ -9,6 +9,8 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
 import {
+  CodevAccount,
+  getAccounts,
   getScannableAccounts,
   getProjectsDir,
   getAccountByLabel,
@@ -20,6 +22,7 @@ import {
   parseQuery,
   PromptMatch,
   promptNeedles,
+  sessionRepos,
 } from './session-search';
 import {
   EnrichmentState,
@@ -100,6 +103,12 @@ const ACTIVE_CACHE_TTL_MS = 5000;
 let cachedCustomTitles: Map<string, string> | null = null;
 
 export const invalidateSessionCache = () => {
+  // Persist what the last scan found BEFORE anything is cleared: a debounced
+  // write still pending would otherwise fire after the clear and replace the
+  // disk cache with `sessions: {}` — and the flush itself reads the maps
+  // below, so it must run before they are reset, not merely before the file
+  // state is. Flushing also cancels the timer.
+  flushEnrichmentCache();
   cachedSessions = null;
   cachedActiveMap = null;
   cachedVSCodeSessions = null;
@@ -109,10 +118,6 @@ export const invalidateSessionCache = () => {
   cachedPRLinks = null;
   cachedRecaps = null;
   cachedPRRefs = null;
-  // Persist what the last scan found BEFORE clearing it: a debounced write
-  // still pending would otherwise fire after the clear and replace the disk
-  // cache with `sessions: {}`. Flushing also cancels that timer.
-  flushEnrichmentCache();
   enrichedFileState.clear();
   prRefBytes.clear();
   // The disk cache is still valid (freshness is per file, by mtime+size);
@@ -266,6 +271,7 @@ export const searchClaudeSessions = (
     const prLink = cachedPRLinks?.get(id);
     const recap = cachedRecaps?.get(id)?.text;
     const refs = cachedPRRefs?.get(id);
+    const repos = sessionRepos(prLink?.prUrl, refs);
     const text = [
       s.projectName,
       s.project,
@@ -290,13 +296,19 @@ export const searchClaudeSessions = (
         prompts: sessionPrompts,
         hasPr: !!prLink,
         lastTimestamp: s.lastTimestamp,
+        repos,
       })
     ) {
       continue;
     }
 
     sessions.push(s);
-    const match = findPromptMatch(sessionPrompts, needles, parsed.prRefs);
+    const match = findPromptMatch(
+      sessionPrompts,
+      needles,
+      parsed.prRefs,
+      repos,
+    );
     if (match) {
       snippets[id] = {
         ...match,
@@ -1202,9 +1214,27 @@ const getResumeConfigDirEnv = (
   if (s) return s.accountConfigDirEnv;
   // Not in any history (a /branch child, a pruned history): trust the label
   // a saved list captured, or the resume lands under the anchor account and
-  // never finds its transcript.
-  return accountLabel ? getAccountByLabel(accountLabel).configDirEnv : null;
+  // never finds its transcript. Strict lookup — a label no account carries
+  // (renamed, removed) is rejected by the launch paths before they get here.
+  const account = accountLabel ? findAccountByLabel(accountLabel) : undefined;
+  return account ? account.configDirEnv : null;
 };
+
+/** The account with exactly this label, or undefined — never a fallback. */
+export const findAccountByLabel = (label: string): CodevAccount | undefined =>
+  getAccounts().find((a) => a.label === label);
+
+/**
+ * A project path safe to embed in the launch commands. Every terminal
+ * launcher interpolates the path into a double-quoted shell string and, for
+ * Ghostty and Terminal.app, into an AppleScript string literal; a path
+ * carrying a quote, a backslash, `$`, a backtick or a line break could end
+ * either literal. Real project paths never contain these, so refusing them
+ * costs nothing and closes the hole for every caller — the saved-list file
+ * and history.jsonl are both plain files a user (or a stray tool) can edit.
+ */
+export const isSafeLaunchPath = (p: unknown): p is string =>
+  typeof p === 'string' && p.length > 0 && !/["\\$`\n\r\u0000]/.test(p);
 
 /**
  * Build `command claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the
@@ -1274,17 +1304,47 @@ export const openSession = async (
       openSessionInCodeV(sessionId);
       break;
     case 'cmux':
-      openSessionInCmux(sessionId, projectPath, isActive, activePid, customTitle, accountLabel);
+      openSessionInCmux(
+        sessionId,
+        projectPath,
+        isActive,
+        activePid,
+        customTitle,
+        accountLabel,
+      );
       break;
     case 'ghostty':
-      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode, customTitle, accountLabel);
+      openSessionInGhostty(
+        sessionId,
+        projectPath,
+        isActive,
+        terminalMode,
+        customTitle,
+        accountLabel,
+      );
       break;
     case 'terminal':
-      openSessionInTerminalApp(sessionId, projectPath, isActive, activePid, terminalMode, customTitle, accountLabel);
+      openSessionInTerminalApp(
+        sessionId,
+        projectPath,
+        isActive,
+        activePid,
+        terminalMode,
+        customTitle,
+        accountLabel,
+      );
       break;
     case 'iterm2':
     default:
-      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode, customTitle, accountLabel);
+      openSessionInITerm2(
+        sessionId,
+        projectPath,
+        isActive,
+        activePid,
+        terminalMode,
+        customTitle,
+        accountLabel,
+      );
       break;
   }
 };
@@ -2287,24 +2347,36 @@ export const openSessionListMembers = async (
 ): Promise<OpenListMembersResult> => {
   const result: OpenListMembersResult = { opened: [], skipped: [] };
   for (const m of members) {
+    const id = m.sessionId;
+    const skip = (reason: string) => result.skipped.push({ sessionId: id, reason });
     // Re-read per launch: the previous launch may have registered by now.
-    if (runningSessionIds().has(m.sessionId) || membersInFlight.has(m.sessionId)) {
-      result.skipped.push({ sessionId: m.sessionId, reason: 'already running' });
+    if (runningSessionIds().has(id) || membersInFlight.has(id)) {
+      skip('already running');
       continue;
     }
     if (!m.project || !fs.existsSync(m.project)) {
-      result.skipped.push({ sessionId: m.sessionId, reason: 'project folder missing' });
+      skip('project folder missing');
       continue;
     }
-    if (!findTranscriptPath(m.sessionId, m.project, m.accountLabel)) {
-      result.skipped.push({ sessionId: m.sessionId, reason: 'transcript missing' });
+    if (!isSafeLaunchPath(m.project)) {
+      skip('unsafe project path');
       continue;
     }
-    if (result.opened.length > 0) await sleep(staggerMs);
-    membersInFlight.add(m.sessionId);
+    if (m.accountLabel && !findAccountByLabel(m.accountLabel)) {
+      skip(`unknown account "${m.accountLabel}"`);
+      continue;
+    }
+    if (!findTranscriptPath(id, m.project, m.accountLabel)) {
+      skip('transcript missing');
+      continue;
+    }
+    // Claimed BEFORE the stagger wait: an overlapping call arriving during
+    // the wait must see this session as taken.
+    membersInFlight.add(id);
     try {
+      if (result.opened.length > 0) await sleep(staggerMs);
       await openSession(
-        m.sessionId,
+        id,
         m.project,
         false,
         undefined,
@@ -2313,11 +2385,11 @@ export const openSessionListMembers = async (
         m.title,
         m.accountLabel,
       );
+      result.opened.push(id);
     } finally {
       // Long enough for the new process to write its registration.
-      setTimeout(() => membersInFlight.delete(m.sessionId), 10000);
+      setTimeout(() => membersInFlight.delete(id), 10000);
     }
-    result.opened.push(m.sessionId);
   }
   return result;
 };
@@ -2430,7 +2502,7 @@ end tell`;
       const result = (stdout || '').trim();
       console.log('[ghostty] switch result:', result);
       if (result === 'not found') {
-        copyResumeCommand(sessionId, projectPath);
+        copyResumeCommand(sessionId, projectPath, accountLabel);
       }
       try { fs.unlinkSync(tmpScript); } catch {}
     });
@@ -2549,7 +2621,7 @@ export const openSessionInCmux = (
       // Single tree --all call for title matching, project name fallback, and workspace ID extraction.
       const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
       if (!treeOutput) {
-        copyResumeCommand(sessionId, projectPath);
+        copyResumeCommand(sessionId, projectPath, accountLabel);
         exec('osascript -e \'tell application "cmux" to activate\'');
         return;
       }
@@ -2652,8 +2724,12 @@ export const openSessionInCmux = (
 /**
  * Copy resume command to clipboard (fallback for unsupported terminals)
  */
-export const copyResumeCommand = (sessionId: string, projectPath: string): string => {
-  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
+export const copyResumeCommand = (
+  sessionId: string,
+  projectPath: string,
+  accountLabel?: string,
+): string => {
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel)}`;
   const { execFileSync } = require('child_process');
   execFileSync('pbcopy', { input: command });
   return command;

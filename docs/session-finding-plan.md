@@ -313,10 +313,21 @@ Three things the sketch did not have:
   every session in history** runs 20s after launch in chunks of 10 with a pause between them
   (foreground scans share the queue and interleave), so `title:` / `has:pr` / `#N` see every
   session, not just the loaded window; on the second launch that pass is stat-only.
-- **A repo in the query rules out the same number elsewhere**: `grimmerk/codev#147` does not
-  match a `fireflies/fred/pull/147` URL, while a bare `#147` in the target still matches either,
-  because a bare number cannot say which repo it meant. Delimited forms only, as promised:
-  `#147` never hits `#1475`, `/pull/1470` or `15980`.
+- **Three levels of strictness, and the first live test set them.** The sketch said a bare
+  `#147` in the target should match any query, "because a bare number cannot say which repo it
+  meant". In practice a bare `pr:151` listed **eight sessions**, and `pr:grimmerk/codev#151`
+  still listed them because the bare `#151` counted regardless. Most of those eight turned out
+  to be the miner's fault — it had no right-side boundary, so `#151e2b` (a hex colour in a
+  slide-deck session) was persisted as `#151`; the matcher had the boundary and the miner did
+  not, the one-rule-two-paths drift this file keeps warning about, and re-mining with the
+  boundary took the broad `#151` from 8 hits to 1. The strict levels stay anyway, because every
+  repo really does have its own 151. So:
+  `#147` in the query is broad (any mention, any repo); `pr:147` is strict — only a session's own
+  PR badge or a repo-qualified mention counts; a repo in the query (`owner/repo#147`, the URL,
+  `pr:owner/repo#147`) requires the same repo on qualified forms and accepts a bare `#147` only
+  when the session's own repo context — its badge URL and its qualified references
+  (`sessionRepos`) — names that repo. Delimited forms only, as promised: `#147` never hits
+  `#1475`, `#147abc`, `/pull/1470` or `15980`.
 
 ### 4.7 `/branch` creates generation chains (measured 2026-09-05)
 

@@ -190,7 +190,19 @@ describe('minePrRefs', () => {
           '15980 and &#38; and #0 and #012 and a#9 and x/y#1a and [Image #4] but #5',
         ),
       ),
-    ).toEqual(['x/y#1', '#5']);
+    ).toEqual(['#5']);
+  });
+
+  // The matcher had these boundaries and the miner did not: `#147abc` was
+  // persisted as `#147`, and `notgithub.com/…/pull/9` as `o/r#9`.
+  it('applies the same right-side and host boundaries as the query matcher', () => {
+    expect(
+      minePrRefs(
+        assistant(
+          '#147abc #147_x /pull/147abc o/r#12abc https://notgithub.com/o/r/pull/9 then #147, and https://github.com/o/r/pull/9',
+        ),
+      ),
+    ).toEqual(['#147', 'o/r#9']);
   });
 
   it('assistantTextOfLine joins text and tool inputs, and rejects everything else', () => {
