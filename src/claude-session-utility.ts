@@ -9,15 +9,29 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
 import {
+  CodevAccount,
+  getAccounts,
   getScannableAccounts,
   getProjectsDir,
   getAccountByLabel,
 } from './accounts';
 import {
+  compileQuery,
   findPromptMatch,
-  matchesAllWordsOrId,
+  isEmptyQuery,
+  parseQuery,
   PromptMatch,
+  promptNeedles,
+  sessionRepos,
 } from './session-search';
+import {
+  EnrichmentState,
+  getEnrichmentCachePath,
+  minePrRefs,
+  readEnrichmentCacheFile,
+  writeEnrichmentCacheFile,
+} from './enrichment-cache';
+import { readSessionRegistrations } from './live-sessions';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -89,6 +103,12 @@ const ACTIVE_CACHE_TTL_MS = 5000;
 let cachedCustomTitles: Map<string, string> | null = null;
 
 export const invalidateSessionCache = () => {
+  // Persist what the last scan found BEFORE anything is cleared: a debounced
+  // write still pending would otherwise fire after the clear and replace the
+  // disk cache with `sessions: {}` — and the flush itself reads the maps
+  // below, so it must run before they are reset, not merely before the file
+  // state is. Flushing also cancels the timer.
+  flushEnrichmentCache();
   cachedSessions = null;
   cachedActiveMap = null;
   cachedVSCodeSessions = null;
@@ -97,7 +117,12 @@ export const invalidateSessionCache = () => {
   cachedBranches = null;
   cachedPRLinks = null;
   cachedRecaps = null;
+  cachedPRRefs = null;
   enrichedFileState.clear();
+  prRefBytes.clear();
+  // The disk cache is still valid (freshness is per file, by mtime+size);
+  // reload it on the next scan rather than paying a cold scan.
+  enrichmentLoadedFromDisk = false;
 };
 
 /**
@@ -213,13 +238,25 @@ export interface SessionSearchResult {
  * Full search across ALL sessions (not just the ~100 the UI loads) and ALL
  * user prompts (not just first/last) — fixes issue #131. Sessions come back
  * newest-first; prompt text stays in this process (only snippets cross IPC).
+ *
+ * The query language (issue #140) is judged here with the SAME matcher the
+ * renderer runs, over everything this process knows: prompts, project, and
+ * the enrichment caches (title, branch, PR badge, recap, and the PR
+ * references the assistant mentioned) — which the persisted cache and the
+ * background scan fill for every session, not just the loaded window. The
+ * one kind of term this side cannot judge is `is:` (the ps join and the pin
+ * store live in the renderer), so it is left out here and the renderer
+ * applies it to whatever comes back.
  */
 export const searchClaudeSessions = (
   query: string,
   limit = 100,
 ): SessionSearchResult => {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return { sessions: [], snippets: {} };
+  const parsed = parseQuery(query);
+  if (isEmptyQuery(parsed)) return { sessions: [], snippets: {} };
+  ensureEnrichmentLoaded();
+  const matcher = compileQuery({ ...parsed, is: [] });
+  const needles = promptNeedles(parsed);
 
   // Recency-sorted full set; also (re)builds promptsBySession when stale.
   const allSessions = readClaudeSessions(Number.MAX_SAFE_INTEGER);
@@ -227,18 +264,53 @@ export const searchClaudeSessions = (
   const snippets: Record<string, SessionSearchMatch> = {};
 
   for (const s of allSessions) {
-    const sessionPrompts = promptsBySession.get(s.sessionId) || [];
-    // The id shown in a terminal status line finds the session too — by the
-    // prefix rule in matchesSessionId, shared with the renderer's
-    // filterSessionsLocally so the two paths agree on what an id query is.
-    const target =
-      `${s.projectName} ${s.project} ${sessionPrompts.join('\n')}`.toLowerCase();
-    if (!matchesAllWordsOrId(target, s.sessionId, words)) continue;
+    const id = s.sessionId;
+    const sessionPrompts = promptsBySession.get(id) || [];
+    const title = cachedCustomTitles?.get(id);
+    const branch = cachedBranches?.get(id);
+    const prLink = cachedPRLinks?.get(id);
+    const recap = cachedRecaps?.get(id)?.text;
+    const refs = cachedPRRefs?.get(id);
+    const repos = sessionRepos(prLink?.prUrl, refs);
+    const text = [
+      s.projectName,
+      s.project,
+      sessionPrompts.join('\n'),
+      title,
+      branch,
+      prLink ? `PR #${prLink.prNumber} ${prLink.prUrl}` : '',
+      recap,
+      refs?.join(' '),
+    ]
+      .filter(Boolean)
+      .join('\n');
+    if (
+      !matcher.test({
+        sessionId: id,
+        text,
+        title,
+        branch,
+        project: `${s.projectName} ${s.project}`,
+        account: s.accountLabel,
+        recap,
+        prompts: sessionPrompts,
+        hasPr: !!prLink,
+        lastTimestamp: s.lastTimestamp,
+        repos,
+      })
+    ) {
+      continue;
+    }
 
     sessions.push(s);
-    const match = findPromptMatch(sessionPrompts, words);
+    const match = findPromptMatch(
+      sessionPrompts,
+      needles,
+      parsed.prRefs,
+      repos,
+    );
     if (match) {
-      snippets[s.sessionId] = {
+      snippets[id] = {
         ...match,
         isLastPrompt: match.promptIndex === sessionPrompts.length - 1,
       };
@@ -1132,19 +1204,50 @@ const detectActiveSessionsLegacy = async (activeMap: Map<string, number>): Promi
  * cached session list, which tags each session with its config dir) and return
  * the CLAUDE_CONFIG_DIR to prefix at resume — or null for the default account.
  */
-const getResumeConfigDirEnv = (sessionId: string): string | null => {
+const getResumeConfigDirEnv = (
+  sessionId: string,
+  accountLabel?: string,
+): string | null => {
   const s = readClaudeSessions(Number.MAX_SAFE_INTEGER).find(
     (x) => x.sessionId === sessionId,
   );
-  return s?.accountConfigDirEnv ?? null;
+  if (s) return s.accountConfigDirEnv;
+  // Not in any history (a /branch child, a pruned history): trust the label
+  // a saved list captured, or the resume lands under the anchor account and
+  // never finds its transcript. Strict lookup — a label no account carries
+  // (renamed, removed) is rejected by the launch paths before they get here.
+  const account = accountLabel ? findAccountByLabel(accountLabel) : undefined;
+  return account ? account.configDirEnv : null;
 };
+
+/** The account with exactly this label, or undefined — never a fallback. */
+export const findAccountByLabel = (label: string): CodevAccount | undefined =>
+  getAccounts().find((a) => a.label === label);
+
+/**
+ * A project path safe to embed in the launch commands. Every terminal
+ * launcher interpolates the path into a double-quoted shell string and, for
+ * Ghostty and Terminal.app, into an AppleScript string literal; a path
+ * carrying a quote, a backslash, `$`, a backtick or a line break could end
+ * either literal. Real project paths never contain these, so refusing them
+ * costs nothing and closes the hole for every caller — the saved-list file
+ * and history.jsonl are both plain files a user (or a stray tool) can edit.
+ * An EMPTY path is not this function's concern: switching to a running
+ * session never embeds it (iTerm2 matches by tty), and the launch paths that
+ * do need one already check existence.
+ */
+export const isSafeLaunchPath = (p: unknown): p is string =>
+  typeof p === 'string' && !/["\\$`\n\r\u0000]/.test(p);
 
 /**
  * Build `command claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the
  * session belongs to a non-default account so it resumes under the right account.
  */
-const buildResumeCommand = (sessionId: string): string => {
-  const configDir = getResumeConfigDirEnv(sessionId);
+const buildResumeCommand = (
+  sessionId: string,
+  accountLabel?: string,
+): string => {
+  const configDir = getResumeConfigDirEnv(sessionId, accountLabel);
   // Single-quote the value: some terminal injections (Ghostty `initial input`)
   // don't escape the command, so a double-quoted prefix would break their
   // AppleScript string. Single quotes are safe across all terminals + handle spaces.
@@ -1173,6 +1276,7 @@ export const openSession = async (
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
   customTitle?: string,
+  accountLabel?: string,
 ): Promise<void> => {
   let effectiveTerminal = terminalApp;
 
@@ -1203,18 +1307,44 @@ export const openSession = async (
       openSessionInCodeV(sessionId);
       break;
     case 'cmux':
-      openSessionInCmux(sessionId, projectPath, isActive, activePid, customTitle);
-      break;
+      return openSessionInCmux(
+        sessionId,
+        projectPath,
+        isActive,
+        activePid,
+        customTitle,
+        accountLabel,
+      );
     case 'ghostty':
-      openSessionInGhostty(sessionId, projectPath, isActive, terminalMode, customTitle);
-      break;
+      return openSessionInGhostty(
+        sessionId,
+        projectPath,
+        isActive,
+        terminalMode,
+        customTitle,
+        accountLabel,
+      );
     case 'terminal':
-      openSessionInTerminalApp(sessionId, projectPath, isActive, activePid, terminalMode, customTitle);
-      break;
+      return openSessionInTerminalApp(
+        sessionId,
+        projectPath,
+        isActive,
+        activePid,
+        terminalMode,
+        customTitle,
+        accountLabel,
+      );
     case 'iterm2':
     default:
-      openSessionInITerm2(sessionId, projectPath, isActive, activePid, terminalMode, customTitle);
-      break;
+      return openSessionInITerm2(
+        sessionId,
+        projectPath,
+        isActive,
+        activePid,
+        terminalMode,
+        customTitle,
+        accountLabel,
+      );
   }
 };
 
@@ -1291,18 +1421,53 @@ export const setLaunchInCodevTerminalCallback = (cb: (projectPath: string) => vo
  * For Ghostty: `claudeCmd` is the bare command (no cd), projectPath sets initial working directory.
  * For others: `fullCommand` is the full command string (cd + claude).
  */
+// One script file per launch. A fixed name was fine while launches were one
+// click apart; opening a saved list runs several a few hundred ms apart, and
+// each callback deletes its file, so a shared name could delete the script
+// osascript was about to read.
+let launchScriptSeq = 0;
+const launchScriptPath = (name: string): string =>
+  path.join(os.tmpdir(), `codev-${name}-${process.pid}-${++launchScriptSeq}.scpt`);
+
 export const runCommandInTerminal = (
   fullCommand: string,
   claudeCmd: string,
   projectPath: string,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
-): void => {
+): Promise<void> => {
   const { exec } = require('child_process');
+  // One osascript launch as a promise: the script file is removed either
+  // way, and an error REJECTS, so a caller that counts launches (`open N`)
+  // learns about a failure instead of counting it as opened.
+  const runOsascript = (
+    tmpScript: string,
+    script: string,
+    label: string,
+  ): Promise<void> => {
+    fs.writeFileSync(tmpScript, script);
+    return new Promise<void>((resolve, reject) => {
+      exec(
+        `osascript ${tmpScript}`,
+        { encoding: 'utf-8', timeout: 5000 },
+        (error: any) => {
+          try {
+            fs.unlinkSync(tmpScript);
+          } catch {}
+          if (error) {
+            console.error(`[runCommandInTerminal] ${label} error:`, error.message);
+            reject(error);
+          } else {
+            resolve();
+          }
+        },
+      );
+    });
+  };
 
   switch (terminalApp) {
     case 'ghostty': {
-      const tmpScript = '/tmp/codev-ghostty-launch.scpt';
+      const tmpScript = launchScriptPath('ghostty-launch');
       const launchScript = terminalMode === 'window'
         ? `tell application "Ghostty"
   set cfg to new surface configuration from {initial working directory:"${projectPath}", initial input:"${claudeCmd}\\n"}
@@ -1319,15 +1484,10 @@ end tell`
     activate
   end if
 end tell`;
-      fs.writeFileSync(tmpScript, launchScript);
-      exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
-        if (error) console.error('[runCommandInTerminal] ghostty error:', error.message);
-        try { fs.unlinkSync(tmpScript); } catch {}
-      });
-      break;
+      return runOsascript(tmpScript, launchScript, 'ghostty');
     }
     case 'terminal': {
-      const tmpScript = '/tmp/codev-terminal-launch.scpt';
+      const tmpScript = launchScriptPath('terminal-launch');
       const escapedCommand = fullCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const launchScript = terminalMode === 'window'
         ? `set wasRunning to (do shell script "pgrep -x Terminal >/dev/null 2>&1 && echo 1 || echo 0")
@@ -1354,61 +1514,61 @@ end tell`
     activate
   end if
 end tell`;
-      fs.writeFileSync(tmpScript, launchScript);
-      exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
-        if (error) console.error('[runCommandInTerminal] Terminal.app error:', error.message);
-        try { fs.unlinkSync(tmpScript); } catch {}
-      });
-      break;
+      return runOsascript(tmpScript, launchScript, 'Terminal.app');
     }
     case 'cmux': {
-      const launchInCmux = () => {
-        const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "${claudeCmd}"`;
-        console.log('[cmux] launch cmd:', cmuxCmd);
-        exec(cmuxCmd,
-          { encoding: 'utf-8', timeout: 5000 },
-          (error: any, stdout: string, stderr: string) => {
-            console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
-            if (error) {
-              console.error('cmux new-workspace failed:', error.message);
-            } else {
+      return new Promise<void>((resolve, reject) => {
+        const launchInCmux = () => {
+          const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "${claudeCmd}"`;
+          console.log('[cmux] launch cmd:', cmuxCmd);
+          exec(
+            cmuxCmd,
+            { encoding: 'utf-8', timeout: 5000 },
+            (error: any, stdout: string, stderr: string) => {
+              console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
+              if (error) {
+                console.error('cmux new-workspace failed:', error.message);
+                reject(error);
+                return;
+              }
               const wsMatch = stdout.match(/workspace:\d+/);
               if (wsMatch) {
                 exec(`${CMUX_CLI} select-workspace --workspace ${wsMatch[0]}`);
               }
               exec('osascript -e \'tell application "cmux" to activate\'');
-            }
+              resolve();
+            },
+          );
+        };
+        exec('pgrep -x cmux', (error: any) => {
+          if (error) {
+            console.log('[cmux] not running, launching...');
+            exec('open -a cmux');
+            let attempts = 0;
+            const waitForCmux = () => {
+              attempts++;
+              exec(`${CMUX_CLI} tree 2>/dev/null`, { timeout: 2000 }, (err: any) => {
+                if (!err) {
+                  console.log(`[cmux] ready after ${attempts * 500}ms`);
+                  launchInCmux();
+                } else if (attempts < 10) {
+                  setTimeout(waitForCmux, 500);
+                } else {
+                  console.error('[cmux] timed out waiting for cmux');
+                  reject(new Error('cmux did not start'));
+                }
+              });
+            };
+            setTimeout(waitForCmux, 500);
+          } else {
+            launchInCmux();
           }
-        );
-      };
-      exec('pgrep -x cmux', (error: any) => {
-        if (error) {
-          console.log('[cmux] not running, launching...');
-          exec('open -a cmux');
-          let attempts = 0;
-          const waitForCmux = () => {
-            attempts++;
-            exec(`${CMUX_CLI} tree 2>/dev/null`, { timeout: 2000 }, (err: any) => {
-              if (!err) {
-                console.log(`[cmux] ready after ${attempts * 500}ms`);
-                launchInCmux();
-              } else if (attempts < 10) {
-                setTimeout(waitForCmux, 500);
-              } else {
-                console.error('[cmux] timed out waiting for cmux');
-              }
-            });
-          };
-          setTimeout(waitForCmux, 500);
-        } else {
-          launchInCmux();
-        }
+        });
       });
-      break;
     }
     case 'iterm2':
     default: {
-      const tmpScript = '/tmp/codev-iterm-launch.scpt';
+      const tmpScript = launchScriptPath('iterm-launch');
       const escapedCommand = fullCommand.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const launchScript = terminalMode === 'window'
         ? `set wasRunning to (do shell script "pgrep -x iTerm2 >/dev/null 2>&1 && echo 1 || echo 0")
@@ -1436,12 +1596,7 @@ end tell`
     end tell
   end tell
 end tell`;
-      fs.writeFileSync(tmpScript, launchScript);
-      exec(`osascript ${tmpScript}`, (error: any) => {
-        if (error) console.error('[runCommandInTerminal] iTerm2 error:', error.message);
-        try { fs.unlinkSync(tmpScript); } catch {}
-      });
-      break;
+      return runOsascript(tmpScript, launchScript, 'iTerm2');
     }
   }
 };
@@ -1515,7 +1670,9 @@ export const launchNewClaudeSession = (
   // Pass claudeCmd as the 2nd arg too — Ghostty/cmux build their launch
   // scripts from it (iTerm2/Terminal.app use fullCommand), so the account
   // env prefix must be present in both.
-  runCommandInTerminal(`cd "${projectPath}" && ${claudeCmd}`, claudeCmd, projectPath, terminalApp, terminalMode);
+  runCommandInTerminal(`cd "${projectPath}" && ${claudeCmd}`, claudeCmd, projectPath, terminalApp, terminalMode).catch(
+    (err) => console.error('[launchNewClaudeSession] launch failed:', err),
+  );
 };
 
 /**
@@ -1636,14 +1793,15 @@ export const openSessionInCodeV = (sessionId: string): void => {
   }
 };
 
-export const openSessionInITerm2 = (
+export const openSessionInITerm2 = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
   activePid?: number,
   terminalMode: string = 'tab',
   customTitle?: string,
-): void => {
+  accountLabel?: string,
+): Promise<void> => {
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
@@ -1698,8 +1856,8 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId);
-    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
   }
 };
 
@@ -1734,10 +1892,11 @@ export interface SessionEnrichment {
   recaps: Map<string, RecapInfo>;
 }
 
-// Cache for branches, PR links and recaps
+// Cache for branches, PR links, recaps and mined PR references
 let cachedBranches: Map<string, string> | null = null;
 let cachedPRLinks: Map<string, PRLinkInfo> | null = null;
 let cachedRecaps: Map<string, RecapInfo> | null = null;
+let cachedPRRefs: Map<string, string[]> | null = null;
 
 // Per-file enrichment scan state: a transcript unchanged since its last scan
 // (same mtime+size) is never re-grepped — the stat check IS the freshness
@@ -1745,9 +1904,129 @@ let cachedRecaps: Map<string, RecapInfo> | null = null;
 // longer than the TTL itself: the just-written cache was already stale, so
 // every popup interaction kicked off another multi-second full rescan.
 const enrichedFileState = new Map<string, { mtimeMs: number; size: number }>();
+// How far the PR-reference miner has read each transcript (whole lines).
+// Transcripts are append-only, so the next pass reads only what was added.
+const prRefBytes = new Map<string, number>();
 // Serialize scans: concurrent callers queue up and then mostly hit the
 // accumulated cache (correct even when they pass different session sets).
 let enrichmentQueue: Promise<void> = Promise.resolve();
+
+// --- Persisted cache (issue #134) ---
+// Everything above is written to ~/.config/codev/enrichment-cache.json a few
+// seconds after a scan changed it, and read back on the first scan of the
+// next run, so a launch starts warm: the stat check alone decides what to
+// re-read. A cache, not a store — a bad file is a cold start, never a refusal.
+let enrichmentLoadedFromDisk = false;
+let enrichmentCacheDirty = false;
+let enrichmentSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const ENRICHMENT_SAVE_DEBOUNCE_MS = 3000;
+
+const currentEnrichmentState = (): EnrichmentState => ({
+  fileState: enrichedFileState,
+  titles: (cachedCustomTitles ??= new Map()),
+  branches: (cachedBranches ??= new Map()),
+  prLinks: (cachedPRLinks ??= new Map()),
+  recaps: (cachedRecaps ??= new Map()),
+  prRefs: (cachedPRRefs ??= new Map()),
+  prRefBytes,
+});
+
+const ensureEnrichmentLoaded = (): void => {
+  if (enrichmentLoadedFromDisk) return;
+  enrichmentLoadedFromDisk = true;
+  const t0 = Date.now();
+  const disk = readEnrichmentCacheFile(getEnrichmentCachePath());
+  const mem = currentEnrichmentState();
+  // In-memory wins: it is at least as fresh as anything on disk.
+  const fill = <K, V>(into: Map<K, V>, from: Map<K, V>) => {
+    for (const [k, v] of from) if (!into.has(k)) into.set(k, v);
+  };
+  fill(mem.fileState, disk.fileState);
+  fill(mem.titles, disk.titles);
+  fill(mem.branches, disk.branches);
+  fill(mem.prLinks, disk.prLinks);
+  fill(mem.recaps, disk.recaps);
+  fill(mem.prRefs, disk.prRefs);
+  fill(mem.prRefBytes, disk.prRefBytes);
+  if (disk.fileState.size > 0) {
+    console.log(
+      `[enrichment] cache loaded: ${disk.fileState.size} sessions in ${Date.now() - t0}ms`,
+    );
+  }
+};
+
+/** Write the cache now if anything changed since the last write. */
+export const flushEnrichmentCache = (): void => {
+  if (enrichmentSaveTimer) {
+    clearTimeout(enrichmentSaveTimer);
+    enrichmentSaveTimer = null;
+  }
+  if (!enrichmentCacheDirty) return;
+  enrichmentCacheDirty = false;
+  try {
+    // Sessions gone from history leave the cache with them.
+    const keep = new Set(
+      readClaudeSessions(Number.MAX_SAFE_INTEGER).map((s) => s.sessionId),
+    );
+    writeEnrichmentCacheFile(getEnrichmentCachePath(), currentEnrichmentState(), keep);
+  } catch (err) {
+    console.error('[enrichment] cache write failed:', err);
+  }
+};
+
+const scheduleEnrichmentSave = (): void => {
+  enrichmentCacheDirty = true;
+  if (enrichmentSaveTimer) return;
+  enrichmentSaveTimer = setTimeout(() => {
+    enrichmentSaveTimer = null;
+    flushEnrichmentCache();
+  }, ENRICHMENT_SAVE_DEBOUNCE_MS);
+};
+
+// Mine PR references from `[from, size)` of a transcript, whole lines only,
+// in 4MB chunks with a yield between them so a 65MB cold pass never holds
+// the event loop for long. Returns the offset just past the last complete
+// line, which is where the next pass starts. Byte-level carry, so a
+// multi-byte character split by a chunk boundary is neither mangled nor
+// counted twice.
+const PR_MINE_CHUNK_BYTES = 4 * 1024 * 1024;
+const minePrRefsFromFile = async (
+  filePath: string,
+  from: number,
+  size: number,
+  seen: Set<string>,
+): Promise<{ refs: string[]; scannedTo: number } | null> => {
+  let fh: fs.promises.FileHandle | null = null;
+  try {
+    fh = await fs.promises.open(filePath, 'r');
+    const refs: string[] = [];
+    let pos = from;
+    let carry: Buffer = Buffer.alloc(0);
+    while (pos < size) {
+      const len = Math.min(PR_MINE_CHUNK_BYTES, size - pos);
+      const buf = Buffer.alloc(len);
+      // Cast: this @types/node version mistypes Buffer vs ArrayBufferView.
+      const { bytesRead } = await fh.read(buf as unknown as Uint8Array, 0, len, pos);
+      if (bytesRead === 0) break;
+      pos += bytesRead;
+      // Casts: same @types/node Buffer-vs-Uint8Array mismatch as above.
+      const chunk = Buffer.concat([carry, buf.subarray(0, bytesRead)] as unknown as Uint8Array[]);
+      const lastNl = chunk.lastIndexOf(0x0a);
+      if (lastNl === -1) {
+        carry = chunk;
+        continue;
+      }
+      refs.push(...minePrRefs(chunk.toString('utf-8', 0, lastNl + 1), seen));
+      carry = Buffer.from(chunk.subarray(lastNl + 1) as unknown as Uint8Array);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    return { refs, scannedTo: pos - carry.length };
+  } catch {
+    return null;
+  } finally {
+    await fh?.close().catch(() => {});
+  }
+};
 
 // Run per-session async work in bounded batches. ~100 sessions × several
 // exec() greps each used to spawn hundreds of concurrent processes at once,
@@ -1788,11 +2067,13 @@ const readTailUtf8 = async (
 export const loadSessionEnrichment = async (
   sessions: ClaudeSession[],
 ): Promise<SessionEnrichment> => {
+  ensureEnrichmentLoaded();
   // Accumulator maps persist across calls; scans only fill/refresh entries.
   const titles = (cachedCustomTitles ??= new Map());
   const branches = (cachedBranches ??= new Map());
   const prLinks = (cachedPRLinks ??= new Map());
   const recaps = (cachedRecaps ??= new Map());
+  const prRefs = (cachedPRRefs ??= new Map());
 
   const { execFile } = require('child_process');
   // Shell-free (no interpolated paths anywhere near a shell). Resolves null
@@ -1819,6 +2100,7 @@ export const loadSessionEnrichment = async (
   };
 
   const scan = async () => {
+    let changed = false;
     // Re-scan only transcripts that are new or changed since their last scan.
     const toScan: {
       session: ClaudeSession;
@@ -1840,7 +2122,14 @@ export const loadSessionEnrichment = async (
         continue;
       }
       const prev = enrichedFileState.get(session.sessionId);
-      if (prev && prev.mtimeMs === stat.mtimeMs && prev.size === stat.size) {
+      // A file whose miner pass failed has state but no offset; it is
+      // re-read rather than skipped forever.
+      if (
+        prev &&
+        prev.mtimeMs === stat.mtimeMs &&
+        prev.size === stat.size &&
+        prRefBytes.has(session.sessionId)
+      ) {
         continue;
       }
       toScan.push({
@@ -1934,6 +2223,21 @@ export const loadSessionEnrichment = async (
           }
         }
 
+        // PR references the assistant mentioned (issue #140): incremental
+        // from the last offset; from the start when the file shrank (a
+        // rewritten transcript), in which case the old references go too.
+        const id = session.sessionId;
+        const prevBytes = prRefBytes.get(id) ?? 0;
+        const from = prevBytes <= size ? prevBytes : 0;
+        const known = from === 0 ? [] : (prRefs.get(id) ?? []);
+        const mined = await minePrRefsFromFile(jsonlPath, from, size, new Set(known));
+        if (mined) {
+          const all = [...known, ...mined.refs];
+          if (all.length > 0) prRefs.set(id, all);
+          else prRefs.delete(id);
+          prRefBytes.set(id, mined.scannedTo);
+        }
+
         // Mark fresh ONLY when every read succeeded — a timed-out or failed
         // pass stays unrecorded so the next call retries it.
         if (
@@ -1943,15 +2247,175 @@ export const loadSessionEnrichment = async (
           recapOutput !== null &&
           tailOutput !== null
         ) {
-          enrichedFileState.set(session.sessionId, { mtimeMs, size });
+          enrichedFileState.set(id, { mtimeMs, size });
+          changed = true;
         }
       },
     );
+    if (changed) scheduleEnrichmentSave();
   };
 
   enrichmentQueue = enrichmentQueue.then(scan, scan);
   await enrichmentQueue;
   return { titles, branches, prLinks, recaps };
+};
+
+/**
+ * One pass over EVERY session in history (issue #140, "one background full
+ * scan"), in small chunks with a pause between them so foreground calls —
+ * which share the scan queue — interleave rather than wait. With the
+ * persisted cache this is a stat pass on the second launch; the first one
+ * reads every transcript once. Runs at most once per process.
+ */
+let backgroundScanStarted = false;
+export const runBackgroundEnrichmentScan = async (
+  opts: { chunk?: number; pauseMs?: number } = {},
+): Promise<{ sessions: number; ms: number } | null> => {
+  if (backgroundScanStarted) return null;
+  backgroundScanStarted = true;
+  const chunk = opts.chunk ?? 10;
+  const pauseMs = opts.pauseMs ?? 400;
+  const t0 = Date.now();
+  const all = readClaudeSessions(Number.MAX_SAFE_INTEGER);
+  for (let i = 0; i < all.length; i += chunk) {
+    await loadSessionEnrichment(all.slice(i, i + chunk));
+    await new Promise<void>((resolve) => setTimeout(resolve, pauseMs));
+  }
+  const ms = Date.now() - t0;
+  console.log(`[enrichment] background scan: ${all.length} sessions in ${ms}ms`);
+  return { sessions: all.length, ms };
+};
+
+/**
+ * Where a session's transcript is, or null when no account has it. Tries the
+ * account history knows the session by, then the account a saved list
+ * captured, then every account — a `/branch` child is in no history yet.
+ */
+export const findTranscriptPath = (
+  sessionId: string,
+  project: string,
+  accountLabel?: string,
+): string | null => {
+  if (!/^[0-9a-f-]+$/i.test(sessionId)) return null;
+  const encodedProject = project.replace(/[^a-zA-Z0-9-]/g, '-');
+  const known = readClaudeSessions(Number.MAX_SAFE_INTEGER).find(
+    (s) => s.sessionId === sessionId,
+  );
+  const dirs = new Set(
+    [
+      known?.accountDir,
+      accountLabel ? getAccountByLabel(accountLabel).dir : undefined,
+      ...getScannableAccounts().map((a) => a.dir),
+    ].filter((d): d is string => !!d),
+  );
+  for (const dir of dirs) {
+    const p = path.join(getProjectsDir(dir), encodedProject, `${sessionId}.jsonl`);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+};
+
+export interface OpenListMember {
+  sessionId: string;
+  project: string;
+  accountLabel?: string;
+  title?: string;
+}
+
+export interface OpenListMembersResult {
+  opened: string[];
+  skipped: { sessionId: string; reason: string }[];
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// Sessions a list-open is launching right now. A second invocation that
+// overlaps the first (the renderer disables the button, but the IPC does not
+// know that) must not launch the same session again before it registers.
+const membersInFlight = new Set<string>();
+
+const runningSessionIds = (): Set<string> => {
+  const running = new Set<string>();
+  for (const reg of readSessionRegistrations()) {
+    try {
+      process.kill(reg.pid, 0);
+      running.add(reg.sessionId);
+    } catch {
+      // dead pid: a stale registration, not a running session
+    }
+  }
+  return running;
+};
+
+/**
+ * Resume the members of a saved list that are not running (issue #145:
+ * after a reboot, after closing everything to reclaim memory, or to move the
+ * set to another terminal app). The renderer already dropped the running
+ * ones by the ps join; the registrations are checked again here because the
+ * renderer's report can be seconds old. Launches are staggered — twenty
+ * osascripts in one tick is rough on the terminal app — and a member whose
+ * project folder or transcript is gone is reported, not launched (`cd` would
+ * fail and `claude --resume` would then look in the wrong project).
+ */
+export const openSessionListMembers = async (
+  members: OpenListMember[],
+  terminalApp: string,
+  terminalMode: string,
+  staggerMs = 700,
+): Promise<OpenListMembersResult> => {
+  const result: OpenListMembersResult = { opened: [], skipped: [] };
+  for (const m of members) {
+    const id = m.sessionId;
+    const skip = (reason: string) => result.skipped.push({ sessionId: id, reason });
+    // Re-read per launch: the previous launch may have registered by now.
+    if (runningSessionIds().has(id) || membersInFlight.has(id)) {
+      skip('already running');
+      continue;
+    }
+    if (!m.project || !fs.existsSync(m.project)) {
+      skip('project folder missing');
+      continue;
+    }
+    if (!isSafeLaunchPath(m.project)) {
+      skip('unsafe project path');
+      continue;
+    }
+    if (m.accountLabel && !findAccountByLabel(m.accountLabel)) {
+      skip(`unknown account "${m.accountLabel}"`);
+      continue;
+    }
+    if (!findTranscriptPath(id, m.project, m.accountLabel)) {
+      skip('transcript missing');
+      continue;
+    }
+    // Claimed BEFORE the stagger wait: an overlapping call arriving during
+    // the wait must see this session as taken.
+    membersInFlight.add(id);
+    try {
+      if (result.opened.length > 0) await sleep(staggerMs);
+      await openSession(
+        id,
+        m.project,
+        false,
+        undefined,
+        terminalApp,
+        terminalMode,
+        m.title,
+        m.accountLabel,
+      );
+      result.opened.push(id);
+      // Long enough for the new process to write its registration.
+      setTimeout(() => membersInFlight.delete(id), 10000);
+    } catch (err) {
+      // Reported, not swallowed: "opened 5" must not hide a sixth that threw
+      // — and the claim is released at once, so a retry is not told "already
+      // running" for a session that never started.
+      console.error('[open-session-list-members] launch failed:', id, err);
+      skip('launch failed');
+      membersInFlight.delete(id);
+    }
+  }
+  return result;
 };
 
 /**
@@ -2012,13 +2476,14 @@ export const loadLastAssistantResponses = async (
  * Open a Claude Code session in Ghostty.
  * Full AppleScript support: working directory matching, focus, new tab with command.
  */
-export const openSessionInGhostty = (
+export const openSessionInGhostty = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
   terminalMode: string = 'tab',
   customTitle?: string,
-): void => {
+  accountLabel?: string,
+): Promise<void> => {
   const { exec } = require('child_process');
 
   if (isActive) {
@@ -2061,13 +2526,13 @@ end tell`;
       const result = (stdout || '').trim();
       console.log('[ghostty] switch result:', result);
       if (result === 'not found') {
-        copyResumeCommand(sessionId, projectPath);
+        copyResumeCommand(sessionId, projectPath, accountLabel);
       }
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId);
-    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
   }
 };
 
@@ -2076,14 +2541,15 @@ end tell`;
  * Similar to iTerm2 but simpler structure: window → tab (no session layer).
  * TTY matching works via `tty of tab`. Uses `do script` for command execution.
  */
-export const openSessionInTerminalApp = (
+export const openSessionInTerminalApp = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
   activePid?: number,
   terminalMode: string = 'tab',
   customTitle?: string,
-): void => {
+  accountLabel?: string,
+): Promise<void> => {
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
@@ -2128,8 +2594,8 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId);
-    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
   }
 };
 
@@ -2140,15 +2606,16 @@ end tell`;
  */
 const CMUX_CLI = '/Applications/cmux.app/Contents/Resources/bin/cmux';
 
-export const openSessionInCmux = (
+export const openSessionInCmux = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
   activePid?: number,
   customTitle?: string,
-): void => {
+  accountLabel?: string,
+): Promise<void> => {
   const { exec } = require('child_process');
-  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel)}`;
 
   console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid, customTitle });
   if (isActive) {
@@ -2178,7 +2645,7 @@ export const openSessionInCmux = (
       // Single tree --all call for title matching, project name fallback, and workspace ID extraction.
       const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
       if (!treeOutput) {
-        copyResumeCommand(sessionId, projectPath);
+        copyResumeCommand(sessionId, projectPath, accountLabel);
         exec('osascript -e \'tell application "cmux" to activate\'');
         return;
       }
@@ -2273,16 +2740,20 @@ export const openSessionInCmux = (
       exec('osascript -e \'tell application "cmux" to activate\'');
     })();
   } else {
-    const resumeCmd = buildResumeCommand(sessionId);
-    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
   }
 };
 
 /**
  * Copy resume command to clipboard (fallback for unsupported terminals)
  */
-export const copyResumeCommand = (sessionId: string, projectPath: string): string => {
-  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId)}`;
+export const copyResumeCommand = (
+  sessionId: string,
+  projectPath: string,
+  accountLabel?: string,
+): string => {
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel)}`;
   const { execFileSync } = require('child_process');
   execFileSync('pbcopy', { input: command });
   return command;

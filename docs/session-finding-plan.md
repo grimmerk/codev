@@ -280,6 +280,55 @@ in the PR.
 Free follow-on: the same parser gives the §6 `B4` filters (`is:pinned`, `has:pr`, `pr:1598`,
 `project:`, `branch:`, `after:`).
 
+**Shipped (2026-09-05, the PR after #147) — and the shape is slightly different from the
+sketch above.** `session-search.ts` now holds `parseQuery` (tokens → terms, quotes honoured) and
+`compileQuery` (terms → ONE matcher), and both search paths run that matcher over a
+`QueryTarget` describing what each side knows about a session. The two callers differ only in
+what they can put on the target: the main side has every prompt, the enrichment caches and the
+mined PR references, and drops `is:` (the `ps` join and the pin store live in the renderer); the
+renderer has first/last prompt, enrichment, a saved-list member's captured fields, and `is:`,
+and re-applies only `is:` to what the main side sends back. A term aimed at a field the target
+does not carry simply fails, so "what can this side judge" is decided by what it compiles, never
+by the matcher forgiving.
+
+Three things the sketch did not have:
+
+- **The assistant's replies are mined for PR references** (`enrichment-cache.ts`, `minePrRefs`):
+  text blocks and tool-call inputs of assistant records only — never tool output, so a session
+  that merely ran `gh pr list` did not "work on" twenty PRs. Measured on the reference machine:
+  91 transcripts / 739MB mined in 2.0s cold (largest file, 65MB, in 157ms), 3,889 references,
+  65 sessions with at least one. It runs **in process over whole lines**, not through grep: a
+  fixed-string grep on the 65MB file takes 0.03s, `grep -oE` with the reference alternation
+  takes 4.0s, and reading lines lets the miner skip the ~70% of bytes that are not assistant
+  records. Because a transcript is append-only the miner remembers the byte it stopped at, so the
+  steady state reads only what was appended. **The record layout is parsed, not pattern-matched**:
+  an assistant record carries `message` *before* its top-level `type`, so "the first `"type":"`
+  on the line is the record's" is false — an earlier version keyed on that and mined nothing from
+  91 real transcripts while its hand-made fixture passed. The fixture is now copied from a real
+  record.
+- **The enrichment cache is persisted** (`~/.config/codev/enrichment-cache.json`, issue #134):
+  mtime+size per transcript, title / branch / PR badge / recap, the mined references and the
+  miner's offset. Written a few seconds after a scan changed something and flushed on quit; a bad
+  file is a cold start, never a refusal — it is a cache, not a store. **One background pass over
+  every session in history** runs 20s after launch in chunks of 10 with a pause between them
+  (foreground scans share the queue and interleave), so `title:` / `has:pr` / `#N` see every
+  session, not just the loaded window; on the second launch that pass is stat-only.
+- **Three levels of strictness, and the first live test set them.** The sketch said a bare
+  `#147` in the target should match any query, "because a bare number cannot say which repo it
+  meant". In practice a bare `pr:151` listed **eight sessions**, and `pr:grimmerk/codev#151`
+  still listed them because the bare `#151` counted regardless. Most of those eight turned out
+  to be the miner's fault — it had no right-side boundary, so `#151e2b` (a hex colour in a
+  slide-deck session) was persisted as `#151`; the matcher had the boundary and the miner did
+  not, the one-rule-two-paths drift this file keeps warning about, and re-mining with the
+  boundary took the broad `#151` from 8 hits to 1. The strict levels stay anyway, because every
+  repo really does have its own 151. So:
+  `#147` in the query is broad (any mention, any repo); `pr:147` is strict — only a session's own
+  PR badge or a repo-qualified mention counts; a repo in the query (`owner/repo#147`, the URL,
+  `pr:owner/repo#147`) requires the same repo on qualified forms and accepts a bare `#147` only
+  when the session's own repo context — its badge URL and its qualified references
+  (`sessionRepos`) — names that repo. Delimited forms only, as promised: `#147` never hits
+  `#1475`, `#147abc`, `/pull/1470` or `15980`.
+
 ### 4.7 `/branch` creates generation chains (measured 2026-09-05)
 
 Full evidence and task breakdown: **issue #142**. Recorded here because two claims in
@@ -376,10 +425,22 @@ fallback and marks a recap `⏱` when it is more than 30 minutes older than the 
 activity: its final sentence is usually "next: …", and acting on a stale one is the failure
 mode.
 
-**Deliberately absent: "open all".** In a browser, restoring 22 tabs is cheap. Here, 22
-sessions is ~3GB of processes — the very problem the feature exists to relieve. Restore is
-per-row (the existing click-to-resume), and a whole-set restore, if it ever comes, has to
-show the projected cost first.
+**"Open all" — left out of PR #147, then added, with its cost on the button.** In a browser,
+restoring 22 tabs is cheap. Here, 22 sessions is ~3GB of processes — the very problem the
+feature exists to relieve — so #147 shipped restore as per-row only. Three real moments then
+turned out to want the whole set, and in all three the cost is one the user is choosing on
+purpose: after a reboot or a macOS update; after closing every session to reclaim memory (or to
+confirm what was using it); and when switching terminal app (close the set in one, reopen it in
+the other). So the list header carries `▶ open N` (#144 decision 14), under four constraints
+that make it deliberate rather than blind: it opens only members that are **not running** by
+the `ps` join (idempotent — pressing it twice opens nothing new); it asks once, with the
+projected cost on the button (`open 12 · ~1.7GB?`, the mean RSS of the processes currently
+running, or 145MB each when nothing is); it launches one session every 700ms rather than all in
+one tick (each launch is an osascript, and the temp script files are now unique per launch — a
+shared name would let one callback delete the script the next osascript was about to read); and
+a member whose project folder or transcript is gone is reported, not launched (`cd` would fail
+and `claude --resume` would then look in the wrong project). The embedded CodeV terminal holds
+one session, so the button explains itself instead of opening twelve there.
 
 **Drift across `/branch` is shared with pins.** A list's members are keyed by sessionId
 (each carrying the captured title, branch, pin state, messages and recap), so §4.7 applies
@@ -484,7 +545,7 @@ no released build produces, and a real format change is a versioned migration's 
 | Item | Content | Note |
 |---|---|---|
 | D3 `/pin` | Custom slash command: leverages Claude Code's slash **autocomplete** (answers the user's dislike of `!` having none); the command runs `codev pin`; sessionId from the **`CLAUDE_CODE_SESSION_ID` env var** ([FACT], §7); accepts one LLM turn (user OK'd). Args possible: `/pin as "…"` | UI pin remains primary |
-| B4 filters | `project:` `branch:` `account:` `has:pr` `msgs:>10` `after:` `is:pinned` chips | **Promoted** (2026-08-20): the §4.6 term parser does most of the work, and `is:pinned` overlaps the pinned-only scope |
+| B4 filters | `project:` `branch:` `account:` `has:pr` `msgs:>10` `after:` `is:pinned` chips | **Shipped 2026-09-05 as typed operators, not chips** (§4.6): `title:` `branch:` `msg:` `project:` `account:` `recap:` `has:` `is:live|pinned` `after:` `before:` `pr:`, with a `?` cheat-sheet chip. `msgs:>10` was left out — nothing asked for it yet |
 | D4 "Frequent" list | A frecency scope (`distinct active days × log(1+prompts) × exp(-age/14d)`) alongside the pinned scope. **Derive it from `history.jsonl`, which is already loaded** — no click instrumentation, so no weeks-long cold start | **Measured 2026-08-20, and the numbers argue for modest expectations**: only 3 of the frecency top-10 are outside the recency top-20, so most of it is a re-ordering of rows you can already see. It does **not** subsume pins — of the user's 7 real pins, 3 rank in the frecency top-10 but three others rank #26/#63/#72, because a pin is often exactly the *low*-activity session you refuse to lose. The two intents are complementary: frecency = "I keep coming back", pin = "I decided this matters" |
 | A4-lite | "Generate title" button in the preview (haiku, writes a custom title) | No batch auto-summarizing |
 | C3 chain collapse | **Live, not defunct — this entry was wrong.** It said generation chains do not exist because normal resumes reuse the sessionId. `/branch` also creates one, and it is a daily action: **21 of 88 transcripts on disk (23.9%) carry `forkedFrom`** (measured 2026-09-05, §4.7). | Tracked in issue #142 |

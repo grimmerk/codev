@@ -31,6 +31,11 @@ import {
   launchNewClaudeSession,
   scanClosedVSCodeSessions,
   getSessionsByIds,
+  findAccountByLabel,
+  flushEnrichmentCache,
+  isSafeLaunchPath,
+  openSessionListMembers,
+  runBackgroundEnrichmentScan,
 } from './claude-session-utility';
 import {
   mutateSessionMarks,
@@ -1336,6 +1341,15 @@ const trayToggleEvtHandler = async () => {
     console.log('when ready');
   }
 
+  // One background pass over every session (issue #140), well after the
+  // window's own first scan so it never competes with the first paint. With
+  // the persisted cache (issue #134) a second launch's pass is stat-only.
+  setTimeout(() => {
+    runBackgroundEnrichmentScan().catch((err) => {
+      console.error('[enrichment] background scan failed:', err);
+    });
+  }, 20000);
+
   // Set callback for CodeV embedded terminal sessions
   setCodevTerminalCallback((_sessionId: string) => {
     showSwitcherWindow();
@@ -2022,6 +2036,9 @@ app.once('before-quit', () => {
   if (serverProcess) {
     serverProcess.kill();
   }
+  // The enrichment cache is written a few seconds after a scan; do not lose
+  // the last scan of the run to a quit that lands inside that window.
+  flushEnrichmentCache();
 });
 
 ipcMain.handle('get-app-version', () => {
@@ -2600,11 +2617,78 @@ ipcMain.handle('scan-closed-vscode-sessions', async (_event, activeSessionIds: s
   return scanClosedVSCodeSessions(new Set(activeSessionIds), vsCodeIndex);
 });
 
-ipcMain.on('open-claude-session', async (_event, sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) => {
-  const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
-  const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
-  openSession(sessionId, projectPath, isActive, activePid, terminalApp, terminalMode, customTitle);
-});
+ipcMain.on(
+  'open-claude-session',
+  async (
+    _event,
+    sessionId: string,
+    projectPath: string,
+    isActive: boolean,
+    activePid?: number,
+    customTitle?: string,
+    accountLabel?: string,
+  ) => {
+    // The path is embedded in shell and AppleScript strings by every
+    // launcher; refuse one that could end either literal (see isSafeLaunchPath).
+    if (!isSafeLaunchPath(projectPath)) {
+      console.warn('[open-claude-session] refusing unsafe project path:', projectPath);
+      return;
+    }
+    // Switching to a running session never needs the path (iTerm2 matches by
+    // tty); a resume does — `cd ""` would start the session in the wrong place.
+    if (!isActive && !projectPath) {
+      console.warn('[open-claude-session] refusing to resume without a project path:', sessionId);
+      return;
+    }
+    const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
+    const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+    // A label no account carries is dropped, not trusted: history decides the
+    // account for any session it knows, and the anchor is the documented
+    // fallback for one it does not.
+    const label =
+      typeof accountLabel === 'string' && findAccountByLabel(accountLabel)
+        ? accountLabel
+        : undefined;
+    openSession(
+      sessionId,
+      projectPath,
+      isActive,
+      activePid,
+      terminalApp,
+      terminalMode,
+      customTitle,
+      label,
+    ).catch((err) => {
+      console.error('[open-claude-session] launch failed:', err);
+    });
+  },
+);
+
+// Resume every member of a saved list that is not running (issue #145).
+ipcMain.handle(
+  'open-session-list-members',
+  async (
+    _event,
+    members: { sessionId: string; project: string; accountLabel?: string; title?: string }[],
+  ) => {
+    const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
+    const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+    if (terminalApp === 'codev') {
+      // The embedded terminal holds one session; "open twelve" has no meaning there.
+      return {
+        opened: [],
+        skipped: [],
+        error: 'The embedded terminal holds one session — pick a terminal app in Settings first',
+      };
+    }
+    const safe = Array.isArray(members)
+      ? members.filter(
+          (m) => m && typeof m.sessionId === 'string' && typeof m.project === 'string',
+        )
+      : [];
+    return openSessionListMembers(safe, terminalApp, terminalMode);
+  },
+);
 
 ipcMain.on('launch-new-claude-session', async (_event, projectPath: string, accountLabel?: string) => {
   if (!existsSync(projectPath)) {

@@ -109,8 +109,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
   detectTerminalApps: (pidMap: Record<string, number>, entrypointMap?: Record<string, string>) => ipcRenderer.invoke('detect-terminal-apps', pidMap, entrypointMap),
   scanClosedVSCodeSessions: (activeSessionIds: string[]) => ipcRenderer.invoke('scan-closed-vscode-sessions', activeSessionIds),
   refreshSessionPreview: (sessions: any[]) => ipcRenderer.invoke('refresh-session-preview', sessions),
-  openClaudeSession: (sessionId: string, projectPath: string, isActive: boolean, activePid?: number, customTitle?: string) =>
-    ipcRenderer.send('open-claude-session', sessionId, projectPath, isActive, activePid, customTitle),
+  openClaudeSession: (
+    sessionId: string,
+    projectPath: string,
+    isActive: boolean,
+    activePid?: number,
+    customTitle?: string,
+    accountLabel?: string,
+  ) =>
+    ipcRenderer.send(
+      'open-claude-session',
+      sessionId,
+      projectPath,
+      isActive,
+      activePid,
+      customTitle,
+      accountLabel,
+    ),
+  openSessionListMembers: (
+    members: {
+      sessionId: string;
+      project: string;
+      accountLabel?: string;
+      title?: string;
+    }[],
+  ) => ipcRenderer.invoke('open-session-list-members', members),
   launchNewClaudeSession: (projectPath: string, accountLabel?: string) =>
     ipcRenderer.send('launch-new-claude-session', projectPath, accountLabel),
   launchNewClaudeSessionInCodev: (projectPath: string) =>

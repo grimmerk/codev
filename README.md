@@ -22,7 +22,46 @@ Press `⌃+⌘+R` or click the menu bar icon to launch the Quick Switcher. Searc
 
 CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode. Live status dots show session state: working (orange pulse), idle (green), needs attention (orange blink).
 
-Search covers **every session and every user prompt you ever typed** (not just the ~100 most recent sessions shown in the list) plus titles, branches, PR links, last AI replies, and the **session id** (a prefix of four or more hex characters — type the id your terminal status line shows to find that exact session, then `⌘D` to pin it; the row shows an `id 4ed7505a` marker since the id is not otherwise on screen). When a match sits in the middle of a conversation, the row shows an amber `match #N` snippet with the surrounding context, and every capped line — title, first/last message, branch, last reply — **moves its window to the match** so you can see *why* the row is there. Long titles are shortened **from the middle** (`head … tail`), so a title written as an `A -> B > C` chain keeps its newest step; hover for the full title. Closed one-shot sessions (≤2 messages, untitled, no PR) fold into an expandable "minor sessions" row to keep the list scannable.
+Search covers **every session and every user prompt you ever typed** (not just the ~100 most recent sessions shown in the list) plus titles, branches, PR links, last AI replies, the recap line, and the **session id** (a prefix of four or more hex characters — type the id your terminal status line shows to find that exact session, then `⌘D` to pin it; the row shows an `id 4ed7505a` marker since the id is not otherwise on screen). When a match sits in the middle of a conversation, the row shows an amber `match #N` snippet with the surrounding context, and every capped line — title, first/last message, branch, last reply — **moves its window to the match** so you can see *why* the row is there. Long titles are shortened **from the middle** (`head … tail`), so a title written as an `A -> B > C` chain keeps its newest step; hover for the full title. Closed one-shot sessions (≤2 messages, untitled, no PR) fold into an expandable "minor sessions" row to keep the list scannable.
+
+Bare words search everything; **operators aim the query** (the `?` chip beside the search box shows this list):
+
+| Term | Matches |
+|---|---|
+| `title:x` `branch:x` `msg:x` `project:x` `account:x` `recap:x` | only that field (`msg:` = your prompts); `"two words"` keeps a phrase together, also after an operator |
+| `has:pr` `has:title` `has:branch` `has:recap` | sessions that carry the thing |
+| `is:live` `is:pinned` | sessions with a running process (by the `ps` join below) / pinned ones |
+| `after:7d` `after:2026-09-01` `after:today` `before:…` | by the session's last activity (`Nh` `Nd` `Nw`, a date, `today`, `yesterday`) |
+| `#137` `pr:137` `owner/repo#137` `owner/repo/pull/137` `https://github.com/owner/repo/pull/137` | **a pull request in any spelling** — the query form and the form in the text no longer have to agree (measured: 80.6% of PR mentions in prompts used only one form). Three levels of strictness; see *Finding a pull request* below |
+
+Every term must hold. An operator with an unreadable value (`after:soon`) is reported under the box and ignored rather than silently matching nothing.
+
+#### Finding a pull request
+
+A PR can be found from two kinds of evidence, both indexed:
+
+- **(a) Claude Code's own record.** When a PR is created inside a session, Claude Code writes a `pr-link` record into that session's transcript — `{"type":"pr-link","prNumber":137,"prUrl":"https://github.com/grimmerk/codev/pull/137","prRepository":"grimmerk/codev"}` — and that is the `PR #137` badge on the row. Only a session that actually opened the PR has one (39 of 91 transcripts on the reference machine).
+- **(b) Mentions in the conversation.** The URL, `owner/repo#137` or a bare `#137` in **your prompts**, and the same forms in **the assistant's replies and the commands it ran**, mined from the transcript (never from tool output, so a session that ran `gh pr list` did not "work on" twenty PRs). So "the PR you opened for me" is findable by number even when you never typed it.
+
+A **bare mention** is a `#137` with nothing around it saying which repo it belongs to — "take a look at #137", or `Fixes #137` in a commit message. A **repo-qualified mention** is `owner/repo#137` or the URL; the badge counts as one too.
+
+The query form decides how much evidence is required:
+
+| What the session contains | `#137` | `pr:137` | `grimmerk/codev#137`, the URL, or `pr:` + either |
+|---|---|---|---|
+| The badge: this session opened codev PR #137 | ✓ | ✓ | ✓ |
+| You pasted `https://github.com/grimmerk/codev/pull/137` | ✓ | ✓ | ✓ |
+| The assistant wrote `grimmerk/codev#137` | ✓ | ✓ | ✓ |
+| A codev session where you typed "how is #137 going" — no badge, no URL anywhere | ✓ | ✗ | ✗ — nothing in the session proves which repo that 137 is; use `project:codev #137` |
+| A codev session whose badge is **PR #151**, and you typed "also check #137" | ✓ | ✗ (137 is neither the badge nor repo-qualified) | ✓ (the badge proves the session's repo is grimmerk/codev, so its bare #137 counts) |
+| A fred-service session where the assistant wrote `Fixes #137` | ✓ | ✗ | ✗ |
+| The assistant pasted `https://github.com/firefliesai/fred-service/pull/137` | ✓ | ✓ (any repo, as long as the mention names one) | ✗ |
+| Only `#137abc`, or the hex colour `#137e2b` | ✗ | ✗ | ✗ |
+| Only the paste marker `[Image #137]` | ✗ | ✗ | ✗ |
+
+In words: `#137` accepts any mention; `pr:137` requires that *someone said which repo's 137 it is* (badge, URL or `owner/repo#137`), in any repo; a repo in the query requires the same repo on qualified mentions and accepts a bare `#137` only in sessions whose own badge or references prove they belong to that repo. Never a bare number: `#137` does not hit `1375`, `#1375`, `#137abc` or `notgithub.com/…/pull/137`, and a leading zero (`#0137`) is not a reference.
+
+Practical rule: to find *the codev PR 137*, paste the URL or type `grimmerk/codev#137`; if that session never saw a URL and Claude did not open the PR there, use `project:codev #137`.
 
 **Pin** the sessions you keep coming back to (hover 📌 on a row, or `⌘D` on the selected row): they **move into** a **📌 Pinned** zone at the top, ordered by recency like the rest of the list — works even for old sessions found via deep search. **Hide** one-offs you never want in the main flow (hover ⊘, or `⇧⌘D`): they move into the minor-sessions fold, stay searchable, and can be unhidden from inside the fold (they carry a persistent ⊘ marker there). Pins and hides live in `~/.config/codev/session-marks.json`, shared across accounts.
 
@@ -45,7 +84,7 @@ Two chips beside the search box, on the [Session Buddy](https://sessionbuddy.com
 | `save list…` | Appears whenever the list is scoped (`● live`, `only`, or a search): **saves exactly what is on screen as a named list**. The default name is today's `MMDD`, then `MMDD-2`, `MMDD-3` — a label, not an identity. |
 | `🗂 N` | Shows the saved lists. Click one to view its members **in the order they were captured** and resume any of them; `✎` renames, `✕` (then `delete?`) deletes. |
 
-A saved member stores what you recognise a session by — title, branch, pin state at capture, the last messages, and the **recap** line Claude Code writes into the transcript (the `※ recap:` "where we are, what's next" line), which replaces the last-reply line on the member's row; a recap much older than the session's last activity is marked `⏱`, since its "next step" may already be done. A member whose transcript is gone still reads as the session it was. Opening a session from a list or from the live scope **leaves you in that scope** when you come back (only the search box is cleared), so you can work through a set one session at a time. There is deliberately no "open all": 22 sessions is a few GB of processes, which is the very thing a saved list exists to relieve. Lists live in `~/.config/codev/session-lists.json`; a file that cannot be trusted as written is reported at load, never rewritten.
+A saved member stores what you recognise a session by — title, branch, pin state at capture, the last messages, and the **recap** line Claude Code writes into the transcript (the `※ recap:` "where we are, what's next" line), which replaces the last-reply line on the member's row; a recap much older than the session's last activity is marked `⏱`, since its "next step" may already be done. A member whose transcript is gone still reads as the session it was. Opening a session from a list or from the live scope **leaves you in that scope** when you come back (only the search box is cleared), so you can work through a set one session at a time. A list's header also carries **`▶ open N`** — resume the N members that are **not** running, for the moments that call for the whole set: after a reboot or a macOS update, after closing everything to reclaim memory, or to move the set to another terminal app (change the terminal in Settings, then press it). It asks once, showing the projected cost (`open 12 · ~1.7GB?`, from the mean size of the processes currently running), opens only what is not already running (so pressing it twice opens nothing new), launches one session every 0.7s rather than all at once, and reports members it skipped because their project folder or transcript is gone. Lists live in `~/.config/codev/session-lists.json`; a file that cannot be trusted as written is reported at load, never rewritten.
 
 **Simple rule**: when running multiple sessions in the same project directory at the same time, give each running session a name. Closed sessions don't need names — they won't cause issues.
 
