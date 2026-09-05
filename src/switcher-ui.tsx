@@ -183,11 +183,12 @@ const LIST_ROW_STYLE = {
 // it is the row's first Tab stop) and the rename / delete controls beside it.
 // Nothing interactive sits inside a button — interactive descendants of a
 // button are not reliably exposed by assistive tech.
+// The wrapper carries NO gap or padding of its own: every pixel of the row
+// belongs to the opener or to a control, so there is no dead area to click.
+// (It still delegates a direct click, should one ever land on it.)
 const LIST_WRAPPER_STYLE = {
   display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  paddingRight: '10px',
+  alignItems: 'stretch',
   margin: '1px 0',
   borderRadius: '3px',
   fontSize: '12px',
@@ -200,9 +201,19 @@ const LIST_OPENER_STYLE = {
   gap: '8px',
   flex: 1,
   minWidth: 0,
-  padding: '4px 10px 4px 24px',
+  padding: '4px 8px 4px 24px',
   cursor: 'pointer',
   outlineOffset: '-2px',
+} as const;
+
+// Each control pads itself; the last one carries the row's right edge.
+const LIST_CONTROL_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  padding: '4px 4px',
+  cursor: 'pointer',
+  fontSize: '11px',
+  flexShrink: 0,
 } as const;
 
 // Per-row process facts in the live scope: memory, uptime, terminal. Muted —
@@ -1910,11 +1921,12 @@ function SwitcherApp() {
           // Drop the stale filtered list immediately so the empty input and the
           // visible list agree before fetchClaudeSessions() resolves.
           setSessions(allSessionsRef.current);
-          // A scope is a way of finding one session; once it is opened, the
-          // next show starts from the full list, like the search does.
-          setViewingListId(null);
-          liveOnlyRef.current = false;
-          setLiveOnly(false);
+          // The search is cleared here; a scope (a saved list, the live
+          // view) deliberately is NOT. A query is a way of finding one
+          // session, but a scope is a place to work through several —
+          // resume one, come back, resume the next — and being dropped out
+          // of it on every return was the complaint. Its header / chip keeps
+          // it visible, and ✕ / the chip leave it.
         }
         fetchClaudeSessions();
       }
@@ -2598,7 +2610,16 @@ function SwitcherApp() {
                 )}
                 {sessionLists.map((l) => (
                   // See LIST_WRAPPER_STYLE: opener + two controls as siblings.
-                  <div key={l.id} className="codev-list-row" style={LIST_WRAPPER_STYLE}>
+                  <div
+                    key={l.id}
+                    className="codev-list-row"
+                    style={LIST_WRAPPER_STYLE}
+                    onClick={(e) => {
+                      // Only a click that landed on the wrapper itself; the
+                      // opener and the controls handle their own.
+                      if (e.target === e.currentTarget) openList(l.id);
+                    }}
+                  >
                     <div
                       role="button"
                       tabIndex={0}
@@ -2639,7 +2660,7 @@ function SwitcherApp() {
                           openRenameListPrompt(l.id);
                         }
                       }}
-                      style={{ cursor: 'pointer', fontSize: '11px', flexShrink: 0, color: '#666' }}
+                      style={{ ...LIST_CONTROL_STYLE, color: '#666' }}
                     >
                       ✎
                     </span>
@@ -2663,9 +2684,8 @@ function SwitcherApp() {
                         }
                       }}
                       style={{
-                        cursor: 'pointer',
-                        fontSize: '11px',
-                        flexShrink: 0,
+                        ...LIST_CONTROL_STYLE,
+                        paddingRight: '10px',
                         color: confirmDeleteListId === l.id ? '#e07a5f' : '#666',
                       }}
                     >
