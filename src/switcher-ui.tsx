@@ -1167,12 +1167,20 @@ function SwitcherApp() {
     if (count === 0) return;
     setSaveListPrompt({ name: nextListName(sessionLists.map((l) => l.name)), count });
   };
+  // Closing the dialog unmounts the focused input, which drops focus to the
+  // body — arrow keys then go nowhere until a click lands on something (the
+  // document click handler is what refocuses the search box). Hand focus
+  // back explicitly, for Enter and for Esc alike.
+  const closeSaveListPrompt = () => {
+    setSaveListPrompt(null);
+    setTimeout(() => sessionSearchRef.current?.focus(), 0);
+  };
   const saveList = () => {
     if (!saveListPrompt) return;
     const members = captureDisplayedSessions();
     const name =
       saveListPrompt.name.trim() || nextListName(sessionLists.map((l) => l.name));
-    setSaveListPrompt(null);
+    closeSaveListPrompt();
     window.electronAPI
       .saveSessionList(name, members)
       .then((r) => {
@@ -3320,7 +3328,7 @@ function SwitcherApp() {
       {saveListPrompt && (
         <div
           data-settings-panel
-          onClick={() => setSaveListPrompt(null)}
+          onClick={closeSaveListPrompt}
           style={{
             position: 'fixed',
             inset: 0,
@@ -3336,7 +3344,7 @@ function SwitcherApp() {
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === 'Escape') {
-                setSaveListPrompt(null);
+                closeSaveListPrompt();
               } else if (e.key === 'Enter') {
                 e.preventDefault();
                 saveList();
