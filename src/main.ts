@@ -136,9 +136,15 @@ const showSwitcherWindow = () => {
   }
 
   if (appMode === 'menubar') {
-    // Menu bar mode: always center on screen
+    // Menu bar mode: always the default size, centred, not resizable — the
+    // window may have been created (and resized, and remembered) in normal
+    // mode, so this is enforced at every show rather than at creation.
+    window.setResizable(false);
+    window.setSize(WIN_WIDTH, WIN_HEIGHT, false);
     const position = getWindowPosition();
     window.setPosition(position.x, position.y, false);
+  } else {
+    window.setResizable(true);
   }
   if (window.isMinimized()) {
     window.restore();
@@ -484,7 +490,8 @@ const createSwitcherWindow = (initialMode?: string): BrowserWindow => {
           typeof b.y !== 'number' ||
           typeof b.width !== 'number' ||
           typeof b.height !== 'number' ||
-          window.isDestroyed()
+          window.isDestroyed() ||
+          appMode !== 'normal'
         ) {
           return;
         }
@@ -502,7 +509,9 @@ const createSwitcherWindow = (initialMode?: string): BrowserWindow => {
     const saveBounds = () => {
       if (saveBoundsTimer) clearTimeout(saveBoundsTimer);
       saveBoundsTimer = setTimeout(() => {
-        if (window.isDestroyed()) return;
+        // Checked when the timer fires, not when the handler was attached:
+        // the mode can change under a window that stays alive.
+        if (window.isDestroyed() || appMode !== 'normal') return;
         const b = window.getBounds();
         settings
           .set('switcher-window-bounds', { x: b.x, y: b.y, width: b.width, height: b.height })
