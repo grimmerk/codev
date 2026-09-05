@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isAuthoritativeRead } from './atomic-json-store';
 import {
   emptyLists,
+  inspectListsFile,
   LIST_TEXT_CAPS,
   mutateListsFile,
   normalizeLists,
@@ -198,6 +199,46 @@ describe('lists file roundtrip', () => {
     expect(r.known).toBe(false);
     // The corrupt bytes are still there — nothing was overwritten.
     expect(fs.readFileSync(file, 'utf-8')).toBe('{not json');
+  });
+
+  it('inspect reports what a non-authoritative file holds without touching it', () => {
+    // A store whose normalization is not a no-op (a message with a trailing
+    // blank the normalizer would trim): refused for writing, but the UI must
+    // be able to say what is in it rather than showing an empty list.
+    const untrusted = {
+      version: 1,
+      lists: [
+        list('a', [
+          member('s1', {
+            lastUserMessage: 'x'.repeat(LIST_TEXT_CAPS.message - 1) + ' ',
+          }),
+          member('s2'),
+        ]),
+      ],
+    };
+    const bytes = JSON.stringify(untrusted);
+    fs.writeFileSync(file, bytes);
+    expect(readListsFileResult(file).known).toBe(false);
+    expect(mutateListsFile(file, (s) => withList(s, list('b'))).known).toBe(
+      false,
+    );
+    expect(inspectListsFile(file)).toMatchObject({
+      known: false,
+      parseable: true,
+      rawLists: 1,
+      rawMembers: 2,
+      keptLists: 1,
+      keptMembers: 2,
+    });
+    expect(fs.readFileSync(file, 'utf-8')).toBe(bytes); // inspect never writes
+  });
+
+  it('inspect says when the file is not JSON at all', () => {
+    fs.writeFileSync(file, '{not json');
+    expect(inspectListsFile(file)).toMatchObject({
+      known: false,
+      parseable: false,
+    });
   });
 
   it('mutate refuses to write over a store it would have coerced', () => {

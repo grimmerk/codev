@@ -19,6 +19,7 @@
  * (`atomic-json-store.ts`). Pure helpers first, fs wrappers below.
  */
 
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -223,8 +224,86 @@ export const watchListsFile = (
 ): (() => void) =>
   watchStoreFile(filePath, readListsFileResult, onChange, onError);
 
+/**
+ * What a non-authoritative store actually holds, so the UI can say "the
+ * file has N lists / M sessions but cannot be trusted as written" instead of
+ * silently showing zero — which read as "my list was deleted" in a live
+ * test. The store is never rewritten from here: an unreadable-as-is file is
+ * for the user to fix or remove, same policy as the marks store. If a future
+ * format change ever makes old files non-authoritative, the answer is a
+ * versioned migration, not a repair button.
+ */
+export interface ListsInspection {
+  known: boolean;
+  /** False when the file is not JSON at all. */
+  parseable: boolean;
+  rawLists: number;
+  rawMembers: number;
+  keptLists: number;
+  keptMembers: number;
+}
+
+const countRaw = (raw: unknown): { lists: number; members: number } => {
+  const lists = (raw as { lists?: unknown } | null)?.lists;
+  if (!Array.isArray(lists)) return { lists: 0, members: 0 };
+  let members = 0;
+  for (const l of lists) {
+    const m = (l as { members?: unknown } | null)?.members;
+    if (Array.isArray(m)) members += m.length;
+  }
+  return { lists: lists.length, members };
+};
+
+const countKept = (
+  lists: SessionLists,
+): { lists: number; members: number } => ({
+  lists: lists.lists.length,
+  members: lists.lists.reduce((n, l) => n + l.members.length, 0),
+});
+
+export const inspectListsFile = (filePath: string): ListsInspection => {
+  const read = readListsFileResult(filePath);
+  if (read.known) {
+    const kept = countKept(read.value);
+    return {
+      known: true,
+      parseable: true,
+      rawLists: kept.lists,
+      rawMembers: kept.members,
+      keptLists: kept.lists,
+      keptMembers: kept.members,
+    };
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return {
+      known: false,
+      parseable: false,
+      rawLists: 0,
+      rawMembers: 0,
+      keptLists: 0,
+      keptMembers: 0,
+    };
+  }
+  const r = countRaw(raw);
+  const k = countKept(normalizeLists(raw));
+  return {
+    known: false,
+    parseable: true,
+    rawLists: r.lists,
+    rawMembers: r.members,
+    keptLists: k.lists,
+    keptMembers: k.members,
+  };
+};
+
 const defaultListsPath = (): string =>
   path.join(os.homedir(), '.config', 'codev', LISTS_FILENAME);
+
+export const inspectSessionLists = (): ListsInspection =>
+  inspectListsFile(defaultListsPath());
 
 export const readSessionListsResult = (): ListsRead =>
   readListsFileResult(defaultListsPath());

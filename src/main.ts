@@ -42,6 +42,7 @@ import {
   withPin,
 } from './session-marks';
 import {
+  inspectSessionLists,
   mutateSessionLists,
   normalizeList,
   readSessionListsResult,
@@ -2503,7 +2504,14 @@ ipcMain.handle('unhide-session', (_event, sessionId: string) => {
 ipcMain.handle('get-session-lists', () => {
   ensureListsWatcher();
   const read = readSessionListsResult();
-  return { ...read.value, known: read.known };
+  // An unknown read travels with what the file holds, so the UI can say why
+  // the list is empty — and that the data is still there — instead of
+  // showing nothing.
+  return {
+    ...read.value,
+    known: read.known,
+    inspection: read.known ? undefined : inspectSessionLists(),
+  };
 });
 
 ipcMain.handle('save-session-list', (_event, name: unknown, members: unknown) => {

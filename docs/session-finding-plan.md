@@ -396,11 +396,21 @@ a click *resumes* it — a second process for the same id. Saved-list members an
 placeholders now take their running state from the join as well, and viewing a list refreshes
 it. The general fix — feeding the join into active detection itself — is #142 C0 territory.
 
-**What the row shows.** Memory and uptime, not the tty: a person cannot act on a tty name,
-and the width was coming out of the title. The tty stays in the tooltip and in the data, where
-the future window-switching (#142 C0) needs it. A pure "running sessions only" browse with no
-figures at all is a different scope, and the cheap form of it is a `is:live` term in #140's
-field-scoped search, not a second chip.
+**What the row shows.** By default, nothing extra: the live scope is a "running sessions
+only" browse, and the one figure that says whether there is a problem — the total memory —
+sits beside the search box. Per-row memory and uptime are behind a `stats` toggle (off by
+default, remembered), because on most rows they track the message count closely enough to be
+noise (user verdict after two rounds); they earn their width at the "which one do I close
+first" moment, which is occasional. The tty is never on the row: a person cannot act on a tty
+name, and it stays in the tooltip and in the data, where the future window-switching (#142 C0)
+needs it.
+
+**An untrusted store is reported, not repaired.** When the lists file exists but its
+normalization is not a no-op (hand-edited, or a hypothetical future format change), the UI
+says so with what the file holds — "N lists / M sessions inside; fix or remove it" — instead
+of silently showing an empty list, which read as "my list was deleted" in a live test. It is
+never rewritten from the UI: that would be an exception to the read-authority rule for a case
+no released build produces, and a real format change is a versioned migration's job.
 
 ## 5. Batch 2 — structural investments
 

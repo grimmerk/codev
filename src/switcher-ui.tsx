@@ -626,6 +626,18 @@ function SwitcherApp() {
   // persisted — it describes this moment, not a preference.
   const [liveOnly, setLiveOnly] = useState(false);
   const liveOnlyRef = useRef(false);
+  // Per-row process figures inside the live scope. Off by default: memory
+  // and uptime track message count closely enough that on most rows they
+  // are noise (user verdict, second live test); the one number that says
+  // whether there is a problem is the total beside the search box, which
+  // stays. Persisted — a preference, not a moment.
+  const [liveStats, setLiveStats] = useState(() => {
+    try {
+      return localStorage.getItem('codev-live-stats') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [liveReport, setLiveReport] = useState<LiveReport | null>(null);
   // Saved session lists (issue #145), pushed from main via fs.watch.
   const [sessionLists, setSessionLists] = useState<SessionList[]>([]);
@@ -641,6 +653,16 @@ function SwitcherApp() {
   const [viewingListId, setViewingListId] = useState<string | null>(null);
   const [confirmDeleteListId, setConfirmDeleteListId] = useState<string | null>(null);
   const [listsNotice, setListsNotice] = useState<string | null>(null);
+  // Set when the lists store exists but cannot be trusted as written — a
+  // file an earlier build wrote, or hand-edited. Persistent until repaired
+  // or until a readable store is pushed; carries what a repair would keep.
+  const [listsStoreProblem, setListsStoreProblem] = useState<{
+    parseable: boolean;
+    rawLists: number;
+    rawMembers: number;
+    keptLists: number;
+    keptMembers: number;
+  } | null>(null);
   const [saveListPrompt, setSaveListPrompt] = useState<{ name: string; count: number } | null>(null);
   // Rows a scope needs that are outside the loaded list (list members, live
   // sessions older than the window), fetched by id — same mechanism as pins.
@@ -1040,6 +1062,13 @@ function SwitcherApp() {
   };
 
   // --- Live scope (issue #94) ---
+  useEffect(() => {
+    try {
+      localStorage.setItem('codev-live-stats', liveStats ? '1' : '0');
+    } catch {
+      // Best effort, same as the pinned toggles.
+    }
+  }, [liveStats]);
   const refreshLiveReport = () => {
     window.electronAPI
       .getLiveSessions()
@@ -1082,7 +1111,7 @@ function SwitcherApp() {
     } else if (r && !r.ok) {
       showListsNotice(
         r.error === 'lists store unreadable'
-          ? 'Not saved: ~/.config/codev/session-lists.json could not be read — fix or remove it'
+          ? 'Not saved: ~/.config/codev/session-lists.json cannot be read as-is — fix or remove it'
           : `Not saved: ${r.error || 'unknown error'}`,
       );
     }
@@ -1160,7 +1189,22 @@ function SwitcherApp() {
     window.electronAPI
       .getSessionLists()
       .then((r: any) => {
-        if (!r || listsPushSeenRef.current || r.known === false) return;
+        if (!r || listsPushSeenRef.current) return;
+        if (r.known === false) {
+          // Do not apply the (empty) value — but do say why the list is
+          // empty, with the numbers a repair would keep. Silence here read
+          // as "my list was deleted" in the second live test.
+          setListsStoreProblem(
+            r.inspection ?? {
+              parseable: false,
+              rawLists: 0,
+              rawMembers: 0,
+              keptLists: 0,
+              keptMembers: 0,
+            },
+          );
+          return;
+        }
         setSessionLists(r.lists || []);
         setListsLoaded(true);
       })
@@ -1171,6 +1215,8 @@ function SwitcherApp() {
         listsPushSeenRef.current = true;
         setSessionLists(r.lists || []);
         setListsLoaded(true);
+        // A push is an authoritative read by construction.
+        setListsStoreProblem(null);
       },
     );
     return unsubscribe;
@@ -2226,6 +2272,29 @@ function SwitcherApp() {
             >
               ● {liveCount} live{staleCount > 0 ? ` ⚠${staleCount}` : ''}
             </span>
+            {liveOnlyActive && (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-pressed={liveStats}
+                title={
+                  liveStats
+                    ? 'Hide per-row memory and uptime'
+                    : 'Show each running session’s memory and uptime (which one to close first)'
+                }
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setLiveStats((v) => !v)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setLiveStats((v) => !v);
+                  }
+                }}
+                style={liveStats ? SCOPE_CHIP_ACTIVE_STYLE : SCOPE_CHIP_STYLE}
+              >
+                stats
+              </span>
+            )}
             {(liveOnlyActive || pinnedOnlyActive || isSearchingSessions) && !listViewActive && (
               <span
                 role="button"
@@ -2291,6 +2360,17 @@ function SwitcherApp() {
                   : `${pinnedOnlyActive ? displayedSessions.length : sessions.length} sessions`}
             </span>
           </div>
+          {/* The store exists but cannot be trusted as written. Say so, with
+              what it holds — never rewrite it from here (same policy as the
+              marks store; a future format change gets a migration, not a
+              repair button). */}
+          {listsStoreProblem && (
+            <div style={{ margin: '4px 15px 0', color: '#e0b060', fontSize: '11px' }}>
+              {listsStoreProblem.parseable
+                ? `⚠ ~/.config/codev/session-lists.json cannot be trusted as written (${listsStoreProblem.rawLists} list${listsStoreProblem.rawLists === 1 ? '' : 's'} / ${listsStoreProblem.rawMembers} session${listsStoreProblem.rawMembers === 1 ? '' : 's'} inside) — fix or remove it; saved lists are unavailable until then`
+                : '⚠ ~/.config/codev/session-lists.json is not valid JSON — fix or remove it; saved lists are unavailable until then'}
+            </div>
+          )}
           {listsNotice && (
             <div style={{ margin: '4px 15px 0', color: '#e07a5f', fontSize: '11px' }}>
               ⚠ {listsNotice}
@@ -2615,17 +2695,21 @@ function SwitcherApp() {
                             (session.__live as LiveRowInfo | undefined) ||
                             liveBySession[session.sessionId];
                           if (!live) return null;
-                          // The tty is for the app (window switching, #142) and
-                          // for the tooltip; on the row it was width spent on
-                          // something a person cannot act on.
+                          // Figures only behind the `stats` toggle; the
+                          // warning below is not a figure and always shows.
+                          // The tty is for the app (window switching, #142)
+                          // and the tooltip — on the row it was width spent
+                          // on something a person cannot act on.
                           return (
                             <>
-                              <span
-                                style={LIVE_INFO_STYLE}
-                                title={`pid ${live.pid}${live.tty ? ` on ${live.tty}` : ' (no terminal)'} · resident memory · time since the process started`}
-                              >
-                                {formatMb(live.rssKb)} · {formatUptime(live.uptimeSec)}
-                              </span>
+                              {liveStats && (
+                                <span
+                                  style={LIVE_INFO_STYLE}
+                                  title={`pid ${live.pid}${live.tty ? ` on ${live.tty}` : ' (no terminal)'} · resident memory · time since the process started`}
+                                >
+                                  {formatMb(live.rssKb)} · {formatUptime(live.uptimeSec)}
+                                </span>
+                              )}
                               {!live.registered && (
                                 <span
                                   style={LIVE_WARN_STYLE}

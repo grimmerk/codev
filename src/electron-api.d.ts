@@ -177,6 +177,15 @@ interface IElectronAPI {
     lists: SessionListRecord[];
     /** False when the store exists but could not be read — the lists are unknown, not empty. */
     known: boolean;
+    /** Present when `known` is false: what the file holds, so the UI can say so. */
+    inspection?: {
+      known: boolean;
+      parseable: boolean;
+      rawLists: number;
+      rawMembers: number;
+      keptLists: number;
+      keptMembers: number;
+    };
   }>;
   saveSessionList: (
     name: string,
