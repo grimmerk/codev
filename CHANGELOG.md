@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.89
+
+- Feat: a search result explains itself and can be walked ([#141](https://github.com/grimmerk/codev/issues/141), [#146](https://github.com/grimmerk/codev/issues/146))
+  - _(filled in below as the pieces land)_
+- Feat: switch to a running session by its **terminal (tty)** first, title second ([#142](https://github.com/grimmerk/codev/issues/142) C0). Three `/branch` siblings deliberately share a title, and the title-first match sent every one of their rows to the same iTerm2 tab; a process has exactly one tty, so that is what the click matches now (iTerm2 and Terminal.app; Ghostty has no per-tab tty, [#63](https://github.com/grimmerk/codev/issues/63), and keeps title-then-cwd). Running rows that share a title show their tty (`·ttys003`) so they can be told apart on screen
+- Feat: a **memory warning chip** beside `● live` when the machine is under pressure — swap past 8GB, or macOS's own pressure level at warn (amber) / critical (red) — with the figures in the live chip's tooltip otherwise. Read from `sysctl vm.swapusage` and `kern.memorystatus_vm_pressure_level` on the same refresh as the process table, so it costs nothing extra. Added the night 42 `claude` processes at 5.1GB pushed a 32GB machine to 18GB of swap: swap was the number that said so first
+- Feat: **normal app mode's window can be resized** and reopens at its last position and size (a remembered window that would land on an unplugged display is ignored); the header is already a drag region, so the macOS title-bar double-click action applies to it ([#148](https://github.com/grimmerk/codev/issues/148) step 1; width-aware line caps are step 2)
+- Fix: a session parked at Claude Code's context-limit prompt no longer shows as `working` forever — no hook fires there, so a `working` status untouched for 10 minutes is shown as idle ([#110](https://github.com/grimmerk/codev/issues/110))
+- Docs: README on keeping the machine responsive — sessions grow with time, Spotlight should skip `~/Library/Application Support/Claude` and `~/.claude`, and what the swap chip means
+
 ## 1.0.88
 
 - Feat: aim the search — field-scoped terms, PR references in any spelling, `is:live`, and a persisted enrichment cache ([#140](https://github.com/grimmerk/codev/issues/140), [#134](https://github.com/grimmerk/codev/issues/134))

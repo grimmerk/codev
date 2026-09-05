@@ -105,6 +105,14 @@ For the full same-cwd accuracy matrix (detection + switch by launch method and t
 | cmux | Title match → TTY fallback | CLI new-workspace | Same as iTerm2 (requires cmux v0.63+); requires socket access in cmux Settings (`automation` or `allowAll`) |
 | VS Code | URI handler (session-level) | `open -b` + URI handler | Requires Claude Code VS Code extension v2.1.72+; `[VSCODE]` badge on active sessions; adaptive resume via IDE lock file polling (~0.5s if project already open) |
 
+#### Keeping the machine responsive
+
+Three things learned from a night of cursor stutter on a 32GB machine running ~40 Claude Code sessions:
+
+- **Sessions grow while they sit.** A Claude Code process gains memory over time even when idle (upstream: [anthropics/claude-code#37240](https://github.com/anthropics/claude-code/issues/37240) measures ~500MB per hour of use, [#18859](https://github.com/anthropics/claude-code/issues/18859) idle sessions reaching ~15GB each). 42 processes held 5.1GB resident and had pushed the machine to 18GB of swap. Close sessions when a task is done, or `save list…` the set, close it all, and `▶ open N` later. When swap passes 8GB or macOS reports memory pressure, a `swap …` chip appears beside `● live` (amber at warn, red at critical); the figures are always in the live chip's tooltip. macOS only empties swap on a restart.
+- **Exclude two folders from Spotlight** (System Settings → Spotlight → Search Privacy; press `⌘⇧.` in the file picker to show hidden folders, or `⌘⇧G` and type the path): `~/Library/Application Support/Claude` — Claude Desktop writes gigabytes of IndexedDB churn there and Spotlight re-indexes it ([anthropics/claude-code#43390](https://github.com/anthropics/claude-code/issues/43390), 12GB on the reference machine) — and `~/.claude`, where every running session appends to its transcript. Both showed up as `mds_stores` at 50–100% of a core.
+- **A compositor that has run for weeks is a suspect of its own.** With every app closed the stutter remained until a restart; `WindowServer` was at 1.2GB and 30–80% CPU after 37 days of uptime. If nothing in Activity Monitor explains a stutter, restart before debugging further.
+
 ### Multi-Account Support (Claude Code)
 
 Run multiple Claude Code accounts (e.g. personal + work) on one machine. Each account gets its own config dir (via `CLAUDE_CONFIG_DIR`); the default account stays at `~/.claude` untouched. The Sessions tab aggregates sessions from every account (non-default ones get a purple account badge), and each session always resumes under the account it belongs to.

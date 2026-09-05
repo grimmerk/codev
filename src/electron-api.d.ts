@@ -215,6 +215,8 @@ interface IElectronAPI {
     staleRegistrations: { pid: number; sessionId: string; cwd: string }[];
     totalRssKb: number;
     measuredAt: number;
+    /** Machine-wide swap and pressure level (1 normal, 2 warn, 4 critical); absent when unreadable. */
+    memory?: { swapUsedMb: number; swapTotalMb: number; level: number };
   }>;
 
   // Claude Code sessions

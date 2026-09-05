@@ -456,7 +456,12 @@ const createSwitcherWindow = (initialMode?: string): BrowserWindow => {
     show: false,
     frame: false,
     fullscreenable: false,
-    resizable: false,
+    // Normal app mode is a regular window on a large display: let it be
+    // resized (issue #148, step 1) and remember where it was. The menu-bar
+    // popup stays fixed-size — it is placed by the app, not the user.
+    resizable: appMode === 'normal',
+    minWidth: 640,
+    minHeight: 420,
     backgroundColor: '#1e1e1e',
   });
 
@@ -464,6 +469,49 @@ const createSwitcherWindow = (initialMode?: string): BrowserWindow => {
   // Pass initial mode via hash so renderer can use it synchronously (no async IPC)
   const hash = initialMode ? `#mode=${initialMode}` : '';
   window.loadURL(SWITCHER_WINDOW_WEBPACK_ENTRY + hash);
+
+  if (appMode === 'normal') {
+    // Restore the last bounds before the window is first shown. Only if
+    // they still land on a display that exists — a window remembered on an
+    // external monitor must not open off-screen after it is unplugged.
+    settings
+      .get('switcher-window-bounds')
+      .then((saved: unknown) => {
+        const b = saved as { x: number; y: number; width: number; height: number } | null;
+        if (
+          !b ||
+          typeof b.x !== 'number' ||
+          typeof b.y !== 'number' ||
+          typeof b.width !== 'number' ||
+          typeof b.height !== 'number' ||
+          window.isDestroyed()
+        ) {
+          return;
+        }
+        const display = screen.getDisplayMatching(b);
+        const area = display.workArea;
+        const onScreen =
+          b.x < area.x + area.width &&
+          b.x + b.width > area.x &&
+          b.y < area.y + area.height &&
+          b.y + b.height > area.y;
+        if (onScreen) window.setBounds({ ...b, width: Math.max(b.width, 640), height: Math.max(b.height, 420) });
+      })
+      .catch(() => {});
+    let saveBoundsTimer: ReturnType<typeof setTimeout> | null = null;
+    const saveBounds = () => {
+      if (saveBoundsTimer) clearTimeout(saveBoundsTimer);
+      saveBoundsTimer = setTimeout(() => {
+        if (window.isDestroyed()) return;
+        const b = window.getBounds();
+        settings
+          .set('switcher-window-bounds', { x: b.x, y: b.y, width: b.width, height: b.height })
+          .catch(() => {});
+      }, 400);
+    };
+    window.on('resize', saveBounds);
+    window.on('move', saveBounds);
+  }
 
   // Open external links in default browser
   const { shell } = require('electron');

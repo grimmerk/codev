@@ -1827,11 +1827,14 @@ export const openSessionInITerm2 = async (
       : '';
 
     const tmpScript = '/tmp/codev-iterm-switch.scpt';
+    // TTY first: a process has exactly one controlling terminal, so this is
+    // the only match that cannot pick a sibling. Title matching is the
+    // fallback, and it is exactly what went wrong before (issue #142 C0):
+    // three `/branch` siblings share a name on purpose, and the title layer
+    // sent every row to the same tab.
     const switchScript = `tell application "iTerm2"
   activate
-  ${titleMatch ? `-- Layer 1: title matching (most precise for same-cwd sessions)
-  ${titleMatch.trim()}` : ''}
-  -- Layer 2: tty matching (fallback)
+  -- Layer 1: tty matching (exact)
   set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
   if targetTty is not "" then
     repeat with w in windows
@@ -1847,6 +1850,8 @@ export const openSessionInITerm2 = async (
       end repeat
     end repeat
   end if
+  ${titleMatch ? `-- Layer 2: title matching (fallback; not unique across /branch siblings)
+  ${titleMatch.trim()}` : ''}
   return "not found"
 end tell`;
     console.log(`[iTerm2] switch: pid=${activePid}, customTitle=${customTitle || 'none'}`);
@@ -2553,10 +2558,10 @@ export const openSessionInTerminalApp = async (
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
-    // Two-layer matching: title first, then TTY
+    // TTY first (exact), title as the fallback — see the iTerm2 switch for why.
     const titleMatch = customTitle
       ? `
-  -- Layer 1: title matching
+  -- Layer 2: title matching (fallback; not unique across /branch siblings)
   repeat with w in windows
     repeat with t in tabs of w
       if custom title of t contains "${customTitle.replace(/"/g, '\\"')}" then
@@ -2571,8 +2576,7 @@ export const openSessionInTerminalApp = async (
     const tmpScript = '/tmp/codev-terminal-switch.scpt';
     const switchScript = `tell application "Terminal"
   activate
-  ${titleMatch}
-  -- Layer 2: TTY matching
+  -- Layer 1: tty matching (exact)
   set targetTty to do shell script "ps -o tty= -p ${activePid} 2>/dev/null | tr -d '[:space:]'"
   if targetTty is not "" then
     repeat with w in windows
@@ -2585,6 +2589,7 @@ export const openSessionInTerminalApp = async (
       end repeat
     end repeat
   end if
+  ${titleMatch}
   return "not found"
 end tell`;
     console.log(`[Terminal.app] switch: pid=${activePid}, customTitle=${customTitle || 'none'}`);

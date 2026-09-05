@@ -522,6 +522,28 @@ const formatUptime = (sec: number): string => {
   return `${m}m`;
 };
 
+// A `working` status file that no hook has touched for this long is a
+// session parked at a prompt Claude Code fires no hook for — the context-
+// limit "new task? /clear …" prompt (issue #110) is the known case. Ten
+// minutes is longer than any tool call this app has seen finish, and the
+// cost of being wrong is one dot that is green a little early.
+const STALE_WORKING_SEC = 10 * 60;
+
+/** The dot colour for one status entry, with the stale-working rule applied. */
+const dotStatus = (v: { status?: string; timestamp?: number } | string): string => {
+  if (typeof v !== 'object' || !v) return v as string;
+  const status = v.status ?? '';
+  if (
+    status === 'working' &&
+    typeof v.timestamp === 'number' &&
+    v.timestamp > 0 &&
+    Date.now() / 1000 - v.timestamp > STALE_WORKING_SEC
+  ) {
+    return 'idle';
+  }
+  return status;
+};
+
 const formatMb = (kb: number): string => {
   const mb = kb / 1024;
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)}GB` : `${Math.round(mb)}MB`;
@@ -1175,6 +1197,34 @@ function SwitcherApp() {
   const liveCount = liveReport
     ? liveReport.live.length
     : Object.keys(activeStateRef.current).length;
+  // Swap and pressure level from the live report. A chip only when the
+  // machine is actually under pressure (level warn/critical, or swap past
+  // 8GB — the reference machine was stuttering at 13–18GB); the plain
+  // figures live in the live chip's tooltip so the row stays quiet otherwise.
+  const memory = liveReport?.memory;
+  const memorySummary = memory
+    ? `swap ${formatMb(memory.swapUsedMb * 1024)} of ${formatMb(memory.swapTotalMb * 1024)} · pressure ${memory.level >= 4 ? 'critical' : memory.level >= 2 ? 'warn' : 'normal'}`
+    : '';
+  const memoryWarning =
+    memory && (memory.level >= 2 || memory.swapUsedMb > 8 * 1024)
+      ? {
+          critical: memory.level >= 4,
+          label: `${memory.level >= 4 ? '⚠ ' : ''}swap ${formatMb(memory.swapUsedMb * 1024)}`,
+          detail: memorySummary,
+        }
+      : null;
+  // Live rows that share a title (typically /branch siblings, issue #142 C0)
+  // get a tty tag so they can be told apart on screen; the tty is also what
+  // the switch now matches on, so the tag names the thing the click uses.
+  const liveTitleDupes = (() => {
+    const seen = new Map<string, number>();
+    for (const s of displayedSessions) {
+      if (!s.isActive) continue;
+      const t = customTitles[s.sessionId] || s.__listMember?.title;
+      if (t) seen.set(t, (seen.get(t) ?? 0) + 1);
+    }
+    return new Set([...seen].filter(([, n]) => n > 1).map(([t]) => t));
+  })();
   const staleCount = liveReport?.staleRegistrations.length ?? 0;
   // Memory of the rows on screen — not of every live process — so the figure
   // beside a search result describes the result.
@@ -1895,7 +1945,7 @@ function SwitcherApp() {
       if (!rawStatuses) return;
       const statusStrings: Record<string, string> = {};
       for (const [id, v] of Object.entries(rawStatuses)) {
-        statusStrings[id] = typeof v === 'object' ? v.status : v;
+        statusStrings[id] = dotStatus(v);
       }
       setSessionStatuses(statusStrings);
     });
@@ -1903,7 +1953,7 @@ function SwitcherApp() {
       // Extract status strings for dots display
       const statusStrings: Record<string, string> = {};
       for (const [id, v] of Object.entries(rawStatuses)) {
-        statusStrings[id] = typeof v === 'object' ? v.status : v;
+        statusStrings[id] = dotStatus(v);
       }
       setSessionStatuses(statusStrings);
 
@@ -2062,7 +2112,7 @@ function SwitcherApp() {
         if (!rawStatuses) return;
         const statusStrings: Record<string, string> = {};
         for (const [id, v] of Object.entries(rawStatuses)) {
-          statusStrings[id] = typeof v === 'object' ? v.status : v;
+          statusStrings[id] = dotStatus(v);
         }
         setSessionStatuses(statusStrings);
       });
@@ -2591,7 +2641,7 @@ function SwitcherApp() {
               aria-pressed={liveOnlyActive}
               title={
                 liveOnlyActive
-                  ? `Show every session again${liveReport ? ` · measured ${formatRelativeTime(liveReport.measuredAt)}; re-read on each open and on toggling` : ''}`
+                  ? `Show every session again${liveReport ? ` · measured ${formatRelativeTime(liveReport.measuredAt)}; re-read on each open and on toggling${memorySummary ? ` · ${memorySummary}` : ''}` : ''}`
                   : `Show only sessions with a running process${staleCount ? ` · ${staleCount} stale registration${staleCount > 1 ? 's' : ''} in ~/.claude/sessions` : ''}`
               }
               onMouseDown={(e) => e.preventDefault()}
@@ -2606,6 +2656,23 @@ function SwitcherApp() {
             >
               ● {liveCount} live{staleCount > 0 ? ` ⚠${staleCount}` : ''}
             </span>
+            {/* Machine-wide memory, shown only when it is a problem: swap is
+                what said "trouble" first the night 42 claude processes
+                pushed a 32GB machine to 18GB of swap. Normal pressure stays
+                in the live chip's tooltip. */}
+            {memoryWarning && (
+              <span
+                title={`${memoryWarning.detail} — close sessions (save a list first) or quit heavy apps; macOS only clears swap on a restart`}
+                style={{
+                  ...SCOPE_CHIP_STYLE,
+                  cursor: 'default',
+                  border: `1px solid ${memoryWarning.critical ? '#e07a5f' : '#e0b060'}`,
+                  color: memoryWarning.critical ? '#e07a5f' : '#e0b060',
+                }}
+              >
+                {memoryWarning.label}
+              </span>
+            )}
             {liveOnlyActive && (
               <span
                 role="button"
@@ -3149,6 +3216,26 @@ function SwitcherApp() {
                               )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
+                            {session.isActive &&
+                              liveTitleDupes.has(
+                                customTitles[session.sessionId] || session.__listMember?.title || '',
+                              ) &&
+                              (() => {
+                                const live = session.__live || liveBySession[session.sessionId];
+                                const tag = live?.tty
+                                  ? live.tty
+                                  : live?.pid || session.activePid
+                                    ? `pid ${live?.pid ?? session.activePid}`
+                                    : null;
+                                return tag ? (
+                                  <span
+                                    title="Two or more running sessions share this title; this is the one on this terminal"
+                                    style={{ color: '#888', fontSize: '10px', fontWeight: 'normal' }}
+                                  >
+                                    {' '}·{tag}
+                                  </span>
+                                ) : null;
+                              })()}
                           </span>
                         )}
                         {(branches[session.sessionId] || session.__listMember?.branch) && (

@@ -5,10 +5,30 @@ import {
   isSessionProcess,
   joinLiveSessions,
   parseEtime,
+  parseMemoryPressure,
   parsePsOutput,
   sessionIdFromArgs,
   SessionRegistration,
 } from './live-sessions';
+
+describe('parseMemoryPressure', () => {
+  it('reads the swap line and the pressure level, converting units to MB', () => {
+    expect(
+      parseMemoryPressure(
+        'vm.swapusage: total = 14336.00M  used = 13066.94M  free = 1221.06M  (encrypted)\n2\n',
+      ),
+    ).toEqual({ swapUsedMb: 13066.94, swapTotalMb: 14336, level: 2 });
+    expect(
+      parseMemoryPressure('total = 2.00G  used = 512.00M  free = 1.50G\n1'),
+    ).toEqual({ swapUsedMb: 512, swapTotalMb: 2048, level: 1 });
+  });
+
+  it('returns null rather than zeros when either figure is missing', () => {
+    expect(parseMemoryPressure('')).toBeNull();
+    expect(parseMemoryPressure('1\n')).toBeNull();
+    expect(parseMemoryPressure('total = 1.00M  used = 0.50M  free = 0.50M\n')).toBeNull();
+  });
+});
 
 // Captured from `ps -Ao pid=,rss=,tty=,etime=,args=` on 2026-09-05, trimmed
 // to the shapes that matter: sessions with a tty, the daemon family without
@@ -255,6 +275,13 @@ describe('collectLiveSessions', () => {
         asked.push(pid);
         return `/cwd/of/${pid}`;
       },
+      sysctl: async () =>
+        'vm.swapusage: total = 14336.00M  used = 13066.94M  free = 1221.06M  (encrypted)\n4\n',
+    });
+    expect(report.memory).toEqual({
+      swapUsedMb: 13066.94,
+      swapTotalMb: 14336,
+      level: 4,
     });
     // Every tty-attached session except the registered one is unregistered here.
     expect(asked.sort((a, b) => a - b)).toEqual([
