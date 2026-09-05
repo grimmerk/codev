@@ -355,6 +355,13 @@ spare width), and a scope replaces the list rather than adding to it. Scopes ran
 being viewed beats live, live beats pinned-only — encoded in `session-list-view.ts` so a
 stale flag can never blank the list.
 
+**A scope survives resuming from it; the search box does not.** Opening a session clears the
+query on the next show (a query is a way of finding one session), but it leaves a saved list or
+the live scope in place: a scope is a place to work *through* several sessions — resume one,
+come back, resume the next — and being dropped out of it on every return was the first
+complaint in live testing. The scope's header / active chip keeps it visible; `✕` or the chip
+leaves it.
+
 **What a member stores is the feature.** A list of bare sessionIds is useless for recall.
 Each member captures title, branch, pin state (a snapshot — never updated later), the last
 user and assistant messages, and the **recap** Claude Code writes into the transcript

@@ -967,7 +967,12 @@ function SwitcherApp() {
     viewingListId ? sessionLists.find((l) => l.id === viewingListId) ?? null : null;
   // Mirrored into a ref for applySearchFilter, which runs from debounced
   // timeouts and setState updaters (the stale-closure trap, see above).
-  viewingListRef.current = viewingList;
+  // Written in an effect, not during render: with concurrent rendering a
+  // render can be abandoned, and a ref written by it would leave those
+  // callbacks filtering against a list that was never committed.
+  useEffect(() => {
+    viewingListRef.current = viewingList;
+  }, [viewingList]);
   // Process facts by session, plus a synthetic row for every running process
   // that has no session row to carry them: no id at all (the "unregistered"
   // case the live view exists for), or an id the session list does not know —
@@ -1211,10 +1216,17 @@ function SwitcherApp() {
       // Best effort, same as the pinned toggles.
     }
   }, [liveStats]);
+  // Requests overlap (every session refetch starts one, and `ps` can take
+  // half a second on a swapping machine); only the newest may land, or an
+  // older snapshot would overwrite a newer one. Same pattern as the deep
+  // search's deepSearchSeqRef.
+  const liveReportSeqRef = useRef(0);
   const refreshLiveReport = async () => {
+    const seq = ++liveReportSeqRef.current;
     try {
       // null = "could not look" (a failed ps); keep the last good report.
       const r = await window.electronAPI.getLiveSessions();
+      if (seq !== liveReportSeqRef.current) return; // superseded meanwhile
       if (r) setLiveReport(r);
     } catch {
       // Same: never replace a good report with nothing.

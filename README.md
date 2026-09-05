@@ -22,7 +22,7 @@ Press `⌃+⌘+R` or click the menu bar icon to launch the Quick Switcher. Searc
 
 CodeV can list, search, and resume Claude Code sessions. Press `⌃+⌘+R` to open the Quick Switcher, then `Tab` to toggle to Sessions mode. Live status dots show session state: working (orange pulse), idle (green), needs attention (orange blink).
 
-Search covers **every session and every user prompt you ever typed** (not just the ~100 most recent sessions shown in the list) plus titles, branches, PR links, and last AI replies. When a match sits in the middle of a conversation, the row shows a `⌕ #N …` snippet with the surrounding context. Closed one-shot sessions (≤2 messages, untitled, no PR) fold into an expandable "minor sessions" row to keep the list scannable.
+Search covers **every session and every user prompt you ever typed** (not just the ~100 most recent sessions shown in the list) plus titles, branches, PR links, last AI replies, and the **session id** (a prefix of four or more hex characters — type the id your terminal status line shows to find that exact session, then `⌘D` to pin it; the row shows an `id 4ed7505a` marker since the id is not otherwise on screen). When a match sits in the middle of a conversation, the row shows an amber `match #N` snippet with the surrounding context, and every capped line — title, first/last message, branch, last reply — **moves its window to the match** so you can see *why* the row is there. Long titles are shortened **from the middle** (`head … tail`), so a title written as an `A -> B > C` chain keeps its newest step; hover for the full title. Closed one-shot sessions (≤2 messages, untitled, no PR) fold into an expandable "minor sessions" row to keep the list scannable.
 
 **Pin** the sessions you keep coming back to (hover 📌 on a row, or `⌘D` on the selected row): they **move into** a **📌 Pinned** zone at the top, ordered by recency like the rest of the list — works even for old sessions found via deep search. **Hide** one-offs you never want in the main flow (hover ⊘, or `⇧⌘D`): they move into the minor-sessions fold, stay searchable, and can be unhidden from inside the fold (they carry a persistent ⊘ marker there). Pins and hides live in `~/.config/codev/session-marks.json`, shared across accounts.
 
@@ -34,6 +34,18 @@ The `📌 Pinned (N)` header carries two independent toggles:
 | the `only` chip on the right | **Pinned only.** The list — and the search box — is scoped to pinned sessions. Click again to leave. |
 
 Keyboard semantics worth knowing: the shortcuts act on the **selected row** (the one with the blue left border — hovering selects), and require an explicit selection. `⌘D` = pin/unpin toggle; `⇧⌘D` = hide (on a pinned row this unpins *and* folds in one step — pin and hide are mutually exclusive). When the last pin is removed the header disappears entirely (that's normal, not a collapse). A pinned session is never folded away as a "minor session", whatever its message count.
+
+#### Live view and saved session lists
+
+Two chips beside the search box, on the [Session Buddy](https://sessionbuddy.com/) model — save what is open, put the windows down, come back to the set later:
+
+| Chip | What it does |
+|---|---|
+| `● N live` | **Scope the list to sessions with a running process**, with the memory they hold beside it. Built by joining `ps` against Claude Code's own `~/.claude/sessions/` registrations, so a session that is running but never registered still shows (marked `⚠ unregistered`), a registration whose process is gone is never shown as a ghost, and a session running under **two** processes (a resumed copy, a `/branch` parent and child) shows both (`⚠ 2nd process`). A **`stats`** toggle (off by default, remembered) adds each row's memory and uptime for the "which one do I close first" moment. |
+| `save list…` | Appears whenever the list is scoped (`● live`, `only`, or a search): **saves exactly what is on screen as a named list**. The default name is today's `MMDD`, then `MMDD-2`, `MMDD-3` — a label, not an identity. |
+| `🗂 N` | Shows the saved lists. Click one to view its members **in the order they were captured** and resume any of them; `✎` renames, `✕` (then `delete?`) deletes. |
+
+A saved member stores what you recognise a session by — title, branch, pin state at capture, the last messages, and the **recap** line Claude Code writes into the transcript (the `※ recap:` "where we are, what's next" line), which replaces the last-reply line on the member's row; a recap much older than the session's last activity is marked `⏱`, since its "next step" may already be done. A member whose transcript is gone still reads as the session it was. Opening a session from a list or from the live scope **leaves you in that scope** when you come back (only the search box is cleared), so you can work through a set one session at a time. There is deliberately no "open all": 22 sessions is a few GB of processes, which is the very thing a saved list exists to relieve. Lists live in `~/.config/codev/session-lists.json`; a file that cannot be trusted as written is reported at load, never rewritten.
 
 **Simple rule**: when running multiple sessions in the same project directory at the same time, give each running session a name. Closed sessions don't need names — they won't cause issues.
 
