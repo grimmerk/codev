@@ -26,6 +26,10 @@ import {
 import TerminalTab from './terminal-tab';
 
 type LiveReport = Awaited<ReturnType<Window['electronAPI']['getLiveSessions']>>;
+/** One session's search result detail: hits, their time, and which fields matched. */
+type SearchHit = Awaited<
+  ReturnType<Window['electronAPI']['searchClaudeSessions']>
+>['snippets'][string];
 type ListsResponse = Awaited<ReturnType<Window['electronAPI']['getSessionLists']>>;
 /** Shape every list mutation returns (save / delete / rename). */
 type ListsWriteResult = {
@@ -655,7 +659,18 @@ function SwitcherApp() {
   const [assistantResponses, setAssistantResponses] = useState<Record<string, string>>({});
   const [terminalApps, setTerminalApps] = useState<Record<string, string>>({});
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, string>>({});
-  const [searchSnippets, setSearchSnippets] = useState<Record<string, { snippet: string; promptIndex: number; isLastPrompt: boolean }>>({});
+  const [searchSnippets, setSearchSnippets] = useState<Record<string, SearchHit>>({});
+  // Mirrored for applySearchFilter (stale-closure trap, see sessionSearchRef2).
+  const searchSnippetsRef = useRef<Record<string, SearchHit>>({});
+  // Issue #146: order results by when the match happened instead of the
+  // session's last activity. Off by default — "what was I just working on"
+  // is the commoner question, and it wants last activity.
+  const [sortByMatch, setSortByMatch] = useState(false);
+  const sortByMatchRef = useRef(false);
+  // Which of a session's hits the row shows, and whether its context
+  // (the prompts before and after) is unfolded.
+  const [hitIndex, setHitIndex] = useState<Record<string, number>>({});
+  const [expandedHits, setExpandedHits] = useState<Set<string>>(new Set());
   const [minorsExpanded, setMinorsExpanded] = useState(false);
   // Folding waits for the first active-session detection so a just-started
   // (≤2 msgs, not-yet-detected) session is never folded away at app start.
@@ -944,11 +959,16 @@ function SwitcherApp() {
             isPinned: s.sessionId in sessionMarks.pins,
           }),
       );
-    if (extra.length === 0) return base;
-    const merged = [...base, ...extra];
-    merged.sort(
-      (a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0),
-    );
+    // Base rows arrive in timeline order; only a merge or a match-time sort
+    // needs a re-sort. Match time falls back to last activity for a row whose
+    // match was not in a prompt (title, branch, badge).
+    if (extra.length === 0 && !sortByMatchRef.current) return base;
+    const merged = extra.length === 0 ? [...base] : [...base, ...extra];
+    const key = (s: any): number =>
+      sortByMatchRef.current
+        ? searchSnippetsRef.current[s.sessionId]?.matchedAt || s.lastTimestamp || 0
+        : s.lastTimestamp || 0;
+    merged.sort((a: any, b: any) => key(b) - key(a));
     return merged;
   };
 
@@ -989,6 +1009,7 @@ function SwitcherApp() {
       // Drop stale responses (query changed while this one was in flight)
       if (seq !== deepSearchSeqRef.current || sessionSearchRef2.current !== query) return;
       deepMatchesRef.current = res?.sessions || [];
+      searchSnippetsRef.current = res?.snippets || {};
       setSearchSnippets(res?.snippets || {});
       // Bump a revision instead of filtering here. This callback was created
       // ~180ms + one IPC round-trip ago and closes over the enrichment maps of
@@ -1051,6 +1072,9 @@ function SwitcherApp() {
     // they change, not on the next keystroke.
     liveReport,
     sessionMarks,
+    // Sorting by match time reads the snippets and the toggle.
+    searchSnippets,
+    sortByMatch,
   ]);
 
   const isSearchingSessions = sessionSearchValue.trim().length > 0;
@@ -2632,6 +2656,35 @@ function SwitcherApp() {
             >
               ?
             </span>
+            {/* Issue #146: order a search by when the match happened. Only
+                while searching — it has no meaning for the timeline. */}
+            {isSearchingSessions && (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-pressed={sortByMatch}
+                title={
+                  sortByMatch
+                    ? 'Ordered by when the match happened; click for last activity'
+                    : 'Order by when the match happened instead of the session’s last activity'
+                }
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  sortByMatchRef.current = !sortByMatch;
+                  setSortByMatch(!sortByMatch);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    sortByMatchRef.current = !sortByMatch;
+                    setSortByMatch(!sortByMatch);
+                  }
+                }}
+                style={sortByMatch ? SCOPE_CHIP_ACTIVE_STYLE : SCOPE_CHIP_STYLE}
+              >
+                by match
+              </span>
+            )}
             {/* Scope chips: live processes (issue #94) and saved lists
                 (issue #145). Here, not in the list, because this row has
                 spare width and the list has no spare height. */}
@@ -3471,26 +3524,134 @@ function SwitcherApp() {
                       const m = searchSnippets[session.sessionId];
                       if (!m || !isSearchingSessions) return null;
                       const words = searchHighlightWords;
-                      // Stale guard: snippet must still match the current query
-                      if (!words.some((w) => m.snippet.toLowerCase().includes(w.toLowerCase()))) return null;
-                      const dupFirst = m.promptIndex === 0 && (sessionDisplayMode === 'first' || sessionDisplayMode === 'both');
-                      const dupLast = m.isLastPrompt && (sessionDisplayMode === 'last' || sessionDisplayMode === 'both');
-                      if (dupFirst || dupLast) return null;
-                      return (
-                        <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' }}>
-                          <span style={SNIPPET_LINE_STYLE}>
-                            <span style={SNIPPET_MARKER_STYLE}>
-                              match #{m.promptIndex + 1}
-                            </span>{' '}
-                            <Highlighter
-                              searchWords={words}
-                              autoEscape
-                              textToHighlight={m.snippet.slice(0, 120)}
-                              highlightStyle={SEARCH_HIGHLIGHT_STYLE}
-                            />
-                          </span>
-                        </div>
-                      );
+                      const id = session.sessionId;
+                      const hits = m.hits ?? [];
+                      const k = Math.min(hitIndex[id] ?? 0, Math.max(0, hits.length - 1));
+                      const hit = hits[k];
+                      const lineStyle = { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' } as const;
+                      const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+                      const lines: React.ReactNode[] = [];
+                      // Issue #146: the matched prompt, with the other hits one
+                      // click away and the prompts around it unfoldable. The
+                      // line is still suppressed when the only hit is already
+                      // on screen (first/last prompt) — vertical space rule.
+                      if (hit && words.some((w) => hit.snippet.toLowerCase().includes(w.toLowerCase()))) {
+                        const lastIndex = (session.messageCount ?? 0) - 1;
+                        const dupFirst = hit.promptIndex === 0 && (sessionDisplayMode === 'first' || sessionDisplayMode === 'both');
+                        const dupLast = hit.promptIndex === lastIndex && (sessionDisplayMode === 'last' || sessionDisplayMode === 'both');
+                        const expanded = expandedHits.has(id);
+                        const hasContext = !!(hit.before || hit.after);
+                        if (!(dupFirst || dupLast) || hits.length > 1 || expanded) {
+                          lines.push(
+                            <div key="hit" style={lineStyle}>
+                              <span style={SNIPPET_LINE_STYLE}>
+                                <span style={SNIPPET_MARKER_STYLE}>match #{hit.promptIndex + 1}</span>
+                                {hits.length > 1 && (
+                                  <span style={{ color: '#777', fontSize: '10px' }} onClick={stop} onMouseDown={stop}>
+                                    {' '}
+                                    <span
+                                      role="button"
+                                      tabIndex={-1}
+                                      title="Previous hit in this session"
+                                      style={{ cursor: 'pointer', padding: '0 2px' }}
+                                      onClick={() => setHitIndex((h) => ({ ...h, [id]: (k - 1 + hits.length) % hits.length }))}
+                                    >
+                                      ‹
+                                    </span>
+                                    {k + 1}/{hits.length}
+                                    <span
+                                      role="button"
+                                      tabIndex={-1}
+                                      title="Next hit in this session"
+                                      style={{ cursor: 'pointer', padding: '0 2px' }}
+                                      onClick={() => setHitIndex((h) => ({ ...h, [id]: (k + 1) % hits.length }))}
+                                    >
+                                      ›
+                                    </span>
+                                  </span>
+                                )}
+                                {hasContext && (
+                                  <span
+                                    role="button"
+                                    tabIndex={-1}
+                                    title={expanded ? 'Hide the prompts around this hit' : 'Show the prompts before and after this hit'}
+                                    style={{ color: '#777', fontSize: '10px', cursor: 'pointer', padding: '0 3px' }}
+                                    onMouseDown={stop}
+                                    onClick={(e) => {
+                                      stop(e);
+                                      setExpandedHits((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(id)) next.delete(id);
+                                        else next.add(id);
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    {expanded ? '▾' : '▸'}
+                                  </span>
+                                )}{' '}
+                                <Highlighter
+                                  searchWords={words}
+                                  autoEscape
+                                  textToHighlight={hit.snippet.slice(0, 120)}
+                                  highlightStyle={SEARCH_HIGHLIGHT_STYLE}
+                                />
+                              </span>
+                            </div>,
+                          );
+                          if (expanded && hit.before) {
+                            lines.push(
+                              <div key="before" style={lineStyle}>
+                                <span style={{ ...SNIPPET_LINE_STYLE, color: '#777' }}>
+                                  {'  ↑ '}
+                                  <Highlighter searchWords={words} autoEscape textToHighlight={fitToRow(hit.before, 110)} highlightStyle={SEARCH_HIGHLIGHT_STYLE} />
+                                </span>
+                              </div>,
+                            );
+                          }
+                          if (expanded && hit.after) {
+                            lines.push(
+                              <div key="after" style={lineStyle}>
+                                <span style={{ ...SNIPPET_LINE_STYLE, color: '#777' }}>
+                                  {'  ↓ '}
+                                  <Highlighter searchWords={words} autoEscape textToHighlight={fitToRow(hit.after, 110)} highlightStyle={SEARCH_HIGHLIGHT_STYLE} />
+                                </span>
+                              </div>,
+                            );
+                          }
+                        }
+                      }
+                      // Issue #141: name the field that matched when that field is
+                      // not on the row — the path, the assistant's mined
+                      // references, a recap the row is not showing, a reply hidden
+                      // behind a recap. Fields that render (title, branch, project
+                      // name, badge, first/last prompt) already carry the highlight.
+                      const hasRecapLine = !!session.__listMember?.recap;
+                      const explain: [string, string][] = [];
+                      for (const r of m.reasons ?? []) {
+                        if (r === 'path') explain.push(['path', session.project || '']);
+                        else if (r === 'assistant')
+                          explain.push([
+                            'assistant',
+                            parsedSearch.prRefs.length > 0
+                              ? parsedSearch.prRefs.map((p) => (p.repo ? `${p.repo}#${p.number}` : `#${p.number}`)).join(' ')
+                              : parsedSearch.words.join(' '),
+                          ]);
+                        else if (r === 'recap' && !hasRecapLine) explain.push(['recap', recaps[id]?.text || '']);
+                        else if (r === 'reply' && hasRecapLine) explain.push(['reply', assistantResponses[id] || '']);
+                      }
+                      for (const [field, text] of explain) {
+                        if (!text) continue;
+                        lines.push(
+                          <div key={`why-${field}`} style={lineStyle}>
+                            <span style={SNIPPET_LINE_STYLE}>
+                              <span style={SNIPPET_MARKER_STYLE}>match {field}</span>{' '}
+                              <Highlighter searchWords={words} autoEscape textToHighlight={fitToRow(text, 110)} highlightStyle={SEARCH_HIGHLIGHT_STYLE} />
+                            </span>
+                          </div>,
+                        );
+                      }
+                      return lines.length > 0 ? <>{lines}</> : null;
                     })()}
                     {/* Line 3: on a saved-list member, the recap captured
                         with it — Claude Code's own "where we are, what's

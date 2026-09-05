@@ -17,9 +17,12 @@ import {
 } from './accounts';
 import {
   compileQuery,
-  findPromptMatch,
+  explainMatch,
+  findPromptHits,
   isEmptyQuery,
+  MatchField,
   parseQuery,
+  PromptHit,
   PromptMatch,
   promptNeedles,
   sessionRepos,
@@ -91,6 +94,9 @@ const CACHE_TTL_MS = 5000; // refresh cache after 5 seconds
 // All user prompts per session, same rebuild lifecycle as cachedSessions.
 // Main-process-only: searched here, never shipped over IPC (~MBs of text).
 let promptsBySession: Map<string, string[]> = new Map();
+// Epoch ms per prompt, parallel to promptsBySession (issue #146: a hit
+// carries the time it happened, not just the session it happened in).
+let promptTimesBySession: Map<string, number[]> = new Map();
 
 // Cache for active session detection to avoid spawning processes on every keystroke
 let cachedActiveMap: Map<string, number> | null = null;
@@ -140,6 +146,7 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
   // sessionIds are UUIDs (unique across accounts), so no cross-account dedupe.
   const bySession = new Map<string, SessionAccum>();
   const prompts = new Map<string, string[]>();
+  const promptTimes = new Map<string, number[]>();
 
   // Per-account try/catch: one unreadable/corrupt history must not hide the
   // sessions of every other account.
@@ -159,6 +166,10 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
             const list = prompts.get(raw.sessionId);
             if (list) list.push(raw.display);
             else prompts.set(raw.sessionId, [raw.display]);
+            const times = promptTimes.get(raw.sessionId);
+            const at = typeof raw.timestamp === 'number' ? raw.timestamp : 0;
+            if (times) times.push(at);
+            else promptTimes.set(raw.sessionId, [at]);
           }
 
           const existing = bySession.get(raw.sessionId);
@@ -220,12 +231,19 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
 
   cachedSessions = allSessions;
   promptsBySession = prompts;
+  promptTimesBySession = promptTimes;
   cacheTimestamp = now;
   return allSessions.slice(0, limit);
 };
 
 export interface SessionSearchMatch extends PromptMatch {
   isLastPrompt: boolean;
+  /** Every hit (up to 20), first one mirrored in the fields above. */
+  hits: PromptHit[];
+  /** Epoch ms of the latest hit — what "sort by match" orders on. */
+  matchedAt: number;
+  /** Which fields matched, for the "why is this row here" marker (#141). */
+  reasons: MatchField[];
 }
 
 export interface SessionSearchResult {
@@ -303,16 +321,38 @@ export const searchClaudeSessions = (
     }
 
     sessions.push(s);
-    const match = findPromptMatch(
+    const reasons = explainMatch(
+      {
+        sessionId: id,
+        text,
+        title,
+        branch,
+        project: s.projectName,
+        path: s.project,
+        recap,
+        prompts: sessionPrompts,
+        assistant: refs?.join(' '),
+        prText: prLink ? `PR #${prLink.prNumber} ${prLink.prUrl}` : undefined,
+        repos,
+      },
+      parsed,
+    );
+    const hits = findPromptHits(
       sessionPrompts,
+      promptTimesBySession.get(id) || [],
       needles,
       parsed.prRefs,
       repos,
     );
-    if (match) {
+    if (hits.length > 0 || reasons.length > 0) {
+      const first = hits[0];
       snippets[id] = {
-        ...match,
-        isLastPrompt: match.promptIndex === sessionPrompts.length - 1,
+        promptIndex: first?.promptIndex ?? -1,
+        snippet: first?.snippet ?? '',
+        isLastPrompt: !!first && first.promptIndex === sessionPrompts.length - 1,
+        hits,
+        matchedAt: hits.reduce((m, h) => Math.max(m, h.at), 0),
+        reasons,
       };
     }
     if (sessions.length >= limit) break;

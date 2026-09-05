@@ -26,7 +26,9 @@ describe('parseMemoryPressure', () => {
   it('returns null rather than zeros when either figure is missing', () => {
     expect(parseMemoryPressure('')).toBeNull();
     expect(parseMemoryPressure('1\n')).toBeNull();
-    expect(parseMemoryPressure('total = 1.00M  used = 0.50M  free = 0.50M\n')).toBeNull();
+    expect(
+      parseMemoryPressure('total = 1.00M  used = 0.50M  free = 0.50M\n'),
+    ).toBeNull();
   });
 });
 

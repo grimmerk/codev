@@ -225,7 +225,23 @@ interface IElectronAPI {
     sessions: any[];
     snippets: Record<
       string,
-      { snippet: string; promptIndex: number; isLastPrompt: boolean }
+      {
+        snippet: string;
+        promptIndex: number;
+        isLastPrompt: boolean;
+        /** Every prompt hit (up to 20): where, when, and the prompts around it. */
+        hits: {
+          promptIndex: number;
+          snippet: string;
+          at: number;
+          before?: string;
+          after?: string;
+        }[];
+        /** Epoch ms of the latest hit; 0 when the match was not in a prompt. */
+        matchedAt: number;
+        /** Fields the query matched in: title, branch, project, path, prompt, recap, reply, assistant, pr, id. */
+        reasons: string[];
+      }
     >;
   }>;
   detectActiveSessions: () => Promise<{
