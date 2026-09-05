@@ -2634,6 +2634,12 @@ ipcMain.on(
       console.warn('[open-claude-session] refusing unsafe project path:', projectPath);
       return;
     }
+    // Switching to a running session never needs the path (iTerm2 matches by
+    // tty); a resume does — `cd ""` would start the session in the wrong place.
+    if (!isActive && !projectPath) {
+      console.warn('[open-claude-session] refusing to resume without a project path:', sessionId);
+      return;
+    }
     const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
     const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
     // A label no account carries is dropped, not trusted: history decides the
@@ -2652,7 +2658,9 @@ ipcMain.on(
       terminalMode,
       customTitle,
       label,
-    );
+    ).catch((err) => {
+      console.error('[open-claude-session] launch failed:', err);
+    });
   },
 );
 

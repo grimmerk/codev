@@ -1307,7 +1307,7 @@ export const openSession = async (
       openSessionInCodeV(sessionId);
       break;
     case 'cmux':
-      openSessionInCmux(
+      return openSessionInCmux(
         sessionId,
         projectPath,
         isActive,
@@ -1315,9 +1315,8 @@ export const openSession = async (
         customTitle,
         accountLabel,
       );
-      break;
     case 'ghostty':
-      openSessionInGhostty(
+      return openSessionInGhostty(
         sessionId,
         projectPath,
         isActive,
@@ -1325,9 +1324,8 @@ export const openSession = async (
         customTitle,
         accountLabel,
       );
-      break;
     case 'terminal':
-      openSessionInTerminalApp(
+      return openSessionInTerminalApp(
         sessionId,
         projectPath,
         isActive,
@@ -1336,10 +1334,9 @@ export const openSession = async (
         customTitle,
         accountLabel,
       );
-      break;
     case 'iterm2':
     default:
-      openSessionInITerm2(
+      return openSessionInITerm2(
         sessionId,
         projectPath,
         isActive,
@@ -1348,7 +1345,6 @@ export const openSession = async (
         customTitle,
         accountLabel,
       );
-      break;
   }
 };
 
@@ -1439,8 +1435,35 @@ export const runCommandInTerminal = (
   projectPath: string,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
-): void => {
+): Promise<void> => {
   const { exec } = require('child_process');
+  // One osascript launch as a promise: the script file is removed either
+  // way, and an error REJECTS, so a caller that counts launches (`open N`)
+  // learns about a failure instead of counting it as opened.
+  const runOsascript = (
+    tmpScript: string,
+    script: string,
+    label: string,
+  ): Promise<void> => {
+    fs.writeFileSync(tmpScript, script);
+    return new Promise<void>((resolve, reject) => {
+      exec(
+        `osascript ${tmpScript}`,
+        { encoding: 'utf-8', timeout: 5000 },
+        (error: any) => {
+          try {
+            fs.unlinkSync(tmpScript);
+          } catch {}
+          if (error) {
+            console.error(`[runCommandInTerminal] ${label} error:`, error.message);
+            reject(error);
+          } else {
+            resolve();
+          }
+        },
+      );
+    });
+  };
 
   switch (terminalApp) {
     case 'ghostty': {
@@ -1461,12 +1484,7 @@ end tell`
     activate
   end if
 end tell`;
-      fs.writeFileSync(tmpScript, launchScript);
-      exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
-        if (error) console.error('[runCommandInTerminal] ghostty error:', error.message);
-        try { fs.unlinkSync(tmpScript); } catch {}
-      });
-      break;
+      return runOsascript(tmpScript, launchScript, 'ghostty');
     }
     case 'terminal': {
       const tmpScript = launchScriptPath('terminal-launch');
@@ -1496,57 +1514,57 @@ end tell`
     activate
   end if
 end tell`;
-      fs.writeFileSync(tmpScript, launchScript);
-      exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any) => {
-        if (error) console.error('[runCommandInTerminal] Terminal.app error:', error.message);
-        try { fs.unlinkSync(tmpScript); } catch {}
-      });
-      break;
+      return runOsascript(tmpScript, launchScript, 'Terminal.app');
     }
     case 'cmux': {
-      const launchInCmux = () => {
-        const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "${claudeCmd}"`;
-        console.log('[cmux] launch cmd:', cmuxCmd);
-        exec(cmuxCmd,
-          { encoding: 'utf-8', timeout: 5000 },
-          (error: any, stdout: string, stderr: string) => {
-            console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
-            if (error) {
-              console.error('cmux new-workspace failed:', error.message);
-            } else {
+      return new Promise<void>((resolve, reject) => {
+        const launchInCmux = () => {
+          const cmuxCmd = `${CMUX_CLI} new-workspace --cwd "${projectPath}" --command "${claudeCmd}"`;
+          console.log('[cmux] launch cmd:', cmuxCmd);
+          exec(
+            cmuxCmd,
+            { encoding: 'utf-8', timeout: 5000 },
+            (error: any, stdout: string, stderr: string) => {
+              console.log('[cmux] launch result:', { error: error?.message, stdout, stderr });
+              if (error) {
+                console.error('cmux new-workspace failed:', error.message);
+                reject(error);
+                return;
+              }
               const wsMatch = stdout.match(/workspace:\d+/);
               if (wsMatch) {
                 exec(`${CMUX_CLI} select-workspace --workspace ${wsMatch[0]}`);
               }
               exec('osascript -e \'tell application "cmux" to activate\'');
-            }
+              resolve();
+            },
+          );
+        };
+        exec('pgrep -x cmux', (error: any) => {
+          if (error) {
+            console.log('[cmux] not running, launching...');
+            exec('open -a cmux');
+            let attempts = 0;
+            const waitForCmux = () => {
+              attempts++;
+              exec(`${CMUX_CLI} tree 2>/dev/null`, { timeout: 2000 }, (err: any) => {
+                if (!err) {
+                  console.log(`[cmux] ready after ${attempts * 500}ms`);
+                  launchInCmux();
+                } else if (attempts < 10) {
+                  setTimeout(waitForCmux, 500);
+                } else {
+                  console.error('[cmux] timed out waiting for cmux');
+                  reject(new Error('cmux did not start'));
+                }
+              });
+            };
+            setTimeout(waitForCmux, 500);
+          } else {
+            launchInCmux();
           }
-        );
-      };
-      exec('pgrep -x cmux', (error: any) => {
-        if (error) {
-          console.log('[cmux] not running, launching...');
-          exec('open -a cmux');
-          let attempts = 0;
-          const waitForCmux = () => {
-            attempts++;
-            exec(`${CMUX_CLI} tree 2>/dev/null`, { timeout: 2000 }, (err: any) => {
-              if (!err) {
-                console.log(`[cmux] ready after ${attempts * 500}ms`);
-                launchInCmux();
-              } else if (attempts < 10) {
-                setTimeout(waitForCmux, 500);
-              } else {
-                console.error('[cmux] timed out waiting for cmux');
-              }
-            });
-          };
-          setTimeout(waitForCmux, 500);
-        } else {
-          launchInCmux();
-        }
+        });
       });
-      break;
     }
     case 'iterm2':
     default: {
@@ -1578,12 +1596,7 @@ end tell`
     end tell
   end tell
 end tell`;
-      fs.writeFileSync(tmpScript, launchScript);
-      exec(`osascript ${tmpScript}`, (error: any) => {
-        if (error) console.error('[runCommandInTerminal] iTerm2 error:', error.message);
-        try { fs.unlinkSync(tmpScript); } catch {}
-      });
-      break;
+      return runOsascript(tmpScript, launchScript, 'iTerm2');
     }
   }
 };
@@ -1657,7 +1670,9 @@ export const launchNewClaudeSession = (
   // Pass claudeCmd as the 2nd arg too — Ghostty/cmux build their launch
   // scripts from it (iTerm2/Terminal.app use fullCommand), so the account
   // env prefix must be present in both.
-  runCommandInTerminal(`cd "${projectPath}" && ${claudeCmd}`, claudeCmd, projectPath, terminalApp, terminalMode);
+  runCommandInTerminal(`cd "${projectPath}" && ${claudeCmd}`, claudeCmd, projectPath, terminalApp, terminalMode).catch(
+    (err) => console.error('[launchNewClaudeSession] launch failed:', err),
+  );
 };
 
 /**
@@ -1778,7 +1793,7 @@ export const openSessionInCodeV = (sessionId: string): void => {
   }
 };
 
-export const openSessionInITerm2 = (
+export const openSessionInITerm2 = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
@@ -1786,7 +1801,7 @@ export const openSessionInITerm2 = (
   terminalMode: string = 'tab',
   customTitle?: string,
   accountLabel?: string,
-): void => {
+): Promise<void> => {
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
@@ -1842,7 +1857,7 @@ end tell`;
     });
   } else {
     const resumeCmd = buildResumeCommand(sessionId, accountLabel);
-    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
   }
 };
 
@@ -2389,13 +2404,15 @@ export const openSessionListMembers = async (
         m.accountLabel,
       );
       result.opened.push(id);
-    } catch (err) {
-      // Reported, not swallowed: "opened 5" must not hide a sixth that threw.
-      console.error('[open-session-list-members] launch failed:', id, err);
-      skip('launch failed');
-    } finally {
       // Long enough for the new process to write its registration.
       setTimeout(() => membersInFlight.delete(id), 10000);
+    } catch (err) {
+      // Reported, not swallowed: "opened 5" must not hide a sixth that threw
+      // — and the claim is released at once, so a retry is not told "already
+      // running" for a session that never started.
+      console.error('[open-session-list-members] launch failed:', id, err);
+      skip('launch failed');
+      membersInFlight.delete(id);
     }
   }
   return result;
@@ -2459,14 +2476,14 @@ export const loadLastAssistantResponses = async (
  * Open a Claude Code session in Ghostty.
  * Full AppleScript support: working directory matching, focus, new tab with command.
  */
-export const openSessionInGhostty = (
+export const openSessionInGhostty = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
   terminalMode: string = 'tab',
   customTitle?: string,
   accountLabel?: string,
-): void => {
+): Promise<void> => {
   const { exec } = require('child_process');
 
   if (isActive) {
@@ -2515,7 +2532,7 @@ end tell`;
     });
   } else {
     const resumeCmd = buildResumeCommand(sessionId, accountLabel);
-    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
   }
 };
 
@@ -2524,7 +2541,7 @@ end tell`;
  * Similar to iTerm2 but simpler structure: window → tab (no session layer).
  * TTY matching works via `tty of tab`. Uses `do script` for command execution.
  */
-export const openSessionInTerminalApp = (
+export const openSessionInTerminalApp = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
@@ -2532,7 +2549,7 @@ export const openSessionInTerminalApp = (
   terminalMode: string = 'tab',
   customTitle?: string,
   accountLabel?: string,
-): void => {
+): Promise<void> => {
   const { exec } = require('child_process');
 
   if (isActive && activePid) {
@@ -2578,7 +2595,7 @@ end tell`;
     });
   } else {
     const resumeCmd = buildResumeCommand(sessionId, accountLabel);
-    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
   }
 };
 
@@ -2589,14 +2606,14 @@ end tell`;
  */
 const CMUX_CLI = '/Applications/cmux.app/Contents/Resources/bin/cmux';
 
-export const openSessionInCmux = (
+export const openSessionInCmux = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
   activePid?: number,
   customTitle?: string,
   accountLabel?: string,
-): void => {
+): Promise<void> => {
   const { exec } = require('child_process');
   const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel)}`;
 
@@ -2724,7 +2741,7 @@ export const openSessionInCmux = (
     })();
   } else {
     const resumeCmd = buildResumeCommand(sessionId, accountLabel);
-    runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
   }
 };
 
