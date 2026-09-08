@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.90
+
+- Fix: the **`match …` markers are outlined rather than filled.** They carried the same solid amber as the highlighted words, which was right while a row had at most one of them; [#152](https://github.com/grimmerk/codev/pull/152) made a row carry up to four (`match #N` plus `match path`, `match assistant`, and `match recap` or `match reply`), and at that count the labels competed with the text they point at and could not be told apart from it. They are now amber outlined pills, the shape every other badge on the row already uses (PR, account, terminal), so solid amber means exactly one thing: text the query matched. The `id 4ed7505a` marker follows, keeping the corner radius of the badges beside it on that line. No row is taller for it: the border is drawn on an inline element, which costs no line height
+
 ## 1.0.89
 
 - Feat: a search result explains itself and can be walked ([#141](https://github.com/grimmerk/codev/issues/141), [#146](https://github.com/grimmerk/codev/issues/146))

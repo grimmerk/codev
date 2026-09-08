@@ -61,16 +61,31 @@ const SEARCH_HIGHLIGHT_STYLE = {
   fontWeight: 600,
 } as const;
 
-// Deliberately the SAME amber as SEARCH_HIGHLIGHT_STYLE: the chip and the
-// highlighted words are one system, so the row reads as "search found this
-// here" at a glance. The line's text stays the neutral prompt grey — an amber
-// line body sat too close to the orange last-message line, and the snippet IS
-// a user prompt, so colouring it as one is also the honest choice.
+// The label naming what a snippet line is (`match #N`, `match path`, …).
+//
+// It used to be FILLED with the same amber as SEARCH_HIGHLIGHT_STYLE, which
+// was right while a row carried at most one of them (#139): one chip and the
+// highlighted words read as a single "search found this here" system. PR #152
+// made a row carry up to four — `match #N` plus path, assistant, and recap or
+// reply — and at that count the filled amber competes with the thing it points
+// at, since the label and the matched words are then the same solid block of
+// colour. Reported as noise, and as "I cannot tell a field label from matched
+// text".
+//
+// So the hue stays (the label is still part of the search system) and the
+// weight goes: an outlined pill, which is what every other badge on the row
+// already is (PR, account, terminal). Filled amber now means exactly one
+// thing: text the query actually matched.
+//
+// `display` is deliberately left at inline. An inline border costs no line
+// height and is not clipped by the line's `overflow: hidden`; inline-block
+// adds 2–8px per row, measured 2026-09-08 across four rows of chips.
 const SNIPPET_MARKER_STYLE = {
-  color: SEARCH_HIGHLIGHT_STYLE.color,
-  backgroundColor: SEARCH_HIGHLIGHT_STYLE.backgroundColor,
-  borderRadius: '2px',
-  padding: '0 4px',
+  // The highlight amber, dimmed for text and at half strength for the border.
+  color: '#e0b060',
+  border: '1px solid rgba(245, 185, 66, 0.5)',
+  borderRadius: '9px',
+  padding: '0 6px',
   fontSize: '10px',
   fontWeight: 600,
 } as const;
@@ -3507,8 +3522,12 @@ function SwitcherApp() {
                             <span
                               style={{
                                 fontSize: '10px',
-                                color: '#1a1a1a',
-                                backgroundColor: SEARCH_HIGHLIGHT_STYLE.backgroundColor,
+                                // Amber like the other match markers, but the
+                                // 3px corner of the badges it sits among on
+                                // this line (PR, account, terminal) rather
+                                // than the snippet lines' pill.
+                                color: SNIPPET_MARKER_STYLE.color,
+                                border: SNIPPET_MARKER_STYLE.border,
                                 borderRadius: '3px',
                                 padding: '1px 5px',
                                 fontFamily: 'Menlo, monospace',
