@@ -108,30 +108,48 @@ export const isEmptyQuery = (q: ParsedQuery): boolean =>
   q.after === undefined &&
   q.before === undefined;
 
+interface QueryToken {
+  text: string;
+  /**
+   * Some part of this token was inside double quotes. The quotes are gone by
+   * the time anything reads the token, but whether they were there is the
+   * language's "treat this as literal text" mark, which the operator rule in
+   * `parseQuery` needs: `title: "is:live"` is a title, not a live filter.
+   */
+  quoted: boolean;
+}
+
 /**
  * Split on whitespace, honouring double quotes: `title:"foo bar"` is one
  * token with the quotes removed (`title:foo bar`). An unterminated quote runs
  * to the end of the query, which is what someone still typing expects.
  */
-export const tokenizeQuery = (query: string): string[] => {
-  const out: string[] = [];
+const tokenizeQueryDetailed = (query: string): QueryToken[] => {
+  const out: QueryToken[] = [];
   let cur = '';
+  let inQuotes = false;
   let quoted = false;
   for (const ch of query) {
     if (ch === '"') {
-      quoted = !quoted;
+      inQuotes = !inQuotes;
+      quoted = true;
       continue;
     }
-    if (!quoted && /\s/.test(ch)) {
-      if (cur) out.push(cur);
+    if (!inQuotes && /\s/.test(ch)) {
+      if (cur) out.push({ text: cur, quoted });
       cur = '';
+      quoted = false;
       continue;
     }
     cur += ch;
   }
-  if (cur) out.push(cur);
+  if (cur) out.push({ text: cur, quoted });
   return out;
 };
+
+/** The tokens alone, for callers that do not care how they were written. */
+export const tokenizeQuery = (query: string): string[] =>
+  tokenizeQueryDetailed(query).map((t) => t.text);
 
 // A GitHub owner is alphanumerics and hyphens only — no dot — which is what
 // keeps `example.com/o/pull/1` from reading as owner `example.com`.
@@ -223,14 +241,61 @@ export const parseQueryDate = (value: string, now: number): number | null => {
   return null;
 };
 
+/** Every `key:` the parser understands, for the space-after-colon rule below. */
+const OPERATOR_KEYS: ReadonlySet<string> = new Set([
+  ...SCOPED_FIELDS,
+  'pr',
+  'has',
+  'is',
+  'after',
+  'before',
+]);
+
+/** Is this token itself an operator (`is:live`), rather than a plain value? */
+const isOperatorToken = (token: string): boolean => {
+  const colon = token.indexOf(':');
+  return colon > 0 && OPERATOR_KEYS.has(token.slice(0, colon));
+};
+
+/**
+ * May this token become the value of the operator before it?
+ *
+ * A QUOTED token always may: quotes are the language's mark for literal text,
+ * so `title: "is:live"` is a title of `is:live`, matching what the no-space
+ * `title:"is:live"` has always done.
+ *
+ * An unquoted one may not when it is already a search term in its own right —
+ * another operator, or a PR reference. Those meant something before this rule
+ * existed, and absorbing them would silently delete a term the user asked for:
+ * `title: #137` used to search for PR 137 (and report `title:` as unusable),
+ * so it still does, rather than quietly becoming a title of `#137`.
+ */
+const isTakeableValue = (token: QueryToken): boolean => {
+  if (token.quoted) return true;
+  const lower = token.text.toLowerCase();
+  return !isOperatorToken(lower) && !parsePrRef(lower);
+};
+
 /**
  * Parse the search box. Everything is lowercased; a token with an unknown
  * `key:` prefix (`error:`, `12:30`, a URL that is not a PR) stays a bare
  * word, so the operators cost nothing to queries that do not use them.
+ *
+ * A space after the colon is allowed: `title: ci` reads as `title:ci`. People
+ * type the space (it is how a sentence works, and how most search boxes read),
+ * and a bare `title:` meant nothing before — it was reported as an unreadable
+ * value — so for a plain word the rule only changes queries that were already
+ * errors. Which token may be taken is `isTakeableValue`: quoted text always,
+ * and anything that is not itself a search term (an operator, a PR reference)
+ * otherwise. So `title: is:live` and `title: #137` keep doing what they did,
+ * each with its `title:` reported, and `title: "is:live"` is the way to ask
+ * for that literal title — the same escape hatch as `title:"is:live"`.
  */
 export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
   const q = emptyQuery();
-  for (const raw of tokenizeQuery(query)) {
+  const tokens = tokenizeQueryDetailed(query);
+  for (let i = 0; i < tokens.length; i++) {
+    const raw = tokens[i].text;
     const token = raw.toLowerCase();
     const pr = parsePrRef(token);
     if (pr) {
@@ -239,7 +304,19 @@ export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
     }
     const colon = token.indexOf(':');
     const key = colon > 0 ? token.slice(0, colon) : '';
-    const value = colon > 0 ? token.slice(colon + 1) : '';
+    let value = colon > 0 ? token.slice(colon + 1) : '';
+    // What the warning line shows when the value turns out to be unusable:
+    // both tokens when the next one was taken, so `after: soon` is reported
+    // as the user typed it rather than as a bare `after:`.
+    let shown = raw;
+    if (key && !value && OPERATOR_KEYS.has(key)) {
+      const next = tokens[i + 1];
+      if (next !== undefined && isTakeableValue(next)) {
+        value = next.text.toLowerCase();
+        shown = `${raw} ${next.text}`;
+        i++;
+      }
+    }
     if (key === 'pr') {
       // `pr:147`, `pr:o/r#147`, `pr:<url>` — a number alone is allowed here
       // because the key already says what it is.
@@ -247,20 +324,20 @@ export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
         ? { number: Number(value), strict: true }
         : parsePrRef(value);
       if (ref) q.prRefs.push(ref);
-      else q.ignored.push(raw);
+      else q.ignored.push(shown);
     } else if (SCOPED_FIELDS.has(key)) {
       if (value) q.fields.push({ field: key as ScopedField, value });
-      else q.ignored.push(raw);
+      else q.ignored.push(shown);
     } else if (key === 'has') {
       if (HAS_VALUES.has(value)) q.has.push(value);
-      else q.ignored.push(raw);
+      else q.ignored.push(shown);
     } else if (key === 'is') {
       const v = IS_ALIASES[value] ?? value;
       if (IS_VALUES.has(v)) q.is.push(v);
-      else q.ignored.push(raw);
+      else q.ignored.push(shown);
     } else if (key === 'after' || key === 'before') {
       const t = parseQueryDate(value, now);
-      if (t === null) q.ignored.push(raw);
+      if (t === null) q.ignored.push(shown);
       else if (key === 'after') q.after = Math.max(q.after ?? -Infinity, t);
       else q.before = Math.min(q.before ?? Infinity, t);
     } else if (token) {
