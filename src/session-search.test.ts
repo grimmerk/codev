@@ -494,11 +494,23 @@ describe('parseQuery', () => {
     expect(parseQuery('has: pr', now).has).toEqual(['pr']);
     expect(parseQuery('is: live', now).is).toEqual(['live']);
     expect(parseQuery('after: 7d', now).after).toBe(now - 7 * 24 * 3600 * 1000);
-    expect(parseQuery('before: 3d', now).before).toBe(now - 3 * 24 * 3600 * 1000);
+    expect(parseQuery('before: 3d', now).before).toBe(
+      now - 3 * 24 * 3600 * 1000,
+    );
     // Every scoped field, so a change to SCOPED_FIELDS cannot silently leave
     // one of them out of the rule.
-    for (const field of ['title', 'branch', 'msg', 'project', 'account', 'recap'] as const) {
-      expect(parseQuery(`${field}: x`, now).fields).toEqual([{ field, value: 'x' }]);
+    const scoped = [
+      'title',
+      'branch',
+      'msg',
+      'project',
+      'account',
+      'recap',
+    ] as const;
+    for (const field of scoped) {
+      expect(parseQuery(`${field}: x`, now).fields).toEqual([
+        { field, value: 'x' },
+      ]);
     }
   });
 
