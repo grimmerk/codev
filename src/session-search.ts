@@ -223,14 +223,39 @@ export const parseQueryDate = (value: string, now: number): number | null => {
   return null;
 };
 
+/** Every `key:` the parser understands, for the space-after-colon rule below. */
+const OPERATOR_KEYS: ReadonlySet<string> = new Set([
+  ...SCOPED_FIELDS,
+  'pr',
+  'has',
+  'is',
+  'after',
+  'before',
+]);
+
+/** Is this token itself an operator (`is:live`), rather than a plain value? */
+const isOperatorToken = (token: string): boolean => {
+  const colon = token.indexOf(':');
+  return colon > 0 && OPERATOR_KEYS.has(token.slice(0, colon));
+};
+
 /**
  * Parse the search box. Everything is lowercased; a token with an unknown
  * `key:` prefix (`error:`, `12:30`, a URL that is not a PR) stays a bare
  * word, so the operators cost nothing to queries that do not use them.
+ *
+ * A space after the colon is allowed: `title: ci` reads as `title:ci`. People
+ * type the space (it is how a sentence works, and how most search boxes read),
+ * and a bare `title:` meant nothing before — it was reported as an unreadable
+ * value — so taking the next token only changes queries that were already
+ * errors. The one token never taken is another operator: `title: is:live` is
+ * two fumbled operators, not a title of `is:live`.
  */
 export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
   const q = emptyQuery();
-  for (const raw of tokenizeQuery(query)) {
+  const tokens = tokenizeQuery(query);
+  for (let i = 0; i < tokens.length; i++) {
+    const raw = tokens[i];
     const token = raw.toLowerCase();
     const pr = parsePrRef(token);
     if (pr) {
@@ -239,7 +264,19 @@ export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
     }
     const colon = token.indexOf(':');
     const key = colon > 0 ? token.slice(0, colon) : '';
-    const value = colon > 0 ? token.slice(colon + 1) : '';
+    let value = colon > 0 ? token.slice(colon + 1) : '';
+    // What the warning line shows when the value turns out to be unusable:
+    // both tokens when the next one was taken, so `after: soon` is reported
+    // as the user typed it rather than as a bare `after:`.
+    let shown = raw;
+    if (key && !value && OPERATOR_KEYS.has(key)) {
+      const next = tokens[i + 1];
+      if (next !== undefined && !isOperatorToken(next.toLowerCase())) {
+        value = next.toLowerCase();
+        shown = `${raw} ${next}`;
+        i++;
+      }
+    }
     if (key === 'pr') {
       // `pr:147`, `pr:o/r#147`, `pr:<url>` — a number alone is allowed here
       // because the key already says what it is.
@@ -247,20 +284,20 @@ export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
         ? { number: Number(value), strict: true }
         : parsePrRef(value);
       if (ref) q.prRefs.push(ref);
-      else q.ignored.push(raw);
+      else q.ignored.push(shown);
     } else if (SCOPED_FIELDS.has(key)) {
       if (value) q.fields.push({ field: key as ScopedField, value });
-      else q.ignored.push(raw);
+      else q.ignored.push(shown);
     } else if (key === 'has') {
       if (HAS_VALUES.has(value)) q.has.push(value);
-      else q.ignored.push(raw);
+      else q.ignored.push(shown);
     } else if (key === 'is') {
       const v = IS_ALIASES[value] ?? value;
       if (IS_VALUES.has(v)) q.is.push(v);
-      else q.ignored.push(raw);
+      else q.ignored.push(shown);
     } else if (key === 'after' || key === 'before') {
       const t = parseQueryDate(value, now);
-      if (t === null) q.ignored.push(raw);
+      if (t === null) q.ignored.push(shown);
       else if (key === 'after') q.after = Math.max(q.after ?? -Infinity, t);
       else q.before = Math.min(q.before ?? Infinity, t);
     } else if (token) {

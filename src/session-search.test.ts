@@ -475,6 +475,42 @@ describe('parseQuery', () => {
     expect(q.words).toEqual(['ok']);
   });
 
+  it('reads a space after the colon as part of the operator', () => {
+    const q = parseQuery('title: ci time', now);
+    expect(q.fields).toEqual([{ field: 'title', value: 'ci' }]);
+    expect(q.words).toEqual(['time']);
+    expect(q.ignored).toEqual([]);
+    // Identical to the no-space form, which is the whole point.
+    expect(q).toEqual(parseQuery('title:ci time', now));
+  });
+
+  it('takes a quoted phrase after the space, and works for every operator', () => {
+    expect(parseQuery('title: "two words" rest', now).fields).toEqual([
+      { field: 'title', value: 'two words' },
+    ]);
+    expect(parseQuery('pr: 147', now).prRefs).toEqual([
+      { number: 147, strict: true },
+    ]);
+    expect(parseQuery('has: pr', now).has).toEqual(['pr']);
+    expect(parseQuery('is: live', now).is).toEqual(['live']);
+    expect(parseQuery('after: 7d', now).after).toBe(now - 7 * 24 * 3600 * 1000);
+  });
+
+  it('never takes another operator as the value, and reports what was typed', () => {
+    const q = parseQuery('title: is:live', now);
+    expect(q.fields).toEqual([]);
+    expect(q.is).toEqual(['live']);
+    expect(q.ignored).toEqual(['title:']);
+    // Nothing to take at the end of the query — someone still typing.
+    expect(parseQuery('ci title:', now).ignored).toEqual(['title:']);
+    // When the taken token is unusable, the report shows both halves.
+    expect(parseQuery('after: soon', now).ignored).toEqual(['after: soon']);
+    // An unknown key stays a bare word and takes nothing.
+    const unknown = parseQuery('error: ci', now);
+    expect(unknown.words).toEqual(['error:', 'ci']);
+    expect(unknown.ignored).toEqual([]);
+  });
+
   it('keeps a leading-zero hash as a bare word rather than reading it as a PR', () => {
     const q = parseQuery('#012', now);
     expect(q.prRefs).toEqual([]);
