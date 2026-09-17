@@ -108,30 +108,48 @@ export const isEmptyQuery = (q: ParsedQuery): boolean =>
   q.after === undefined &&
   q.before === undefined;
 
+interface QueryToken {
+  text: string;
+  /**
+   * Some part of this token was inside double quotes. The quotes are gone by
+   * the time anything reads the token, but whether they were there is the
+   * language's "treat this as literal text" mark, which the operator rule in
+   * `parseQuery` needs: `title: "is:live"` is a title, not a live filter.
+   */
+  quoted: boolean;
+}
+
 /**
  * Split on whitespace, honouring double quotes: `title:"foo bar"` is one
  * token with the quotes removed (`title:foo bar`). An unterminated quote runs
  * to the end of the query, which is what someone still typing expects.
  */
-export const tokenizeQuery = (query: string): string[] => {
-  const out: string[] = [];
+const tokenizeQueryDetailed = (query: string): QueryToken[] => {
+  const out: QueryToken[] = [];
   let cur = '';
+  let inQuotes = false;
   let quoted = false;
   for (const ch of query) {
     if (ch === '"') {
-      quoted = !quoted;
+      inQuotes = !inQuotes;
+      quoted = true;
       continue;
     }
-    if (!quoted && /\s/.test(ch)) {
-      if (cur) out.push(cur);
+    if (!inQuotes && /\s/.test(ch)) {
+      if (cur) out.push({ text: cur, quoted });
       cur = '';
+      quoted = false;
       continue;
     }
     cur += ch;
   }
-  if (cur) out.push(cur);
+  if (cur) out.push({ text: cur, quoted });
   return out;
 };
+
+/** The tokens alone, for callers that do not care how they were written. */
+export const tokenizeQuery = (query: string): string[] =>
+  tokenizeQueryDetailed(query).map((t) => t.text);
 
 // A GitHub owner is alphanumerics and hyphens only — no dot — which is what
 // keeps `example.com/o/pull/1` from reading as owner `example.com`.
@@ -240,6 +258,25 @@ const isOperatorToken = (token: string): boolean => {
 };
 
 /**
+ * May this token become the value of the operator before it?
+ *
+ * A QUOTED token always may: quotes are the language's mark for literal text,
+ * so `title: "is:live"` is a title of `is:live`, matching what the no-space
+ * `title:"is:live"` has always done.
+ *
+ * An unquoted one may not when it is already a search term in its own right —
+ * another operator, or a PR reference. Those meant something before this rule
+ * existed, and absorbing them would silently delete a term the user asked for:
+ * `title: #137` used to search for PR 137 (and report `title:` as unusable),
+ * so it still does, rather than quietly becoming a title of `#137`.
+ */
+const isTakeableValue = (token: QueryToken): boolean => {
+  if (token.quoted) return true;
+  const lower = token.text.toLowerCase();
+  return !isOperatorToken(lower) && !parsePrRef(lower);
+};
+
+/**
  * Parse the search box. Everything is lowercased; a token with an unknown
  * `key:` prefix (`error:`, `12:30`, a URL that is not a PR) stays a bare
  * word, so the operators cost nothing to queries that do not use them.
@@ -247,15 +284,18 @@ const isOperatorToken = (token: string): boolean => {
  * A space after the colon is allowed: `title: ci` reads as `title:ci`. People
  * type the space (it is how a sentence works, and how most search boxes read),
  * and a bare `title:` meant nothing before — it was reported as an unreadable
- * value — so taking the next token only changes queries that were already
- * errors. The one token never taken is another operator: `title: is:live` is
- * two fumbled operators, not a title of `is:live`.
+ * value — so for a plain word the rule only changes queries that were already
+ * errors. Which token may be taken is `isTakeableValue`: quoted text always,
+ * and anything that is not itself a search term (an operator, a PR reference)
+ * otherwise. So `title: is:live` and `title: #137` keep doing what they did,
+ * each with its `title:` reported, and `title: "is:live"` is the way to ask
+ * for that literal title — the same escape hatch as `title:"is:live"`.
  */
 export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
   const q = emptyQuery();
-  const tokens = tokenizeQuery(query);
+  const tokens = tokenizeQueryDetailed(query);
   for (let i = 0; i < tokens.length; i++) {
-    const raw = tokens[i];
+    const raw = tokens[i].text;
     const token = raw.toLowerCase();
     const pr = parsePrRef(token);
     if (pr) {
@@ -271,9 +311,9 @@ export const parseQuery = (query: string, now = Date.now()): ParsedQuery => {
     let shown = raw;
     if (key && !value && OPERATOR_KEYS.has(key)) {
       const next = tokens[i + 1];
-      if (next !== undefined && !isOperatorToken(next.toLowerCase())) {
-        value = next.toLowerCase();
-        shown = `${raw} ${next}`;
+      if (next !== undefined && isTakeableValue(next)) {
+        value = next.text.toLowerCase();
+        shown = `${raw} ${next.text}`;
         i++;
       }
     }
