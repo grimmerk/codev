@@ -8,6 +8,9 @@ interface CodevAccountInfo {
   dir: string;
   isAnchor: boolean; // the anchor ~/.claude account (not the dispatcher default)
   isCurrentDefault: boolean; // what bare `claude` resolves to
+  // Launch this account with its auto-memory redirected to the anchor's, per
+  // project. Always false/absent on the anchor itself.
+  shareMemoryWithAnchor?: boolean;
   email?: string;
   org?: string;
   loggedIn?: boolean;
@@ -62,6 +65,10 @@ interface IElectronAPI {
     changed?: boolean;
     path?: string;
   }>;
+  setAccountShareMemory: (
+    label: string,
+    on: boolean,
+  ) => Promise<{ ok: boolean; error?: string }>;
   getAccountShareStatus: (label: string) => Promise<{
     ok: boolean;
     error?: string;

@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('accounts-set-default', label),
   setAccountsShellHook: (action: 'install' | 'uninstall') =>
     ipcRenderer.invoke('accounts-shell-hook', action),
+  setAccountShareMemory: (label: string, on: boolean) =>
+    ipcRenderer.invoke('accounts-share-memory', label, on),
   getAccountShareStatus: (label: string) =>
     ipcRenderer.invoke('accounts-share-status', label),
   shareAccountItem: (label: string, item: string, mode: 'link' | 'copy') =>

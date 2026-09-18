@@ -20,6 +20,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { memoryShellHelper } from './memory-dir';
 
 export interface RegistryAccount {
   label: string;
@@ -31,6 +32,10 @@ export interface RegistryAccount {
   // GLOBAL DEFAULT (`defaultAccount` below, what bare `claude` opens) — the
   // field was historically called `isDefault`, which conflated the two.
   isAnchor: boolean;
+  // Redirect this account's auto-memory to the anchor's, per project, at every
+  // launch (see memory-dir.ts). Anchor accounts ignore it — their memory is
+  // already the shared copy.
+  shareMemoryWithAnchor?: boolean;
   email?: string;
   org?: string;
   subscription?: string;
@@ -203,13 +208,24 @@ export function resolveDefaultLabel(reg: Registry): string | undefined {
  * dispatcher. `env` runs the real binary (no shell-function recursion) and lets
  * us set — or explicitly unset — CLAUDE_CONFIG_DIR.
  */
-function launchCmd(account: RegistryAccount | undefined): string {
+function launchCmd(
+  account: RegistryAccount | undefined,
+  // A session launch, as opposed to `claude-whoami`'s `auth status`: only a
+  // session needs its auto-memory redirected.
+  forSession = false,
+): string {
   if (!account || !account.configDirEnv) {
     // Default/anchor account: unset CLAUDE_CONFIG_DIR so a stray exported value
-    // can't hijack it (§3.4).
+    // can't hijack it (§3.4). The anchor's memory is already the shared one.
     return 'env -u CLAUDE_CONFIG_DIR claude ';
   }
-  return `env CLAUDE_CONFIG_DIR="${toShellPath(expandHome(account.configDirEnv))}" claude `;
+  // Computed per launch, not baked in: the directory depends on the repository
+  // the shell is sitting in when the command runs.
+  const memory =
+    forSession && account.shareMemoryWithAnchor === true
+      ? '--settings "$(_codev_memory_settings)" '
+      : '';
+  return `env CLAUDE_CONFIG_DIR="${toShellPath(expandHome(account.configDirEnv))}" claude ${memory}`;
 }
 
 /** Render the accounts.sh contents from a registry object. Pure function. */
@@ -265,9 +281,27 @@ export function generateAccountsSh(reg: Registry): string {
     '# All native flags pass through, e.g. `claude work -r`, `claude-work mcp list`.',
   );
   L.push('');
+  // The helper the launchers below call. Emitted only when an account shares
+  // memory, so the generated file stays as short as it was for everyone else.
+  // The launchers below call the helper whenever an account carries the flag,
+  // so the helper has to exist in exactly those cases — including a partial
+  // registry with no anchor marked, which falls back the way getAnchorDir does.
+  if (
+    accounts.some((a) => a.shareMemoryWithAnchor === true && a.configDirEnv)
+  ) {
+    const anchor = accounts.find((a) => a.isAnchor);
+    L.push(
+      memoryShellHelper(
+        path.resolve(
+          anchor ? expandHome(anchor.dir) : path.join(os.homedir(), '.claude'),
+        ),
+      ),
+    );
+    L.push('');
+  }
   L.push('# --- per-account launchers (full passthrough via "$@") ---');
   for (const a of accounts) {
-    L.push(`claude-${a.label}() { ${launchCmd(a)}"$@"; }`);
+    L.push(`claude-${a.label}() { ${launchCmd(a, true)}"$@"; }`);
   }
   L.push('');
   L.push(
@@ -279,9 +313,9 @@ export function generateAccountsSh(reg: Registry): string {
   L.push('claude() {');
   L.push('  case "$1" in');
   for (const a of accounts) {
-    L.push(`    ${a.label}) shift; ${launchCmd(a)}"$@" ;;`);
+    L.push(`    ${a.label}) shift; ${launchCmd(a, true)}"$@" ;;`);
   }
-  L.push(`    *) ${launchCmd(defaultAccount)}"$@" ;;`);
+  L.push(`    *) ${launchCmd(defaultAccount, true)}"$@" ;;`);
   L.push('  esac');
   L.push('}');
   L.push('');
@@ -359,20 +393,21 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('    compadd account');
     L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
     L.push(
-      '    compadd list add default remove rm rename share unshare sync-settings regenerate show install uninstall help',
+      '    compadd list add default remove rm rename share unshare share-memory sync-settings regenerate show install uninstall help',
     );
     L.push('  elif (( CURRENT == 4 )) && [ "${words[2]}" = "account" ]; then');
     L.push('    case "${words[3]}" in');
     if (allLabels) L.push(`      default|rename) compadd ${allLabels} ;;`);
     if (removable) {
       L.push(
-        `      remove|rm|share|unshare|sync-settings) compadd ${removable} ;;`,
+        `      remove|rm|share|unshare|share-memory|sync-settings) compadd ${removable} ;;`,
       );
     }
     L.push('    esac');
     L.push('  elif (( CURRENT == 5 )) && [ "${words[2]}" = "account" ]; then');
     L.push('    case "${words[3]}" in');
     L.push('      share|unshare) compadd claude-md skills commands ;;');
+    L.push('      share-memory) compadd on off ;;');
     L.push(
       '      sync-settings) compadd statusLine model effortLevel theme ;;',
     );
@@ -605,6 +640,26 @@ export function setDefault(label: string): void {
     throw new Error(`No account "${label}"`);
   }
   reg.defaultAccount = label;
+  writeRegistry(reg);
+  regenerate(reg);
+}
+
+/**
+ * Turn shared auto-memory on or off for one non-anchor account, then
+ * regenerate accounts.sh so the shell dispatcher agrees with CodeV's own
+ * launchers. Refuses the anchor: its memory already IS the shared copy, so a
+ * flag there would only look like it did something.
+ */
+export function setShareMemory(label: string, on: boolean): void {
+  const reg = readRegistry();
+  const account = reg.accounts.find((a) => a.label === label);
+  if (!account) throw new Error(`No account "${label}"`);
+  if (account.isAnchor || !account.configDirEnv) {
+    throw new Error(
+      `"${label}" is the anchor account — its memory is the one others share`,
+    );
+  }
+  account.shareMemoryWithAnchor = on;
   writeRegistry(reg);
   regenerate(reg);
 }

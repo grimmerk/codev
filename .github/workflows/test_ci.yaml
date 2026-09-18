@@ -16,6 +16,11 @@ jobs:
         with:
           node-version: 22
           cache: yarn
+      # The generated accounts.sh is sourced by zsh in real use, and the
+      # memory-dir tests run its helper to pin the shell rule against the
+      # TypeScript one. Ubuntu runners have bash but not zsh.
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh
       - name: Install dependencies
         run: yarn install --frozen-lockfile
       - name: Run tests

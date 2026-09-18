@@ -211,7 +211,7 @@ The registry records `configDirEnv` (null for default, the dir for extras) and
 | `settings.json` (model, hooks, permissions, env) | Config dir | Optional symlink (careful) | Symlink ⇒ hooks/permissions shared; or install hook per-dir (§6.F) |
 | Single `settings.json` keys (`statusLine`, `model`, `effortLevel`, `theme`) | Config dir | **Yes — per-key copy** | Copy the key into the other account's settings.json (statusLine done for `work` 2026-07; HOME-based script serves all accounts) |
 | `.claude.json` (identity + per-project trust) | Config dir | **No — never symlink** | Holds `oauthAccount`; must stay per-account |
-| Auto-memory (`projects/<path>/memory/`, `MEMORY.md`) | Config dir | No by default | Per-account, or advanced: symlink individual `memory/` subdirs |
+| Auto-memory (`projects/<path>/memory/`, `MEMORY.md`) | Config dir | No by default → **opt-in, per project** | A launch-time redirect, not a symlink — see §5.1 |
 | Session data (`history.jsonl`, `projects/*.jsonl`, `sessions/`) | Config dir | **No — aggregated for display, not shared** | CodeV scans all dirs (§6.E) |
 
 **Verified 2026-07-09:** Claude Code follows symlinks for both `skills/<name>` entries
@@ -254,6 +254,64 @@ e.g. `statusLine` (done manually for `work`, 2026-07: same
 path is HOME-based and Claude Code feeds it the session's own context via stdin).
 Candidates for a future `codev account sync-settings <keys>`: `statusLine`, `model`,
 `effortLevel`, `theme`. Hooks stay per-dir (§6.F installs them per account).
+
+### 5.1 Shared auto-memory — a launch-time redirect, not a symlink
+
+Auto-memory is stored per project, under `<config dir>/projects/<slug>/memory/`,
+so two accounts on one machine keep two separate memories for the same
+repository. Symlinking is the wrong tool here: there is one directory per
+project, a new one appears whenever a repository is first opened, and each
+would need its own link.
+
+Claude Code reads `autoMemoryDirectory` from any settings scope, and
+`--settings` is a scope that accepts a JSON string, so a launcher can point one
+launch at another account's memory without writing to either account's
+`settings.json` and without putting anything inside the repository. The
+directory has to be computed per launch, because it depends on the repository
+the session starts in.
+
+**The slug rule** (measured against Claude Code 2.1.276, 2026-09-18):
+
+- the key is the **git common directory's parent**, so a repository, its
+  subdirectories and all of its linked worktrees share one memory. Verified on
+  disk against a real linked worktree: it reports the main repository's `.git`,
+  and `projects/` holds only the main repository's slug — no second directory
+  for the worktree's own path;
+- outside a git repository the key is the working directory itself, **resolved**: Claude Code keys on `process.cwd()`, so a shell sitting in `/tmp` is filed under `-private-tmp`. The git branch is already immune, since `git rev-parse` reports a resolved path;
+- the slug is that absolute path with every non-alphanumeric byte replaced by
+  `-`, case preserved.
+
+**Three launch paths, one rule.** A session under a non-anchor account can
+start in three ways, and each needed the redirect separately — covering only
+the shell dispatcher would have left CodeV's own buttons writing to the old
+place:
+
+| Path | Where the redirect is added |
+|---|---|
+| `claude ff …` (the generated `accounts.sh` dispatcher, and `claude-ff`) | `_codev_memory_settings` computes the payload from `$PWD` at launch; inline JSON is safe in a plain shell |
+| CodeV resume (`buildResumeCommand`) | `--settings <file>` written to `~/.config/codev/memory-settings/<slug>.json` |
+| CodeV new session under a picked account (`launchNewClaudeSession`) | the same file |
+
+CodeV's two paths use a **file** rather than inline JSON because they embed the
+command in an AppleScript string, and two of the four terminals interpolate it
+unescaped — Ghostty's `initial input:"…"` and cmux's `--command "…"` — so a
+JSON payload's double quotes would end the string and the launch would fail.
+(iTerm2 and Terminal.app do escape.) A path under `~/.config/codev` contains no
+quotes at all. The rule itself lives once, in `src/cli/memory-dir.ts`; the
+shell function is generated from the same module and `memory-dir.test.ts` runs
+it under zsh to assert the two agree for a repository, a subdirectory, a linked
+worktree and a plain directory.
+
+**What is not shared: the session transcript.** Claude Code still writes it to
+the launching account's own `projects/<slug>/`, confirmed by probe — the slug
+directory is created for the transcript with no `memory/` inside it. That is
+what keeps CodeV's per-account session attribution (§6.E) working, and it is
+why this is memory sharing rather than session sharing.
+
+**Known gap, stated in the UI.** A session started outside both launchers — a
+bare `CLAUDE_CONFIG_DIR=… claude`, or the VS Code extension — uses that
+account's own memory for that session. Nothing breaks; it simply does not see
+the shared copy.
 
 ---
 

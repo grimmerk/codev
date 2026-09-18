@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import * as fs from 'fs';
 import { writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -37,6 +38,68 @@ function reg(overrides: Partial<Registry> = {}): Registry {
     ...overrides,
   };
 }
+
+describe('generateAccountsSh — shared auto-memory', () => {
+  /** The same registry with the work account sharing the anchor's memory. */
+  const shared = () => {
+    const r = reg();
+    r.accounts[1].shareMemoryWithAnchor = true;
+    return r;
+  };
+
+  it('adds nothing at all while no account shares memory', () => {
+    expect(generateAccountsSh(reg())).not.toContain('_codev_memory_settings');
+  });
+
+  it('redirects only the sharing account, at every one of its launchers', () => {
+    const sh = generateAccountsSh(shared());
+    expect(sh).toContain('_codev_memory_settings() {');
+    expect(sh).toContain(
+      'claude-work() { env CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --settings "$(_codev_memory_settings)" "$@"; }',
+    );
+    expect(sh).toContain(
+      'work) shift; env CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --settings "$(_codev_memory_settings)" "$@" ;;',
+    );
+    // The anchor already writes to the shared directory, so it is untouched.
+    expect(sh).toContain(
+      'claude-personal() { env -u CLAUDE_CONFIG_DIR claude "$@"; }',
+    );
+  });
+
+  it('follows the global default when that is the sharing account', () => {
+    const r = shared();
+    r.defaultAccount = 'work';
+    expect(generateAccountsSh(r)).toContain(
+      '*) env CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --settings "$(_codev_memory_settings)" "$@" ;;',
+    );
+  });
+
+  it('leaves claude-whoami alone — `auth status` is not a session', () => {
+    const sh = generateAccountsSh(shared());
+    const whoami = sh.slice(sh.indexOf('claude-whoami() {'));
+    expect(whoami).not.toContain('_codev_memory_settings');
+  });
+
+  it('still defines the helper when no account is marked as the anchor', () => {
+    // A partial hand-written registry: the launcher calls the helper, so the
+    // helper has to exist — falling back to ~/.claude the way getAnchorDir does.
+    const r = shared();
+    r.accounts = r.accounts.map((a) => ({ ...a, isAnchor: false }));
+    const sh = generateAccountsSh(r);
+    expect(sh).toContain('_codev_memory_settings() {');
+    expect(sh).toContain(path.join(HOME, '.claude'));
+  });
+
+  it('is still syntactically valid shell with the helper in it', () => {
+    const file = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'accounts-sh-')),
+      'accounts.sh',
+    );
+    fs.writeFileSync(file, generateAccountsSh(shared()));
+    expect(() => execFileSync('bash', ['-n', file])).not.toThrow();
+    expect(() => execFileSync('zsh', ['-n', file])).not.toThrow();
+  });
+});
 
 describe('generateAccountsSh', () => {
   it('launches the default account with CLAUDE_CONFIG_DIR unset', () => {
@@ -143,15 +206,16 @@ describe('generateAccountsSh', () => {
     expect(sh).toContain('_codev() {');
     expect(sh).toContain('compdef _codev codev');
     expect(sh).toContain(
-      'compadd list add default remove rm rename share unshare sync-settings regenerate show install uninstall help',
+      'compadd list add default remove rm rename share unshare share-memory sync-settings regenerate show install uninstall help',
     );
     expect(sh).toContain('default|rename) compadd personal work ;;');
     // anchor (personal) is not removable/shareable-to
     expect(sh).toContain(
-      'remove|rm|share|unshare|sync-settings) compadd work ;;',
+      'remove|rm|share|unshare|share-memory|sync-settings) compadd work ;;',
     );
     // item + key completion at position 5
     expect(sh).toContain('share|unshare) compadd claude-md skills commands ;;');
+    expect(sh).toContain('share-memory) compadd on off ;;');
     expect(sh).toContain(
       'sync-settings) compadd statusLine model effortLevel theme ;;',
     );

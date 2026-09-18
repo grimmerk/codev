@@ -40,6 +40,9 @@ Usage:
                                      Remove the link (source untouched);
                                      --restore-backup = undo a share that displaced
                                      own content; --keep-copy = keep a real copy
+  codev account share-memory <name> on|off
+                                     Point this account's auto-memory at the
+                                     anchor's, per project, at every launch
   codev account sync-settings <name> <key...>
                                      Copy settings.json keys from the anchor
                                      (allowed: statusLine, model, effortLevel, theme)
@@ -274,6 +277,28 @@ function main(): number {
           '  the source is untouched — share --link again to re-attach',
         );
       }
+      return 0;
+    }
+
+    case 'share-memory': {
+      const [name, state] = rest.filter((a) => !a.startsWith('-'));
+      if (!name) {
+        console.error('share-memory: <name> is required');
+        return 1;
+      }
+      if (state !== 'on' && state !== 'off') {
+        console.error(
+          `share-memory: state must be on or off (got "${state ?? ''}")`,
+        );
+        return 1;
+      }
+      manager.setShareMemory(name, state === 'on');
+      console.log(
+        state === 'on'
+          ? `✓ "${name}" now uses the anchor's auto-memory, per project`
+          : `✓ "${name}" uses its own auto-memory again`,
+      );
+      reloadHint();
       return 0;
     }
 
