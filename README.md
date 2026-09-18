@@ -137,6 +137,8 @@ Run multiple Claude Code accounts (e.g. personal + work) on one machine. Each ac
 
 Tab completion included (zsh): `claude <TAB>` completes account names; `codev account <TAB>` completes subcommands and labels. (The `claude` completion is registered only when nothing else completes `claude` — if you already have one, account names won't be injected into it.)
 
+> **In cmux, use the `claude-<name>` form.** cmux's own shell integration installs a `claude` wrapper *after* `~/.zshrc` is read, which replaces this dispatcher — so `claude work` there does not switch accounts; it hands `work` to Claude Code as the initial prompt and starts the session under the anchor, with no error ([#161](https://github.com/grimmerk/codev/issues/161)). `claude-work` is untouched and works, and so does CodeV's own account picker, which never goes through the dispatcher.
+
 The **default account** can be launched three equivalent ways: bare `claude`, `claude <its-name>`, or `claude-<its-name>` (the UI's row shows this).
 
 **`codev account` CLI** (the account manager — same generator the Settings UI uses):
@@ -155,6 +157,7 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 | `codev account share <name> <item> --link\|--copy [--entry E]` | Share the anchor's item — link stays in sync, copy forks |
 | `codev account unshare <name> <item> [--entry E] [--restore-backup\|--keep-copy]` | Remove the link; `--restore-backup` = true undo, `--keep-copy` = keep a fork |
 | `codev account sync-settings <name> <key...>` | Copy settings keys from the anchor (`statusLine`, `model`, `effortLevel`, `theme`) |
+| `codev account share-memory <name> on\|off` | Point that account's auto-memory at the anchor's, per project (see **Shared auto-memory** below) |
 
 > **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`). One folder = one account: registering an already-registered folder under a second name is rejected.
 >
@@ -172,26 +175,44 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 | Already running a second account by hand (own shell function + custom folder) | Register it with `codev account add <name> --dir <your-folder>` — **any folder works**; `~/.claude-<name>` is only the default. Identity and sessions attach immediately, no re-login. If your hand-rolled wrapper was named `claude`, retire it (it would fight the generated dispatcher). |
 | Wondering why a name maps to a different folder | Renames change only the name side of the *name → folder* mapping; folders never move (credentials are keyed by the folder path) — the UI shows `· folder: …` on the row when they diverge. |
 
-> Not yet supported: auto-detecting existing config folders for one-click registration, and a warning when `accounts.sh` overrides a hand-rolled `claude()` shell function ([#127](https://github.com/grimmerk/codev/issues/127)); continuing an existing conversation under a *different* account — "copy-fork" — needs transcript-level workarounds first ([#128](https://github.com/grimmerk/codev/issues/128)).
+> Not yet supported: auto-detecting existing config folders for one-click registration, and a warning when `accounts.sh` overrides a hand-rolled `claude()` shell function ([#127](https://github.com/grimmerk/codev/issues/127)) — or when something else overrides *it*, which is what cmux does ([#161](https://github.com/grimmerk/codev/issues/161)); continuing an existing conversation under a *different* account — "copy-fork" — needs transcript-level workarounds first ([#128](https://github.com/grimmerk/codev/issues/128)).
 
-The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. CodeV refreshes `accounts.sh` on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
+The `codev` command runs the CLI **bundled inside CodeV.app** (`ELECTRON_RUN_AS_NODE`) — no system Node, no sudo, no PATH edits. A **packaged** CodeV refreshes `accounts.sh` from its own bundled generator on every launch, so moving or renaming the app self-heals. (Not available in MAS builds — sandboxed.)
+
+> **The refresh is packaged-only, and an older app downgrades the file.** `yarn start` skips it entirely (the sync returns early unless `app.isPackaged`), so a development run never rewrites `accounts.sh`. The flip side is that the *last thing to run* decides the file's contents: regenerate from a newer checkout with `yarn account regenerate`, then launch an older installed CodeV, and the older app's template silently replaces it — the registry still says what you configured, but the generated functions are the old ones. Install the matching build rather than relying on a hand-run regenerate.
 
 **Cross-account sharing** (also in the UI: each account row's **Sharing** button):
 
 Share the anchor's global files with other accounts — per item, three choices: **Link** (symlink; one file, stays in sync, edits from either side land in the same place), **Copy** (independent fork), or skip. Never silently overwrites: existing content is backed up to a timestamped `.codev-bak-*` sibling first, which also makes **Unlink & restore** a true undo. Plain Unlink loses nothing (the anchor's copy is untouched; re-link anytime). The panel also has one-click **settings-key sync** buttons (`statusLine` / `model` / `effortLevel` / `theme`) and refreshes automatically when the window regains focus (so terminal-side file changes show up live).
 
+The same panel carries one checkbox that is neither Link nor Copy — **Memory: share with the anchor, per project** — because auto-memory is redirected at launch rather than on disk. See **Shared auto-memory** below.
+
 | Item | Shareable? | How |
 |------|------------|-----|
 | Global `CLAUDE.md`, `skills/`, `commands/` | ✅ | Link or Copy (verified: Claude Code follows symlinks) |
 | `statusLine` / `model` / `effortLevel` / `theme` | ✅ | `sync-settings` (per-key copy — they live in `settings.json`) |
+| Auto-memory (`projects/<slug>/memory/`) | ✅ | **Not** a symlink — a per-launch `--settings` redirect, per project. See below |
 | `plugins/` | ❌ | Per-account install state with absolute paths. Install and enable plugins in each account separately — `enabledPlugins` is per-account and **not** a syncable key |
 | `.claude.json`, session data, hooks | ❌ | Identity / live-written / installed per-dir by CodeV |
+
+**Shared auto-memory** (Settings → Accounts → **Sharing** → *Memory: share with the anchor, per project*, or `codev account share-memory <name> on|off`):
+
+Claude Code keeps auto-memory **per project**, under each account's own config dir, so two accounts on one machine keep two separate memories for the same repository. Turning this on points a non-anchor account at the **anchor's** copy of whichever project a session starts in. It is off by default, and the anchor is never offered it — the anchor's memory is the one everyone else shares.
+
+The redirect is computed at launch and passed as `--settings`, so nothing is written into the repository and neither account's `settings.json` is touched. One repository means one memory: a repository, its subdirectories and all of its linked worktrees resolve to the same key (Claude Code keys on the git common directory's parent; outside a repository it is the working directory itself, with symlinks resolved).
+
+| | |
+|---|---|
+| **Shared** | Auto-memory for the project a session starts in |
+| **Not shared** | Session transcripts — Claude Code still writes them under the launching account, which is what keeps CodeV's per-account session attribution working |
+| **Carries the redirect** | `claude <name>` through the generated `accounts.sh`; CodeV's resume; CodeV's new-session launch under a picked account |
+| **Does not** | A session started outside both — a bare `CLAUDE_CONFIG_DIR=… claude`, or the VS Code extension — uses that account's own memory for that session. Nothing breaks; it just does not see the shared one |
 
 **In the CodeV UI:**
 
 | Where | What |
 |-------|------|
-| Settings → Accounts | List/add/remove/rename accounts, set the global default, install shell integration, per-account **Sharing** panel (link/copy/unlink + settings-key sync) |
+| Settings → Accounts | List/add/remove/rename accounts, set the global default, install shell integration, per-account **Sharing** panel (link/copy/unlink, settings-key sync, shared auto-memory) |
 | Sessions tab | Sessions from all accounts with account badges; resume uses each session's own account |
 | Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
 
