@@ -277,7 +277,7 @@ the session starts in.
   disk against a real linked worktree: it reports the main repository's `.git`,
   and `projects/` holds only the main repository's slug — no second directory
   for the worktree's own path;
-- outside a git repository the key is the working directory itself;
+- outside a git repository the key is the working directory itself, **resolved**: Claude Code keys on `process.cwd()`, so a shell sitting in `/tmp` is filed under `-private-tmp`. The git branch is already immune, since `git rev-parse` reports a resolved path;
 - the slug is that absolute path with every non-alphanumeric byte replaced by
   `-`, case preserved.
 

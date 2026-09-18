@@ -109,6 +109,30 @@ describe('the shell helper agrees with the TypeScript rule', () => {
     }
   });
 
+  it('uses the physical path when a directory is reached through a symlink', () => {
+    // `cd` through a symlink leaves $PWD logical, and Claude Code files the
+    // session under the physical path — measured against a real session whose
+    // shell sat in /tmp. `zsh -c 'cd …'` reproduces the logical $PWD that
+    // execFileSync's own cwd option cannot.
+    const real = path.join(base, 'real-dir');
+    const link = path.join(base, 'link-to-dir');
+    fs.mkdirSync(real, { recursive: true });
+    fs.symlinkSync(real, link);
+    const script = path.join(base, 'helper-link.sh');
+    fs.writeFileSync(
+      script,
+      `${memoryShellHelper(ANCHOR)}\ncd ${JSON.stringify(link)}\n_codev_memory_settings\n`,
+    );
+    const out = execFileSync('zsh', [script], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    expect(out).toBe(memorySettingsJson(anchorMemoryDir(ANCHOR, real)));
+    expect(JSON.parse(out).autoMemoryDirectory).toContain(memorySlug(real));
+    // And the TypeScript side resolves the link the same way.
+    expect(memoryProjectRoot(link)).toBe(real);
+  });
+
   it('ignores inherited git discovery variables', () => {
     // A launching shell exporting GIT_DIR must not key the memory to another
     // repository — and the fix must UNSET it, since an empty GIT_DIR makes

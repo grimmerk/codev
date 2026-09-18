@@ -28,6 +28,16 @@ import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 
+/** `fs.realpathSync`, falling back to the path itself when it does not exist. */
+const realPath = (p: string): string => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('fs').realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+
 const GIT_DISCOVERY_VARS = [
   'GIT_DIR',
   'GIT_COMMON_DIR',
@@ -48,7 +58,13 @@ const envWithoutGitDiscovery = (): NodeJS.ProcessEnv => {
 
 /** The directory Claude Code keys this project's auto-memory on. */
 export const memoryProjectRoot = (cwd: string): string => {
-  const start = path.resolve(cwd);
+  // Physical, not logical. Claude Code keys on `process.cwd()`, which resolves
+  // symlinks, so a directory reached through one has to resolve the same way
+  // here: measured 2026-09-19, a session whose shell sat in `/tmp` (a symlink
+  // to `private/tmp`) was filed under `-private-tmp`. The git branch below is
+  // already immune — `git rev-parse` reports a resolved path — so this only
+  // matters for the fallback, which is exactly where it used to differ.
+  const start = realPath(path.resolve(cwd));
   try {
     const out = execFileSync(
       'git',
@@ -173,7 +189,10 @@ export const memoryShellHelper = (anchorDir: string): string =>
     '  root=$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \\',
     '    -u GIT_DISCOVERY_ACROSS_FILESYSTEM \\',
     '    git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)',
-    '  if [ -n "$root" ]; then root="${root%/*}"; else root="$PWD"; fi',
+    // `pwd -P`, not `$PWD`: `cd` through a symlink leaves $PWD logical
+    // (`/tmp`), while Claude Code files the session under the physical path
+    // (`/private/tmp`).
+    '  if [ -n "$root" ]; then root="${root%/*}"; else root="$(pwd -P)"; fi',
     // `tr` first: a newline would otherwise survive as a line separator (perl
     // is line-based here) and land raw inside the JSON string.
     //
