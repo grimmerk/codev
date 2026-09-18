@@ -282,8 +282,14 @@ function main(): number {
 
     case 'share-memory': {
       const [name, state] = rest.filter((a) => !a.startsWith('-'));
-      if (!name || (state !== 'on' && state !== 'off')) {
-        console.error('share-memory: <name> and on|off are required');
+      if (!name) {
+        console.error('share-memory: <name> is required');
+        return 1;
+      }
+      if (state !== 'on' && state !== 'off') {
+        console.error(
+          `share-memory: state must be on or off (got "${state ?? ''}")`,
+        );
         return 1;
       }
       manager.setShareMemory(name, state === 'on');

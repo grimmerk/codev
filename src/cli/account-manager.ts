@@ -222,7 +222,7 @@ function launchCmd(
   // Computed per launch, not baked in: the directory depends on the repository
   // the shell is sitting in when the command runs.
   const memory =
-    forSession && account.shareMemoryWithAnchor
+    forSession && account.shareMemoryWithAnchor === true
       ? '--settings "$(_codev_memory_settings)" '
       : '';
   return `env CLAUDE_CONFIG_DIR="${toShellPath(expandHome(account.configDirEnv))}" claude ${memory}`;
@@ -283,9 +283,18 @@ export function generateAccountsSh(reg: Registry): string {
   L.push('');
   // The helper the launchers below call. Emitted only when an account shares
   // memory, so the generated file stays as short as it was for everyone else.
-  const anchor = accounts.find((a) => a.isAnchor);
-  if (anchor && accounts.some((a) => a.shareMemoryWithAnchor && a.configDirEnv)) {
-    L.push(memoryShellHelper(expandHome(anchor.dir)));
+  // The launchers below call the helper whenever an account carries the flag,
+  // so the helper has to exist in exactly those cases — including a partial
+  // registry with no anchor marked, which falls back the way getAnchorDir does.
+  if (accounts.some((a) => a.shareMemoryWithAnchor === true && a.configDirEnv)) {
+    const anchor = accounts.find((a) => a.isAnchor);
+    L.push(
+      memoryShellHelper(
+        path.resolve(
+          anchor ? expandHome(anchor.dir) : path.join(os.homedir(), '.claude'),
+        ),
+      ),
+    );
     L.push('');
   }
   L.push('# --- per-account launchers (full passthrough via "$@") ---');

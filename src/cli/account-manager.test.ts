@@ -80,6 +80,16 @@ describe('generateAccountsSh — shared auto-memory', () => {
     expect(whoami).not.toContain('_codev_memory_settings');
   });
 
+  it('still defines the helper when no account is marked as the anchor', () => {
+    // A partial hand-written registry: the launcher calls the helper, so the
+    // helper has to exist — falling back to ~/.claude the way getAnchorDir does.
+    const r = shared();
+    r.accounts = r.accounts.map((a) => ({ ...a, isAnchor: false }));
+    const sh = generateAccountsSh(r);
+    expect(sh).toContain('_codev_memory_settings() {');
+    expect(sh).toContain(path.join(HOME, '.claude'));
+  });
+
   it('is still syntactically valid shell with the helper in it', () => {
     const file = path.join(
       fs.mkdtempSync(path.join(os.tmpdir(), 'accounts-sh-')),

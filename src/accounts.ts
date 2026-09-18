@@ -131,7 +131,9 @@ export const getAccounts = (): CodevAccount[] => {
           configDirEnv,
           identityFile,
           isAnchor,
-          shareMemoryWithAnchor: !!a.shareMemoryWithAnchor,
+          // Strictly `true`: a hand-written registry carrying the STRING
+          // "false" must not switch an account into the anchor's memory.
+          shareMemoryWithAnchor: a.shareMemoryWithAnchor === true,
           email: a.email,
           org: a.org,
           subscription: a.subscription,
@@ -181,8 +183,12 @@ export const getAccountByLabel = (label: string | undefined): CodevAccount => {
  * lives. Falls back to the literal path when no registry names an anchor.
  */
 export const getAnchorDir = (): string =>
-  getAccounts().find((a) => a.isAnchor)?.dir ??
-  path.join(os.homedir(), '.claude');
+  // Resolved: a registry written with a relative dir would otherwise put the
+  // shared memory under whatever directory the launch happened to run in.
+  path.resolve(
+    getAccounts().find((a) => a.isAnchor)?.dir ??
+      path.join(os.homedir(), '.claude'),
+  );
 
 export const isMultiAccount = (): boolean => getAccounts().length > 1;
 

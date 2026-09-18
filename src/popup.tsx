@@ -1139,6 +1139,7 @@ const PopupDefaultExample = ({
                     <input
                       type="checkbox"
                       checked={!!a.shareMemoryWithAnchor}
+                      disabled={accountsBusy}
                       onChange={(e) =>
                         setShareMemory(a.label, e.target.checked)
                       }
@@ -1146,7 +1147,9 @@ const PopupDefaultExample = ({
                     />
                     <span>
                       Memory: share with the anchor, per project
-                      <div style={{ color: THEME.text.secondary }}>
+                      <span
+                        style={{ color: THEME.text.secondary, display: 'block' }}
+                      >
                         Auto-memory is per project, and each account keeps its
                         own. This points "{a.label}" at the anchor's copy for
                         whichever repository a session starts in, so one
@@ -1157,7 +1160,7 @@ const PopupDefaultExample = ({
                         IDE extension — keeps using this account's own memory
                         for that session; nothing breaks, it just does not see
                         the shared one.
-                      </div>
+                      </span>
                     </span>
                   </label>
                   {!shareStatus && (

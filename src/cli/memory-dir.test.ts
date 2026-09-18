@@ -95,6 +95,42 @@ describe('the shell helper agrees with the TypeScript rule', () => {
     }
   });
 
+  it('agrees on a path with a newline and on a non-ASCII path', () => {
+    // Both are the shell side's failure modes: `sed` treats a newline as a
+    // line separator, and a non-ASCII byte must collapse to one dash.
+    for (const name of ['line\nbreak', 'ünïcøde']) {
+      const dir = path.join(base, name);
+      fs.mkdirSync(dir, { recursive: true });
+      expect(runHelper(dir), `cwd=${JSON.stringify(name)}`).toBe(
+        memorySettingsJson(anchorMemoryDir(ANCHOR, dir)),
+      );
+    }
+  });
+
+  it('ignores inherited git discovery variables', () => {
+    // A launching shell exporting GIT_DIR must not key the memory to another
+    // repository — and the fix must UNSET it, since an empty GIT_DIR makes
+    // git fail outright and silently sends both sides to the $PWD fallback.
+    const poisoned = {
+      ...process.env,
+      GIT_DIR: path.join(base, 'nowhere', '.git'),
+      GIT_CEILING_DIRECTORIES: base,
+    };
+    const script = path.join(base, 'helper-env.sh');
+    fs.writeFileSync(
+      script,
+      `${memoryShellHelper(ANCHOR)}\n_codev_memory_settings\n`,
+    );
+    const out = execFileSync('zsh', [script], {
+      cwd: subdir,
+      encoding: 'utf-8',
+      env: poisoned,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    expect(out).toBe(memorySettingsJson(anchorMemoryDir(ANCHOR, subdir)));
+    expect(JSON.parse(out).autoMemoryDirectory).toContain(memorySlug(repo));
+  });
+
   it('emits valid JSON naming a directory under the anchor account', () => {
     const parsed = JSON.parse(runHelper(repo));
     expect(parsed.autoMemoryDirectory).toBe(

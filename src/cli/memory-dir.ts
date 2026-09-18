@@ -28,6 +28,24 @@ import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 
+const GIT_DISCOVERY_VARS = [
+  'GIT_DIR',
+  'GIT_COMMON_DIR',
+  'GIT_CEILING_DIRECTORIES',
+  'GIT_DISCOVERY_ACROSS_FILESYSTEM',
+] as const;
+
+/**
+ * `process.env` with those removed — DELETED, never set to '': an empty
+ * `GIT_DIR` is not an unset one, git reads it as "the git dir is ''" and fails,
+ * which would send every lookup down the working-directory fallback.
+ */
+const envWithoutGitDiscovery = (): NodeJS.ProcessEnv => {
+  const env = { ...process.env };
+  for (const k of GIT_DISCOVERY_VARS) delete env[k];
+  return env;
+};
+
 /** The directory Claude Code keys this project's auto-memory on. */
 export const memoryProjectRoot = (cwd: string): string => {
   const start = path.resolve(cwd);
@@ -35,7 +53,15 @@ export const memoryProjectRoot = (cwd: string): string => {
     const out = execFileSync(
       'git',
       ['-C', start, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
-      { encoding: 'utf-8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] },
+      {
+        encoding: 'utf-8',
+        timeout: 3000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        // A launching shell that exports any of these would key the memory to
+        // a different repository, or suppress discovery so the two
+        // implementations fall back to different paths.
+        env: envWithoutGitDiscovery(),
+      },
     ).trim();
     // `.../repo/.git` → `.../repo`. A linked worktree reports the MAIN
     // repository's git dir, which is exactly why worktrees share memory.
@@ -46,7 +72,24 @@ export const memoryProjectRoot = (cwd: string): string => {
   return start;
 };
 
-/** Absolute path → the `projects/` directory name Claude Code uses for it. */
+/**
+ * Absolute path → the `projects/` directory name Claude Code uses for it.
+ *
+ * Two properties of this rule are inherited, not chosen, because the whole
+ * point is to name the directory Claude Code itself will use:
+ *
+ * - **it collides.** `/tmp/a-b` and `/tmp/a/b` both become `-tmp-a-b`, so they
+ *   share one memory. That is already true for a single account today; a
+ *   collision-free key here would just name a directory Claude Code never reads.
+ * - **it counts UTF-16 code units**, since Claude Code is JavaScript. The shell
+ *   twin uses `sed`, which counts characters, so the two differ outside the
+ *   Basic Multilingual Plane: measured 2026-09-18, `/x/😀/y` gives `-x----y`
+ *   here and `-x---y` in the shell (`ü` and every BMP character agree, and are
+ *   covered by a test). A repository path containing an emoji would get one
+ *   memory directory from `claude <name>` and another from CodeV's own launch.
+ *   Known, and not worth a `perl` dependency inside the generated
+ *   `accounts.sh`; revisit if such a path ever turns up.
+ */
 export const memorySlug = (root: string): string =>
   root.replace(/[^a-zA-Z0-9]/g, '-');
 
@@ -91,8 +134,17 @@ export const memorySettingsArg = (anchorDir: string, cwd: string): string => {
     const fs = require('fs');
     const file = memorySettingsPath(cwd);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, memorySettingsJson(anchorMemoryDir(anchorDir, cwd)));
-    return ` --settings ${file}`;
+    // Temp + rename: two launches for one repository race otherwise, and a
+    // reader catching the truncated moment gets unparseable settings.
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmp, memorySettingsJson(anchorMemoryDir(anchorDir, cwd)));
+    fs.renameSync(tmp, file);
+    // Single-quoted: the slug is alphanumerics and dashes, but the home
+    // directory in front of it is not (`/Users/John Doe`). Single quotes are
+    // what the CLAUDE_CONFIG_DIR prefix beside this already uses, and they
+    // survive every terminal — including the two that embed the command in an
+    // AppleScript double-quoted string without escaping it.
+    return ` --settings '${file.replace(/'/g, "'\\''")}'`;
   } catch (err) {
     console.error('[memory-dir] could not write the settings file:', err);
     return '';
@@ -118,9 +170,15 @@ export const memoryShellHelper = (anchorDir: string): string =>
     '# or the working directory outside a repository.',
     '_codev_memory_settings() {',
     '  local root slug',
-    '  root=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)',
+    // `env -u`, not `VAR=`: an EMPTY GIT_DIR is not an unset one — git fails
+    // outright on it and both sides would silently take the $PWD fallback.
+    '  root=$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \\',
+    '    -u GIT_DISCOVERY_ACROSS_FILESYSTEM \\',
+    '    git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)',
     '  if [ -n "$root" ]; then root="${root%/*}"; else root="$PWD"; fi',
-    "  slug=$(printf '%s' \"$root\" | sed 's/[^a-zA-Z0-9]/-/g')",
+    // `tr` first: a newline in the path would otherwise survive `sed` as a
+    // line separator and land raw inside the JSON string.
+    "  slug=$(printf '%s' \"$root\" | tr '\\n' '-' | sed 's/[^a-zA-Z0-9]/-/g')",
     `  printf '{"autoMemoryDirectory":"%s/projects/%s/memory"}' ${JSON.stringify(anchorDir)} "$slug"`,
     '}',
   ].join('\n');
