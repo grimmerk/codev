@@ -28,6 +28,9 @@ export interface CodevAccount {
   // (registry `defaultAccount`, what bare `claude` opens). Historically this
   // field was called `isDefault`, which conflated the two concepts.
   isAnchor: boolean;
+  // Launch this account with its auto-memory redirected to the anchor's, per
+  // project (src/cli/memory-dir.ts). Meaningless on the anchor itself.
+  shareMemoryWithAnchor?: boolean;
   email?: string;
   org?: string;
   subscription?: string;
@@ -41,6 +44,7 @@ interface RawAccount {
   configDirEnv?: string | null;
   identityFile?: string;
   isAnchor?: boolean;
+  shareMemoryWithAnchor?: boolean;
   email?: string;
   org?: string;
   subscription?: string;
@@ -127,6 +131,7 @@ export const getAccounts = (): CodevAccount[] => {
           configDirEnv,
           identityFile,
           isAnchor,
+          shareMemoryWithAnchor: !!a.shareMemoryWithAnchor,
           email: a.email,
           org: a.org,
           subscription: a.subscription,
@@ -171,6 +176,14 @@ export const getAccountByLabel = (label: string | undefined): CodevAccount => {
 };
 
 /** True when more than one account is configured (used to gate account UI). */
+/**
+ * The anchor account's config dir (`~/.claude`) — where shared auto-memory
+ * lives. Falls back to the literal path when no registry names an anchor.
+ */
+export const getAnchorDir = (): string =>
+  getAccounts().find((a) => a.isAnchor)?.dir ??
+  path.join(os.homedir(), '.claude');
+
 export const isMultiAccount = (): boolean => getAccounts().length > 1;
 
 /**

@@ -11,10 +11,12 @@ import { getCurrentIDEBundleId } from './vscode-based-ide-utility';
 import {
   CodevAccount,
   getAccounts,
+  getAnchorDir,
   getScannableAccounts,
   getProjectsDir,
   getAccountByLabel,
 } from './accounts';
+import { memorySettingsArg } from './cli/memory-dir';
 import {
   compileQuery,
   explainMatch,
@@ -1290,25 +1292,51 @@ const detectActiveSessionsLegacy = async (
 };
 
 /**
+ * ` --settings <file>` when this account shares the anchor's auto-memory, else
+ * ''. Anchor accounts get nothing: their memory IS the shared copy.
+ */
+const memoryArgFor = (
+  account: CodevAccount | undefined,
+  projectPath: string,
+): string =>
+  account && !account.isAnchor && account.shareMemoryWithAnchor && projectPath
+    ? memorySettingsArg(getAnchorDir(), projectPath)
+    : '';
+
+/**
  * codev multi-account: look up which account a session belongs to (via the
  * cached session list, which tags each session with its config dir) and return
- * the CLAUDE_CONFIG_DIR to prefix at resume — or null for the default account.
+ * the CLAUDE_CONFIG_DIR to prefix at resume — null for the anchor account —
+ * together with the account itself, which the memory redirect above needs.
  */
-const getResumeConfigDirEnv = (
+const resumeAccountFor = (
   sessionId: string,
   accountLabel?: string,
-): string | null => {
+): { configDirEnv: string | null; account?: CodevAccount } => {
   const s = readClaudeSessions(Number.MAX_SAFE_INTEGER).find(
     (x) => x.sessionId === sessionId,
   );
-  if (s) return s.accountConfigDirEnv;
+  if (s) {
+    // The config dir still comes from the session record, which is the
+    // authority; the account rides along from the SAME lookup so the two
+    // cannot disagree about which identity this resume belongs to.
+    return {
+      configDirEnv: s.accountConfigDirEnv,
+      account: s.accountLabel ? findAccountByLabel(s.accountLabel) : undefined,
+    };
+  }
   // Not in any history (a /branch child, a pruned history): trust the label
   // a saved list captured, or the resume lands under the anchor account and
   // never finds its transcript. Strict lookup — a label no account carries
   // (renamed, removed) is rejected by the launch paths before they get here.
   const account = accountLabel ? findAccountByLabel(accountLabel) : undefined;
-  return account ? account.configDirEnv : null;
+  return { configDirEnv: account ? account.configDirEnv : null, account };
 };
+
+const getResumeConfigDirEnv = (
+  sessionId: string,
+  accountLabel?: string,
+): string | null => resumeAccountFor(sessionId, accountLabel).configDirEnv;
 
 /** The account with exactly this label, or undefined — never a fallback. */
 export const findAccountByLabel = (label: string): CodevAccount | undefined =>
@@ -1335,9 +1363,16 @@ export const isSafeLaunchPath = (p: unknown): p is string =>
  */
 const buildResumeCommand = (
   sessionId: string,
-  accountLabel?: string,
+  accountLabel: string | undefined,
+  // Required, not optional: the memory redirect below is per project, and a
+  // call site that forgot to pass it must be a type error rather than a
+  // session that silently keeps writing to the wrong memory directory.
+  projectPath: string,
 ): string => {
-  const configDir = getResumeConfigDirEnv(sessionId, accountLabel);
+  const { configDirEnv: configDir, account } = resumeAccountFor(
+    sessionId,
+    accountLabel,
+  );
   // Single-quote the value: some terminal injections (Ghostty `initial input`)
   // don't escape the command, so a double-quoted prefix would break their
   // AppleScript string. Single quotes are safe across all terminals + handle spaces.
@@ -1352,7 +1387,7 @@ const buildResumeCommand = (
   // global-default (§2e) — that would resume an anchor-account session under the
   // wrong account. Every terminal here runs the string through a shell, so the
   // `command` builtin is available.
-  return `${prefix}command claude --resume ${sessionId}`;
+  return `${prefix}command claude${memoryArgFor(account, projectPath)} --resume ${sessionId}`;
 };
 
 /**
@@ -1753,9 +1788,13 @@ export const launchNewClaudeSession = (
     }
     // Explicit pick of the default account: clear any inherited
     // CLAUDE_CONFIG_DIR too (matches the generated accounts.sh launchers).
+    // The memory redirect is appended for the same reason it is on resume —
+    // this launch bypasses the accounts.sh dispatcher, so the dispatcher's
+    // copy of the rule never runs.
+    const memory = memoryArgFor(account, projectPath);
     claudeCmd = account.configDirEnv
-      ? `CLAUDE_CONFIG_DIR='${account.configDirEnv.replace(/'/g, "'\\''")}' command claude`
-      : 'env -u CLAUDE_CONFIG_DIR claude';
+      ? `CLAUDE_CONFIG_DIR='${account.configDirEnv.replace(/'/g, "'\\''")}' command claude${memory}`
+      : `env -u CLAUDE_CONFIG_DIR claude${memory}`;
   }
   // Pass claudeCmd as the 2nd arg too — Ghostty/cmux build their launch
   // scripts from it (iTerm2/Terminal.app use fullCommand), so the account
@@ -1910,7 +1949,7 @@ export const openSessionInITerm2 = async (
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
     return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
   }
 };
@@ -2585,7 +2624,7 @@ end tell`;
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
     return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
   }
 };
@@ -2624,7 +2663,7 @@ export const openSessionInTerminalApp = async (
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
     return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
   }
 };
@@ -2645,7 +2684,7 @@ export const openSessionInCmux = async (
   accountLabel?: string,
 ): Promise<void> => {
   const { exec } = require('child_process');
-  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel)}`;
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel, projectPath)}`;
 
   console.log('[cmux] openSession:', { sessionId, projectPath, isActive, activePid, customTitle });
   if (isActive) {
@@ -2770,7 +2809,7 @@ export const openSessionInCmux = async (
       exec('osascript -e \'tell application "cmux" to activate\'');
     })();
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
     return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
   }
 };
@@ -2783,7 +2822,7 @@ export const copyResumeCommand = (
   projectPath: string,
   accountLabel?: string,
 ): string => {
-  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel)}`;
+  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel, projectPath)}`;
   const { execFileSync } = require('child_process');
   execFileSync('pbcopy', { input: command });
   return command;

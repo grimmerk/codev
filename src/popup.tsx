@@ -100,6 +100,7 @@ const PopupDefaultExample = ({
     dir: string;
     isAnchor: boolean;
     isCurrentDefault: boolean;
+    shareMemoryWithAnchor?: boolean;
     email?: string;
     loggedIn?: boolean;
   };
@@ -261,6 +262,23 @@ const PopupDefaultExample = ({
       } else {
         setAccountsNotice('');
         setAccountsError(r.error || 'Failed to rename');
+      }
+    });
+  };
+
+  const setShareMemory = (label: string, on: boolean) => {
+    runAccountOp(async () => {
+      const r = await window.electronAPI.setAccountShareMemory(label, on);
+      if (r.ok) {
+        setAccountsNotice(
+          on
+            ? `"${label}" will use the anchor's memory for each project — applies to sessions started from now on.`
+            : `"${label}" is back to its own memory. Anything already written to the anchor's stays there.`,
+        );
+        await refreshAccounts();
+      } else {
+        setAccountsNotice('');
+        setAccountsError(r.error || 'Failed to change memory sharing');
       }
     });
   };
@@ -1108,6 +1126,40 @@ const PopupDefaultExample = ({
                     Share from the anchor (~/.claude) — Link stays in sync;
                     Copy is an independent fork
                   </div>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '6px',
+                      fontSize: '11px',
+                      padding: '2px 0 8px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!a.shareMemoryWithAnchor}
+                      onChange={(e) =>
+                        setShareMemory(a.label, e.target.checked)
+                      }
+                      style={{ marginTop: '2px' }}
+                    />
+                    <span>
+                      Memory: share with the anchor, per project
+                      <div style={{ color: THEME.text.secondary }}>
+                        Auto-memory is per project, and each account keeps its
+                        own. This points "{a.label}" at the anchor's copy for
+                        whichever repository a session starts in, so one
+                        repository has one memory. Session transcripts stay
+                        with this account. A session started outside CodeV and
+                        outside the <code>claude {a.label}</code> launcher — a
+                        bare <code>CLAUDE_CONFIG_DIR=… claude</code>, or the
+                        IDE extension — keeps using this account's own memory
+                        for that session; nothing breaks, it just does not see
+                        the shared one.
+                      </div>
+                    </span>
+                  </label>
                   {!shareStatus && (
                     <div style={{ fontSize: '11px', color: '#777' }}>
                       Loading…

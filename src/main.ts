@@ -901,6 +901,19 @@ ipcMain.handle('accounts-set-default', (_event, label: string) => {
   }
 });
 
+ipcMain.handle(
+  'accounts-share-memory',
+  (_event, label: string, on: boolean) => {
+    try {
+      accountManager.setShareMemory(label, on);
+      invalidateAccountsCache();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  },
+);
+
 // --- cross-account sharing (Batch 3) — thin wrappers over share-manager ---
 ipcMain.handle('accounts-share-status', (_event, label: string) => {
   try {
