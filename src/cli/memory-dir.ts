@@ -81,14 +81,12 @@ export const memoryProjectRoot = (cwd: string): string => {
  * - **it collides.** `/tmp/a-b` and `/tmp/a/b` both become `-tmp-a-b`, so they
  *   share one memory. That is already true for a single account today; a
  *   collision-free key here would just name a directory Claude Code never reads.
- * - **it counts UTF-16 code units**, since Claude Code is JavaScript. The shell
- *   twin uses `sed`, which counts characters, so the two differ outside the
- *   Basic Multilingual Plane: measured 2026-09-18, `/x/😀/y` gives `-x----y`
- *   here and `-x---y` in the shell (`ü` and every BMP character agree, and are
- *   covered by a test). A repository path containing an emoji would get one
- *   memory directory from `claude <name>` and another from CodeV's own launch.
- *   Known, and not worth a `perl` dependency inside the generated
- *   `accounts.sh`; revisit if such a path ever turns up.
+ * - **it counts UTF-16 code units, not characters.** Measured 2026-09-18 by
+ *   running a real session in `…/x/😀/y`: Claude Code named the directory
+ *   `…-x----y`, four dashes — the surrogate pair counts twice. `sed` counts
+ *   characters and produced three, so the shell twin used to disagree outside
+ *   the Basic Multilingual Plane; it now normalises with `perl`, which can
+ *   count code units, and the agreement test covers an astral path.
  */
 export const memorySlug = (root: string): string =>
   root.replace(/[^a-zA-Z0-9]/g, '-');
@@ -176,9 +174,15 @@ export const memoryShellHelper = (anchorDir: string): string =>
     '    -u GIT_DISCOVERY_ACROSS_FILESYSTEM \\',
     '    git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)',
     '  if [ -n "$root" ]; then root="${root%/*}"; else root="$PWD"; fi',
-    // `tr` first: a newline in the path would otherwise survive `sed` as a
-    // line separator and land raw inside the JSON string.
-    "  slug=$(printf '%s' \"$root\" | tr '\\n' '-' | sed 's/[^a-zA-Z0-9]/-/g')",
+    // `tr` first: a newline would otherwise survive as a line separator (perl
+    // is line-based here) and land raw inside the JSON string.
+    //
+    // Then perl, not sed, because the replacement count has to be UTF-16 code
+    // UNITS to match Claude Code — one dash for a BMP character, two for an
+    // astral one. `sed` counts characters and got `😀` wrong. perl ships with
+    // macOS, which is the only platform CodeV runs on.
+    '  slug=$(printf \'%s\' "$root" | tr \'\\n\' \'-\' |',
+    '    perl -CSD -pe \'s/([^a-zA-Z0-9])/"-" x (ord($1) > 0xFFFF ? 2 : 1)/ge\')',
     `  printf '{"autoMemoryDirectory":"%s/projects/%s/memory"}' ${JSON.stringify(anchorDir)} "$slug"`,
     '}',
   ].join('\n');

@@ -95,10 +95,12 @@ describe('the shell helper agrees with the TypeScript rule', () => {
     }
   });
 
-  it('agrees on a path with a newline and on a non-ASCII path', () => {
-    // Both are the shell side's failure modes: `sed` treats a newline as a
-    // line separator, and a non-ASCII byte must collapse to one dash.
-    for (const name of ['line\nbreak', 'ünïcøde']) {
+  it('agrees on newline, BMP and astral paths', () => {
+    // The shell side's three failure modes. The astral one is why the helper
+    // normalises with perl rather than sed: Claude Code counts UTF-16 code
+    // units, so a surrogate pair becomes TWO dashes (measured against a real
+    // session run in such a directory), and sed would emit one.
+    for (const name of ['line\nbreak', 'ünïcøde', 'emoji-\u{1F600}-dir']) {
       const dir = path.join(base, name);
       fs.mkdirSync(dir, { recursive: true });
       expect(runHelper(dir), `cwd=${JSON.stringify(name)}`).toBe(

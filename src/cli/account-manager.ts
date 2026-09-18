@@ -286,7 +286,9 @@ export function generateAccountsSh(reg: Registry): string {
   // The launchers below call the helper whenever an account carries the flag,
   // so the helper has to exist in exactly those cases — including a partial
   // registry with no anchor marked, which falls back the way getAnchorDir does.
-  if (accounts.some((a) => a.shareMemoryWithAnchor === true && a.configDirEnv)) {
+  if (
+    accounts.some((a) => a.shareMemoryWithAnchor === true && a.configDirEnv)
+  ) {
     const anchor = accounts.find((a) => a.isAnchor);
     L.push(
       memoryShellHelper(
