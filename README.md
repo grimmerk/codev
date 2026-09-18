@@ -214,7 +214,7 @@ The redirect is computed at launch and passed as `--settings`, so nothing is wri
 |-------|------|
 | Settings → Accounts | List/add/remove/rename accounts, set the global default, install shell integration, per-account **Sharing** panel (link/copy/unlink, settings-key sync, shared auto-memory) |
 | Sessions tab | Sessions from all accounts with account badges; resume uses each session's own account |
-| Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
+| Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux — **cmux included**, since CodeV launches with an explicit `CLAUDE_CONFIG_DIR` and never goes through the shell dispatcher [#161](https://github.com/grimmerk/codev/issues/161) breaks); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
 
 **Gotcha:** inside a Claude Code session, `!claude auth status` reports the *global default* (the shell snapshot carries the dispatcher function), not the session's account — use `!command claude auth status` instead. Full design + details: [docs/multi-account-support-design.md](docs/multi-account-support-design.md).
 
