@@ -1132,6 +1132,9 @@ const PopupDefaultExample = ({
                       alignItems: 'flex-start',
                       gap: '6px',
                       fontSize: '11px',
+                      // The panel sets no colour, so an unstyled label inherits
+                      // the platform default — black on this dark background.
+                      color: THEME.text.primary,
                       padding: '2px 0 8px',
                       cursor: 'pointer',
                     }}

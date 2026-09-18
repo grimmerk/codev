@@ -189,10 +189,21 @@ export const memoryShellHelper = (anchorDir: string): string =>
     '  root=$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \\',
     '    -u GIT_DISCOVERY_ACROSS_FILESYSTEM \\',
     '    git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)',
+    '  if [ -n "$root" ]; then',
+    '    root="${root%/*}"',
+    '  else',
     // `pwd -P`, not `$PWD`: `cd` through a symlink leaves $PWD logical
     // (`/tmp`), while Claude Code files the session under the physical path
     // (`/private/tmp`).
-    '  if [ -n "$root" ]; then root="${root%/*}"; else root="$(pwd -P)"; fi',
+    //
+    // The `x` sentinel keeps a directory name that ENDS in a newline: `$(…)`
+    // strips every trailing newline, so a bare `$(pwd -P)` would lose it while
+    // `process.cwd()` on the TypeScript side keeps it. Strip the sentinel,
+    // then exactly one newline — pwd's own line terminator.
+    '    root=$(pwd -P; printf x)',
+    '    root="${root%x}"',
+    '    root="${root%$\'\\n\'}"',
+    '  fi',
     // `tr` first: a newline would otherwise survive as a line separator (perl
     // is line-based here) and land raw inside the JSON string.
     //
@@ -200,7 +211,7 @@ export const memoryShellHelper = (anchorDir: string): string =>
     // UNITS to match Claude Code — one dash for a BMP character, two for an
     // astral one. `sed` counts characters and got `😀` wrong. perl ships with
     // macOS, which is the only platform CodeV runs on.
-    '  slug=$(printf \'%s\' "$root" | tr \'\\n\' \'-\' |',
+    "  slug=$(printf '%s' \"$root\" | tr '\\n' '-' |",
     '    perl -CSD -pe \'s/([^a-zA-Z0-9])/"-" x (ord($1) > 0xFFFF ? 2 : 1)/ge\')',
     `  printf '{"autoMemoryDirectory":"%s/projects/%s/memory"}' ${JSON.stringify(anchorDir)} "$slug"`,
     '}',
