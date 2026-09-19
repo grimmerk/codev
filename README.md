@@ -205,7 +205,7 @@ The redirect is computed at launch and passed as `--settings`, so nothing is wri
 |---|---|
 | **Shared** | Auto-memory for the project a session starts in |
 | **Not shared** | Session transcripts — Claude Code still writes them under the launching account, which is what keeps CodeV's per-account session attribution working |
-| **Carries the redirect** | `claude <name>` through the generated `accounts.sh`; CodeV's resume; CodeV's new-session launch under a picked account |
+| **Carries the redirect** | **Both** generated launcher forms — `claude <name>` and `claude-<name>` — emit the same flag, so the form cmux forces you onto shares memory exactly like the dispatcher; plus CodeV's resume and CodeV's new-session launch under a picked account |
 | **Does not** | A session started outside both — a bare `CLAUDE_CONFIG_DIR=… claude`, or the VS Code extension — uses that account's own memory for that session. Nothing breaks; it just does not see the shared one |
 
 **In the CodeV UI:**
@@ -214,7 +214,7 @@ The redirect is computed at launch and passed as `--settings`, so nothing is wri
 |-------|------|
 | Settings → Accounts | List/add/remove/rename accounts, set the global default, install shell integration, per-account **Sharing** panel (link/copy/unlink, settings-key sync, shared auto-memory) |
 | Sessions tab | Sessions from all accounts with account badges; resume uses each session's own account |
-| Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux — **cmux included**, since CodeV launches with an explicit `CLAUDE_CONFIG_DIR` and never goes through the shell dispatcher [#161](https://github.com/grimmerk/codev/issues/161) breaks); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
+| Projects tab: `⌥⌘+Enter` | Pick the account for a new session (`⌘+Enter` stays instant, under the global default). Account override applies to external terminals (iTerm2, Terminal.app, Ghostty, cmux — **cmux included**, since CodeV launches with an explicit `CLAUDE_CONFIG_DIR` and never goes through the shell dispatcher, which is what cmux's own `claude` wrapper replaces ([#161](https://github.com/grimmerk/codev/issues/161))); VS Code ([#121](https://github.com/grimmerk/codev/issues/121)) and the embedded Term tab ignore it |
 
 **Gotcha:** inside a Claude Code session, `!claude auth status` reports the *global default* (the shell snapshot carries the dispatcher function), not the session's account — use `!command claude auth status` instead. Full design + details: [docs/multi-account-support-design.md](docs/multi-account-support-design.md).
 
