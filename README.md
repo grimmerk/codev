@@ -205,7 +205,7 @@ The redirect is computed at launch and passed as `--settings`, so nothing is wri
 |---|---|
 | **Shared** | Auto-memory for the project a session starts in |
 | **Not shared** | Session transcripts — Claude Code still writes them under the launching account, which is what keeps CodeV's per-account session attribution working |
-| **Carries the redirect** | **Both** generated launcher forms — `claude <name>` and `claude-<name>` — emit the same flag, so the form cmux forces you onto shares memory exactly like the dispatcher; plus CodeV's resume and CodeV's new-session launch under a picked account |
+| **Carries the redirect** | **Both** generated launcher forms — `claude <name>` and `claude-<name>` — emit the same flag, so memory is shared identically whichever one you use. That matters because cmux forces you onto the second form. Plus CodeV's resume and CodeV's new-session launch under a picked account |
 | **Does not** | A session started outside both — a bare `CLAUDE_CONFIG_DIR=… claude`, or the VS Code extension — uses that account's own memory for that session. Nothing breaks; it just does not see the shared one |
 
 **In the CodeV UI:**
