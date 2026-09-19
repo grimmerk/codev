@@ -202,6 +202,56 @@ The registry records `configDirEnv` (null for default, the dir for extras) and
 
 ## 5. Cross-account file reuse (answering the reuse question)
 
+**Why each row of the table below gets the mechanism it gets.** Whether an item
+can be shared, and by what, follows from how Claude Code *locates* it. There are
+two ways and one hybrid, and almost every "can we just symlink this?" question is
+answered by which one the item falls under.
+
+**It scans a fixed directory.** `skills/<name>/SKILL.md` and `commands/<name>.md`
+are found only under `<config dir>/skills/` and `<config dir>/commands/`; nothing
+outside those paths exists as far as Claude Code is concerned. So the second
+account needs something physically present in *its own* directory, and a symlink
+is the only **zero-drift** way to put it there (a periodic copy also satisfies the
+scan — it just drifts).
+
+**It runs a path you wrote.** A hook's `command` and `statusLine.command` are
+arbitrary paths, so the script needs no sharing mechanism at all: keep one copy
+anywhere and register the same absolute path in both accounts' `settings.json`.
+What drifts here is the **registration**, not the script — which is why §6.F
+installs hooks per dir rather than trying to share a file.
+
+**Directory plus per-account state.** `plugins/` has a payload directory
+(`cache/<marketplace>/<plugin>/<version>/`) that could be linked, but the install
+registry (`installed_plugins.json`, one absolute `installPath` per entry) and the
+enablement (`enabledPlugins`, in `settings.json`) are state, and Claude Code writes
+both on every install, update and sweep. Linking the payload saves disk and
+nothing else — measured 2026-09-19 on a two-account machine, the duplication was
+~780 KB against 9.6 MB and 7.6 MB of `plugins/` — while linking the registries
+would make one account's install silently change the other's. The analogy is
+`node_modules` plus `package.json`, not `skills/`. A *self-written* plugin needs no
+link either: add the same local path as a marketplace in both accounts.
+
+Two consequences worth stating, because both look like conventions and are not:
+
+- **`<config dir>/hooks/` and `<config dir>/scripts/` are not Claude Code
+  directories.** Measured 2026-09-19: neither exists in a second account Claude
+  Code has managed for months, while `skills/`, `commands/`, `plugins/`,
+  `projects/` and `sessions/` exist in both. Claude Code never creates them because
+  it never looks for them — they are a user's own filing convention, and a hook
+  command may equally point at `~/.cargo/bin/<tool>`.
+- **`settings.json` is a mixed file** — preferences beside identity, security and
+  machinery — which is why the table shares four keys out of it by copy and nothing
+  by link. A whole-file symlink would carry `permissions`, `hooks` and
+  `enabledPlugins` across too; Claude Code writes the file itself (`/model`,
+  `/effort`, theme), so one account's change would silently become the other's; and
+  CodeV writes into *every* account's copy (§6.F), so a link would have CodeV
+  believing it wrote one account while writing another. The cost of the per-key
+  copy is the honest one: it is one-shot and goes stale.
+
+The fourth mechanism in the table — a **launch-time redirect** (§5.1) — exists
+because auto-memory fits none of the three: it is one directory per project,
+created on demand, and symlinking `memory/` is refused outright.
+
 | File / data | Scope | Shared across accounts? | How |
 |---|---|---|---|
 | Project `CLAUDE.md` (`<repo>/CLAUDE.md`) | Project folder | **Yes, automatically** | Lives in the repo; account-independent |
