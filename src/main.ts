@@ -695,8 +695,12 @@ app.on('activate', async () => {
   }
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
+  // Read BEFORE the count check, so the check and the create run in one tick:
+  // with the await between them, two quick Dock clicks could both see zero
+  // windows and each create one, orphaning the first.
+  const defaultTab = await readDefaultTab();
   if (BrowserWindow.getAllWindows().length === 0) {
-    switcherWindow = createSwitcherWindow(await readDefaultTab());
+    switcherWindow = createSwitcherWindow(defaultTab);
   }
   // Normal mode: clicking Dock icon shows hidden window
   const window = getSwitcherWindow();
