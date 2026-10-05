@@ -2088,7 +2088,8 @@ function SwitcherApp() {
       if (target !== 'projects' && target !== 'sessions') return;
       modeRef.current = target;
       setMode(target);
-      if (target === 'sessions') fetchClaudeSessions();
+      // No fetch here: main sends this before showing/focusing the window, and
+      // the focus handler that follows refreshes Sessions once on its own.
     });
 
     // Account count decides whether the ⌥⌘+Enter picker hint is shown.
