@@ -239,14 +239,16 @@ Two consequences worth stating, because both look like conventions and are not:
   `projects/` and `sessions/` exist in both. Claude Code never creates them because
   it never looks for them — they are a user's own filing convention, and a hook
   command may equally point at `~/.cargo/bin/<tool>`.
-- **`settings.json` is a mixed file** — preferences beside identity, security and
-  machinery — which is why the table shares four keys out of it by copy and nothing
-  by link. A whole-file symlink would carry `permissions`, `hooks` and
-  `enabledPlugins` across too; Claude Code writes the file itself (`/model`,
-  `/effort`, theme), so one account's change would silently become the other's; and
-  CodeV writes into *every* account's copy (§6.F), so a link would have CodeV
-  believing it wrote one account while writing another. The cost of the per-key
-  copy is the honest one: it is one-shot and goes stale.
+- **`settings.json` is a mixed file** — preferences beside security and machinery.
+  (Account identity is not among them: that lives in `.claude.json`, which the table
+  below never offers to share.) A whole-file symlink is *possible*, which is why the
+  table lists it as an option to use carefully — but CodeV's share engine deliberately
+  does not offer one, and copies four keys instead. Three costs, worst last: the link
+  carries `permissions`, `hooks` and `enabledPlugins` across as well; Claude Code
+  writes the file itself (`/model`, `/effort`, theme), so one account's change would
+  silently become the other's; and CodeV writes into *every* account's copy (§6.F),
+  so a link would have CodeV believing it wrote one account while writing another.
+  The cost of the per-key copy is the honest one: it is one-shot and goes stale.
 
 The fourth mechanism in the table — a **launch-time redirect** (§5.1) — exists
 because auto-memory fits none of the three: it is one directory per project,
