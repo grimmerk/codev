@@ -2077,6 +2077,20 @@ function SwitcherApp() {
       setMode('terminal');
     });
 
+    // The Quick Switcher is being shown. Only the Term tab is left behind — a
+    // window parked on Projects or Sessions keeps its place, so this is not a
+    // "reset to the default every time". If the default IS terminal, staying put
+    // falls out of the same branch.
+    window.electronAPI.onQuickSwitcherLeaveTerminal((_e: unknown, target: unknown) => {
+      if (modeRef.current !== 'terminal') return;
+      // Anything that is not a switcher tab — 'terminal' itself, or a value an
+      // older settings file could hold — means stay put rather than guess.
+      if (target !== 'projects' && target !== 'sessions') return;
+      modeRef.current = target;
+      setMode(target);
+      if (target === 'sessions') fetchClaudeSessions();
+    });
+
     // Account count decides whether the ⌥⌘+Enter picker hint is shown.
     // Re-checked when the embedded Settings popup mutates accounts (same-window
     // CustomEvent) and on window focus (covers CLI-side changes) — no restart

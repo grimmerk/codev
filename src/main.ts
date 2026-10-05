@@ -1728,16 +1728,26 @@ const trayToggleEvtHandler = async () => {
   };
 
   // Shortcut callback: Quick Switcher
-  const quickSwitcherCallback = () => {
+  const quickSwitcherCallback = async () => {
     if (isDebug) {
       console.log('Command+Control+R triggered - always shows Switcher window');
     }
+
+    // "Default Tab" used to apply only when the window was CREATED, and nothing
+    // re-applied it afterwards — so a switcher left on the Term tab came back to
+    // Term. Term is not what this shortcut is for; it has its own (Ctrl+Cmd+T).
+    // Showing the switcher therefore leaves the Term tab for the default, while
+    // Projects and Sessions keep their place, which is the part worth keeping.
+    const defaultTab =
+      ((await settings.get('default-switcher-mode')) as string) || 'projects';
+    const leaveTerminalTab = (w: BrowserWindow | null) =>
+      w?.webContents.send('quick-switcher-leave-terminal', defaultTab);
 
     if (BrowserWindow.getAllWindows().length === 0) {
       if (isDebug) {
         console.log('No window, creating main window');
       }
-      switcherWindow = createSwitcherWindow();
+      switcherWindow = createSwitcherWindow(defaultTab);
       showSwitcherWindow();
     } else {
       const window = getSwitcherWindow();
@@ -1758,17 +1768,19 @@ const trayToggleEvtHandler = async () => {
           }
           window.show();
           window.focus();
+          leaveTerminalTab(window);
         }
       } else if (window) {
         if (isDebug) {
           console.log('Switcher window exists but hidden, showing it');
         }
+        leaveTerminalTab(window);
         showSwitcherWindow();
       } else {
         if (isDebug) {
           console.log('Switcher window was destroyed, creating a new one');
         }
-        switcherWindow = createSwitcherWindow();
+        switcherWindow = createSwitcherWindow(defaultTab);
         showSwitcherWindow();
       }
     }
