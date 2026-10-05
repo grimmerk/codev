@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.93
+
+- Fix: **`⌃+⌘+R` no longer comes back to the Term tab.** Leave the app sitting on Term, switch to another app, press the Quick Switcher shortcut, and it reopened on Term — but Term has its own shortcut (`⌃+⌘+T`), and the switcher is what `⌃+⌘+R` is for. Showing the switcher now leaves **only** the Term tab, for whatever **Settings → General → Default Tab** names. A window parked on Projects or Sessions keeps its place, so this is not a reset-to-default on every show; and when Default Tab is itself *Terminal*, staying on Term is the same rule, not an exception. Two causes, neither of them a state bug: Default Tab was read once at app start and nothing re-applied it, and the Quick Switcher callback only showed, hid or focused the window without ever naming a tab
+- Fix: a switcher window created **by the shortcut** — after every window had been closed — ignored Default Tab entirely and opened whichever tab the renderer falls back to, because that path built the window without the `#mode=` hash the startup path passes. Both creation paths now pass it
+
 ## 1.0.92
 
 - Feat: **a non-anchor account can share the anchor's auto-memory, per project** (Settings → Accounts → Sharing → *Memory: share with the anchor, per project*; `codev account share-memory <name> on|off`). Auto-memory is stored per project under each account's own config dir, so two accounts on one machine kept two memories for the same repository. Turning this on points the other account at the anchor's copy of whichever repository a session starts in, computed at launch rather than baked in — a repository, its subdirectories and all of its linked worktrees resolve to one memory (the key is the git common directory's parent; outside a repository it is the directory itself, with symlinks resolved — Claude Code files a session under the physical path). Off by default, and the anchor is never offered it: its memory is the one the others share
