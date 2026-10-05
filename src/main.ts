@@ -672,15 +672,35 @@ app.on('window-all-closed', () => {
   }
 });
 
+/**
+ * Settings → General → Default Tab, read the one way every caller uses.
+ * Never throws: electron-settings rejects on an unreadable or malformed file,
+ * and a shortcut that awaits this must still open the window. Anything that is
+ * not a known tab normalises to 'projects', the renderer's own fallback.
+ */
+const readDefaultTab = async (): Promise<'projects' | 'sessions' | 'terminal'> => {
+  try {
+    const stored = await settings.get('default-switcher-mode');
+    if (stored === 'sessions' || stored === 'terminal') return stored;
+  } catch (err) {
+    console.error('[default-tab] could not read the setting:', err);
+  }
+  return 'projects';
+};
+
 /** not triggered yet */
-app.on('activate', () => {
+app.on('activate', async () => {
   if (isDebug) {
     console.log('activate');
   }
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
+  // Read BEFORE the count check, so the check and the create run in one tick:
+  // with the await between them, two quick Dock clicks could both see zero
+  // windows and each create one, orphaning the first.
+  const defaultTab = await readDefaultTab();
   if (BrowserWindow.getAllWindows().length === 0) {
-    switcherWindow = createSwitcherWindow();
+    switcherWindow = createSwitcherWindow(defaultTab);
   }
   // Normal mode: clicking Dock icon shows hidden window
   const window = getSwitcherWindow();
@@ -1483,7 +1503,7 @@ const trayToggleEvtHandler = async () => {
     }
   }
 
-  const defaultSwitcherMode = ((await settings.get('default-switcher-mode')) as string) || 'projects';
+  const defaultSwitcherMode = await readDefaultTab();
   switcherWindow = createSwitcherWindow(defaultSwitcherMode);
   if (isDebug) {
     console.log('when ready');
@@ -1728,16 +1748,28 @@ const trayToggleEvtHandler = async () => {
   };
 
   // Shortcut callback: Quick Switcher
-  const quickSwitcherCallback = () => {
+  const quickSwitcherCallback = async () => {
     if (isDebug) {
       console.log('Command+Control+R triggered - always shows Switcher window');
     }
+
+    // "Default Tab" used to apply only when the window was CREATED, and nothing
+    // re-applied it afterwards — so a switcher left on the Term tab came back to
+    // Term. Term is not what this shortcut is for; it has its own (Ctrl+Cmd+T).
+    // Showing the switcher therefore leaves the Term tab for the default, while
+    // Projects and Sessions keep their place, which is the part worth keeping.
+    // Sent BEFORE the window is shown or focused in every branch: main-to-renderer
+    // messages arrive in send order, so the tab switches before the focus event
+    // that follows — which then refreshes Sessions once, so the listener does not.
+    const defaultTab = await readDefaultTab();
+    const leaveTerminalTab = (w: BrowserWindow | null) =>
+      w?.webContents.send('quick-switcher-leave-terminal', defaultTab);
 
     if (BrowserWindow.getAllWindows().length === 0) {
       if (isDebug) {
         console.log('No window, creating main window');
       }
-      switcherWindow = createSwitcherWindow();
+      switcherWindow = createSwitcherWindow(defaultTab);
       showSwitcherWindow();
     } else {
       const window = getSwitcherWindow();
@@ -1756,6 +1788,7 @@ const trayToggleEvtHandler = async () => {
           if (appMode === 'normal') {
             app.focus({ steal: true });
           }
+          leaveTerminalTab(window);
           window.show();
           window.focus();
         }
@@ -1763,12 +1796,13 @@ const trayToggleEvtHandler = async () => {
         if (isDebug) {
           console.log('Switcher window exists but hidden, showing it');
         }
+        leaveTerminalTab(window);
         showSwitcherWindow();
       } else {
         if (isDebug) {
           console.log('Switcher window was destroyed, creating a new one');
         }
-        switcherWindow = createSwitcherWindow();
+        switcherWindow = createSwitcherWindow(defaultTab);
         showSwitcherWindow();
       }
     }

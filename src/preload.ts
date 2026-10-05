@@ -166,6 +166,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
   onFocusWindow: (callback: any) => ipcRenderer.on('window-focus', callback),
   onSwitchToTerminal: (callback: any) => ipcRenderer.on('switch-to-terminal', callback),
+  onQuickSwitcherLeaveTerminal: (callback: any) => ipcRenderer.on('quick-switcher-leave-terminal', callback),
   onCheckTerminalAndHide: (callback: any) => ipcRenderer.on('check-terminal-and-hide', callback),
   onXWinNotFound: (callback: any) => ipcRenderer.on('xwin-not-found', callback),
 
