@@ -42,10 +42,12 @@ import {
   sessionIdFromArgs,
 } from './live-sessions';
 import {
+  buildGhosttySwitchScript,
   buildITerm2SwitchScript,
   buildTerminalAppSwitchScript,
   switchOrderFor,
 } from './terminal-switch';
+import { pickSessionByTabTitle } from './cross-ref-title';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -742,11 +744,14 @@ end tell`);
 
         const sessionTitles = await getTitlesForCwd(item.cwd);
         const tabName = itermSession.name;
-        for (const [sessionId, title] of sessionTitles) {
-          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
-            activeMap.set(sessionId, item.pid);
-            break;
-          }
+        const matched = pickSessionByTabTitle(
+          tabName,
+          item.candidates.map(c => c.sessionId),
+          sessionTitles,
+          id => activeMap.has(id),
+        );
+        if (matched) {
+          activeMap.set(matched, item.pid);
         }
       }
     })());
@@ -777,11 +782,14 @@ end tell`);
 
         const sessionTitles = await getTitlesForCwd(item.cwd);
         const tabName = cmuxSurface.title;
-        for (const [sessionId, title] of sessionTitles) {
-          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
-            activeMap.set(sessionId, item.pid);
-            break;
-          }
+        const matched = pickSessionByTabTitle(
+          tabName,
+          item.candidates.map(c => c.sessionId),
+          sessionTitles,
+          id => activeMap.has(id),
+        );
+        if (matched) {
+          activeMap.set(matched, item.pid);
         }
       }
     })());
@@ -822,11 +830,76 @@ end tell`);
 
         const sessionTitles = await getTitlesForCwd(item.cwd);
         const tabName = termTab.title;
-        for (const [sessionId, title] of sessionTitles) {
-          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
-            activeMap.set(sessionId, item.pid);
-            break;
-          }
+        const matched = pickSessionByTabTitle(
+          tabName,
+          item.candidates.map(c => c.sessionId),
+          sessionTitles,
+          id => activeMap.has(id),
+        );
+        if (matched) {
+          activeMap.set(matched, item.pid);
+        }
+      }
+    })());
+  }
+
+  // Ghostty: the same tty → tab title → custom title match, once its tip
+  // builds expose `tty` per terminal (#63, ghostty#11922). Unlike the three
+  // above, a Ghostty pid left unmatched still takes the cwd fallback below:
+  // stable Ghostty 1.3 has no `tty` (the `try` returns nothing), and it must
+  // not lose the only key it had before this cross-ref existed.
+  const ghosttyMatched = new Set<number>();
+  if (byTerminal['ghostty']?.length) {
+    crossRefTasks.push((async () => {
+      // Never `tell` Ghostty when it is not running — that would launch it.
+      // `ps`, not `pgrep`: its comm is the full bundle path, `pgrep -x ghostty`
+      // never matches, and `pgrep -f` saw nothing in a measured shell.
+      const ghosttyCheck = await execPromise("ps -A -o comm= | grep '/Ghostty.app/Contents/MacOS/ghostty$' 2>/dev/null");
+      if (!ghosttyCheck.trim()) return;
+      const tmpScript = '/tmp/codev-ghostty-detect.scpt';
+      // `«class Gtty»` rather than `tty`: compiles on a Ghostty whose
+      // dictionary lacks the word (see terminal-switch.ts).
+      fs.writeFileSync(tmpScript, `tell application "Ghostty"
+  set results to ""
+  try
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with term in terminals of t
+          set results to results & («class Gtty» of term) & "|||" & (name of term) & linefeed
+        end repeat
+      end repeat
+    end repeat
+  end try
+  return results
+end tell`);
+      const ghosttyOutput = await execPromise(`osascript ${tmpScript} 2>/dev/null`);
+      try { fs.unlinkSync(tmpScript); } catch {}
+      if (!ghosttyOutput.trim()) return;
+
+      const ghosttyTerms: { tty: string; title: string }[] = [];
+      for (const line of ghosttyOutput.split('\n')) {
+        const parts = line.split('|||');
+        if (parts.length === 2 && parts[0].trim()) {
+          ghosttyTerms.push({ tty: parts[0].trim(), title: parts[1].trim() });
+        }
+      }
+
+      for (const item of byTerminal['ghostty']) {
+        const ttyOutput = (await execPromise(`ps -o tty= -p ${item.pid} 2>/dev/null`)).trim();
+        if (!ttyOutput) continue;
+        const term = ghosttyTerms.find(s => s.tty.endsWith(ttyOutput));
+        if (!term) continue;
+
+        const sessionTitles = await getTitlesForCwd(item.cwd);
+        const matched = pickSessionByTabTitle(
+          term.title,
+          item.candidates.map(c => c.sessionId),
+          sessionTitles,
+          id => activeMap.has(id),
+        );
+        if (matched) {
+          activeMap.set(matched, item.pid);
+          ghosttyMatched.add(item.pid);
         }
       }
     })());
@@ -834,10 +907,12 @@ end tell`);
 
   await Promise.all(crossRefTasks);
 
-  // Ghostty + unknown terminals: cwd fallback (no async work, runs after cross-ref)
+  // Unknown terminals, and Ghostty pids its cross-ref did not place: cwd
+  // fallback (no async work, runs after cross-ref)
   for (const [terminal, items] of Object.entries(byTerminal)) {
     if (terminal === 'iterm2' || terminal === 'cmux' || terminal === 'terminal' || terminal === 'codev') continue;
     for (const item of items) {
+      if (terminal === 'ghostty' && ghosttyMatched.has(item.pid)) continue;
       const fallback = item.candidates.find(s => !activeMap.has(s.sessionId));
       if (fallback) {
         activeMap.set(fallback.sessionId, item.pid);
@@ -1445,6 +1520,7 @@ export const openSession = async (
         sessionId,
         projectPath,
         isActive,
+        activePid,
         terminalMode,
         customTitle,
         accountLabel,
@@ -2573,6 +2649,7 @@ export const openSessionInGhostty = async (
   sessionId: string,
   projectPath: string,
   isActive: boolean,
+  activePid?: number,
   terminalMode: string = 'tab',
   customTitle?: string,
   accountLabel?: string,
@@ -2580,44 +2657,19 @@ export const openSessionInGhostty = async (
   const { exec } = require('child_process');
 
   if (isActive) {
-    // Two-layer matching: title first (precise), then cwd fallback
-    const titleMatch = customTitle
-      ? `
-  -- Layer 1: title matching
-  repeat with w in windows
-    repeat with t in tabs of w
-      repeat with term in terminals of t
-        if name of term contains "${customTitle.replace(/"/g, '\\"')}" then
-          focus term
-          return "found-by-title"
-        end if
-      end repeat
-    end repeat
-  end repeat`
-      : '';
-
+    // tty and title in the order the pid's provenance calls for (see
+    // terminal-switch.ts), then cwd. tty needs a Ghostty tip build (#63);
+    // on stable Ghostty the tty block fails quietly and title/cwd run.
+    const order = switchOrderFor(!!activePid && !isGuessedPid(activePid));
     const tmpScript = '/tmp/codev-ghostty-switch.scpt';
-    const switchScript = `tell application "Ghostty"
-  activate
-  ${titleMatch}
-  -- Layer 2: cwd matching (fallback)
-  repeat with w in windows
-    repeat with t in tabs of w
-      repeat with term in terminals of t
-        if working directory of term is "${projectPath}" then
-          focus term
-          return "found-by-cwd"
-        end if
-      end repeat
-    end repeat
-  end repeat
-  return "not found"
-end tell`;
-    console.log(`[ghostty] switch: customTitle=${customTitle || 'none'}`);
+    const switchScript = buildGhosttySwitchScript(activePid, customTitle, order, projectPath);
+    console.log(
+      `[ghostty] switch: pid=${activePid ?? 'none'}, order=${order}, customTitle=${customTitle || 'none'}`,
+    );
     fs.writeFileSync(tmpScript, switchScript);
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
       const result = (stdout || '').trim();
-      console.log('[ghostty] switch result:', result);
+      console.log('[ghostty] switch result:', result, error?.message || '');
       if (result === 'not found') {
         copyResumeCommand(sessionId, projectPath, accountLabel);
       }

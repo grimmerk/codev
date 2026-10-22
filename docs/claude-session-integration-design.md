@@ -261,7 +261,7 @@ flowchart TB
   TTY1["registered, exact<br/>tty → title → activate only"]
   TITLE1["cwd / tab-title guess<br/>title → tty → activate only"]
   KEYS["terminal-switch.ts builds the AppleScript<br/>tty: ps -o tty= vs tty of session / tab<br/>title: the /rename title vs name of session / custom title of tab<br/>no title → tty only"]
-  GH["Ghostty<br/>title → cwd → not found: resume command to the clipboard<br/>no per-tab tty (ghostty 11592, issue 63)"]
+  GH["Ghostty<br/>tty and title in pid order → cwd → not found: resume command to the clipboard<br/>tty needs a Ghostty tip build (ghostty 11922, issue 63)"]
   CM["cmux<br/>cmux tree --all: title → surface tty → cwd → project name"]
   VS["VS Code — registration says claude-vscode<br/>focus the window, then the URI handler"]
   CV["CodeV<br/>switch to the Term tab"]
@@ -278,7 +278,7 @@ flowchart TB
 ```
 
 - `detectTerminalApp` walks the parent processes (up to 20 levels), so a session running in cmux is switched with cmux's logic even when the setting says iTerm2; the setting only decides where a *new* session opens.
-- iTerm2 and Terminal.app try both keys when the session has a title, in the order the pid's provenance calls for (see "Switch matching order" under iTerm2 integration for the table and the history); with no title, tty is the only key. Ghostty has no per-tab tty (#63) and falls back from title to cwd, then copies the resume command to the clipboard. cmux reads its own `tree --all` for surface titles and ttys.
+- iTerm2 and Terminal.app try both keys when the session has a title, in the order the pid's provenance calls for (see "Switch matching order" under iTerm2 integration for the table and the history); with no title, tty is the only key. Ghostty does the same on tip builds, which expose a per-terminal tty (ghostty#11922, #63), and keeps cwd as a last resort before copying the resume command to the clipboard; stable Ghostty (1.3.1 and earlier) has no tty, so there it falls through to title, then cwd. cmux reads its own `tree --all` for surface titles and ttys.
 
 ## Current Implementation
 
@@ -340,7 +340,7 @@ Detection Flow:
 │    ├─ iTerm2: AppleScript TTY+name → match custom titles (~130ms) │
 │    ├─ Terminal.app: AppleScript TTY+title → match custom titles   │
 │    ├─ cmux: tree --all tty= → match custom titles (~70ms)         │
-│    └─ Ghostty/other: cwd fallback (no TTY upstream)               │
+│    └─ Ghostty: TTY on tip builds; other / unmatched: cwd fallback │
 ├─────────────────────────────────────────────────────────────────────┤
 │ 4. Fallback: if sessions/ doesn't exist (old Claude Code)         │
 │    → Legacy detection (ps aux + regex + lsof)                     │
@@ -399,7 +399,7 @@ Detection Flow:
 
 History: title-first was the order from 2026-03-21 to PR #152 because *every* pid was potentially a guess then — the registration file was read (since PR #67) but never validated, so the code could not tell a registered pid from a guessed one. PR #147's `ps` join made that distinction available; PR #152 first flipped the order to tty-first for everything (the `/branch`-sibling case in #142 C0), then narrowed it to exact pids only. `isGuessedPid` in `claude-session-utility.ts` is the classification: whatever the last detection attached outside the two registration paths.
 
-**Where TTY is relied on** (the list to revisit when Ghostty exposes a per-tab tty, #63): the iTerm2 and Terminal.app switch scripts above, `detectTerminalApp` (parent-process walk), the live view's `·ttysNNN` tag for same-titled rows (the tty comes from `live-sessions.ts`, the tag is rendered in `switcher-ui.tsx`; PR #152), and `openSessionInGhostty`, which today has only title → cwd and would gain the same TTY layer.
+**Where TTY is relied on** (Ghostty joined this list in 2026-10, #63): the iTerm2 and Terminal.app switch scripts above, `detectTerminalApp` (parent-process walk), the live view's `·ttysNNN` tag for same-titled rows (the tty comes from `live-sessions.ts`, the tag is rendered in `switcher-ui.tsx`; PR #152), and `openSessionInGhostty` plus Ghostty's branch of `crossRefDisambiguate`, which gained the same TTY layer once Ghostty tip builds exposed it (read as the raw code `«class Gtty»` inside `try`, so stable Ghostty still compiles and falls through).
 
 **Workarounds discovered:**
 - `ps -o tty=` output has trailing whitespace → pipe through `tr -d '[:space:]'`
@@ -495,7 +495,7 @@ Session-related settings are only visible when in Sessions mode (fixes popup int
 | Terminal | Detect | Switch | Launch | External Access |
 |----------|--------|--------|--------|----------------|
 | iTerm2 ✅ | `ps` + `lsof` + tty | Exact pid: TTY match → title fallback; guessed pid: title → TTY (PR #152) | AppleScript: new tab/window + execute | No restriction |
-| Ghostty ✅ | `ps` + parent tree | Title match → cwd fallback | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
+| Ghostty ✅ | `ps` + parent tree | Tip build: TTY and title in pid-provenance order → cwd fallback. Stable 1.3.x: title → cwd | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
 | cmux ✅ | `ps` + `lsof` | Title match → surface TTY → cwd fallback → project name fallback (surface-level) | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll` |
 | Terminal.app ✅ | `ps` + tty | Same order rule as iTerm2 | AppleScript: new tab/window + execute | No restriction |
 | Custom | — | — | User command template / clipboard | — |
@@ -514,7 +514,7 @@ When multiple sessions share the same project path, there are two separate conce
 | After `/clear` (before exit) | sessionId mismatch → cwd fallback | 1 same-cwd: ✓; multiple: needs cross-ref |
 | Same-cwd + cross-ref (iTerm2) | TTY match via AppleScript | ✓ (with `/rename`) |
 | Same-cwd + cross-ref (cmux) | TTY match via tree --all | ✓ (with `/rename`) |
-| Same-cwd + cross-ref (Ghostty) | No TTY → cwd fallback | May be wrong |
+| Same-cwd + cross-ref (Ghostty) | Tip build: TTY finds the tab, then its title must contain the session title; without a title → cwd fallback. Stable 1.3.x: no TTY → cwd fallback | Correct on tip when the session has a title; otherwise may be wrong |
 | VS Code / Claude Desktop | `entrypoint` field | ✓ (new capability) |
 
 **Legacy (without `sessions/`):**
@@ -525,7 +525,7 @@ When multiple sessions share the same project path, there are two separate conce
 | `-n "name"` / `--resume "title"` | Match against custom titles | All |
 | `claude -r` (picker) / bare `claude` | cwd fallback + cross-ref | iTerm2/cmux (with `/rename`) |
 
-Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of session` AppleScript; Terminal.app: `tty of tab` AppleScript; cmux: `tree --all` tty= field), then match tab name against custom titles. Requires `/rename`. Ghostty pending upstream TTY ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
+Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of session` AppleScript; Terminal.app: `tty of tab` AppleScript; cmux: `tree --all` tty= field; Ghostty tip builds: `«class Gtty»` of each terminal), then match tab name against custom titles. Requires `/rename`. Ghostty pending upstream TTY ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
 
 #### Switch layer (click → jump to correct tab)
 
@@ -539,7 +539,7 @@ Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of sessio
 | `claude` or `claude -r` (picker), `/rename`'d but not yet exited | Yes (but detection wrong without cross-ref) | Cross-reference fixes detection ✓ → Title match ✓ | Detection wrong → may click wrong item |
 | `claude` or `claude -r` (picker), never `/rename`'d | No | **Unsolvable** | cwd fallback ✗ |
 
-**Key difference**: iTerm2 and Terminal.app have TTY matching — first when the pid is exact, as the fallback when it was guessed (see "Switch matching order" under iTerm2 integration) — so when detection has the correct PID they can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty lacks per-tab TTY, so without a custom title + same cwd, it falls back to cwd matching which may switch to the wrong tab. cmux also lacks native TTY in AppleScript, but compensates via its `tree --all` CLI which exposes per-surface TTY for cross-reference.
+**Key difference**: iTerm2 and Terminal.app have TTY matching — first when the pid is exact, as the fallback when it was guessed (see "Switch matching order" under iTerm2 integration) — so when detection has the correct PID they can switch correctly even without a custom title (e.g., `claude -r <uuid>` without `/rename`). Ghostty has the same TTY matching on tip builds (#63); stable Ghostty (1.3.1 and earlier) lacks a per-terminal TTY, so there a session without a custom title in a shared cwd still falls back to cwd matching and may switch to the wrong tab. cmux also lacks native TTY in AppleScript, but compensates via its `tree --all` CLI which exposes per-surface TTY for cross-reference.
 
 **Detection with `sessions/` (v1.0.44+)**: Most cases are resolved by direct sessionId matching against history.jsonl. Cross-reference only needed after `/clear` (sessionId mismatch) with multiple same-cwd sessions — a rare combination. The "unsolvable" case (no `/rename` + same cwd) is now limited to cross-reference fallback scenarios, not the primary detection path.
 
@@ -611,7 +611,7 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 
 **Note:** Ghostty CLI `+new-window` is not supported on macOS, but AppleScript `new window` works. The `.sdef` is similar to cmux's, but Ghostty's AppleScript actually works (cmux's `count windows` returns 0 — fix submitted as cmux PR #1826).
 
-**Same-cwd limitation:** Without `/rename`, same-cwd sessions may switch to wrong tab. Ghostty does not expose per-terminal PID or TTY in AppleScript — upstream issues [#11592](https://github.com/ghostty-org/ghostty/issues/11592), [#10756](https://github.com/ghostty-org/ghostty/issues/10756), and PR [#11354](https://github.com/ghostty-org/ghostty/pull/11354) track adding this.
+**Same-cwd limitation (stable Ghostty only):** Ghostty tip builds expose per-terminal `tty` and `pid` on the AppleScript `terminal` class (PR [#11922](https://github.com/ghostty-org/ghostty/pull/11922), merged; closes [#11592](https://github.com/ghostty-org/ghostty/issues/11592) and [#10756](https://github.com/ghostty-org/ghostty/issues/10756)), and CodeV switches by tty there (measured on tip build 18371, 2026-10-22: 16 terminals sharing one cwd, each reached its own tab). As of 2026-10-22 no release carries it yet (latest v1.3.1), so on stable Ghostty a same-cwd session without `/rename` may still switch to the wrong tab.
 
 ### Branch Name: Why Not `git branch --show-current`
 
@@ -632,7 +632,7 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 - Last assistant response for active sessions via `tail -n 200`
 - Open/resume in iTerm2, Ghostty, or cmux
 - iTerm2: three-layer switch (title → TTY → fallback)
-- Ghostty: two-layer switch (title → cwd fallback)
+- Ghostty: two-layer switch (title → cwd fallback) — superseded in 2026-10 by tty matching on Ghostty tip builds (#63)
 - cmux: two-layer switch (title → cwd fallback, surface-level)
 - Default Tab, Launch Terminal, Launch Mode, Session Preview settings
 - 1.5-3 line layout with color-coded elements
@@ -655,7 +655,7 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 - Session preview panel (conversation summary)
 - Cost/token statistics from `session-metadata.db`
 - Custom terminal command template
-- Per-terminal PID/TTY matching (pending upstream: Ghostty #11592, cmux #1826)
+- ~~Per-terminal PID/TTY matching~~ — done: cmux via `tree --all` (PR #64), Ghostty on tip builds (#63, 2026-10)
 
 ## Technical Decisions
 
@@ -706,6 +706,7 @@ Current fix (PR #78): skip non-cli sessions in `detectActiveSessions()` to preve
 |------|------|-------|--------|----------------|
 | manaflow-ai/cmux | PR #1826 | Fix AppleScript `count windows` + `working directory` | Our PR, Open | Enables AppleScript for cmux (unified approach) |
 | manaflow-ai/cmux | PR #1287 | Add per-surface cwd to API | Open | Alternative to AppleScript for 2nd-tab matching |
-| ghostty-org/ghostty | Issue #11592 | Add pid/tty to AppleScript terminal class | Open | Would fix same-cwd switching |
-| ghostty-org/ghostty | PR #11354 | Expose PID/TTY on TerminalEntity | Open | Implementation in progress |
-| ghostty-org/ghostty | Issue #10756 | Expose TTY/PID in App Shortcuts | Open | Related request |
+| ghostty-org/ghostty | Issue #11592 | Add pid/tty to AppleScript terminal class | Closed | Fixed by PR #11922 |
+| ghostty-org/ghostty | PR #11922 | Add pid and tty to the AppleScript terminal class and TerminalEntity | Merged (tip only; not in v1.3.1) | CodeV uses it for tty switching (#63) |
+| ghostty-org/ghostty | PR #11354 | Expose PID/TTY on TerminalEntity | Closed | Superseded by #11922 |
+| ghostty-org/ghostty | Issue #10756 | Expose TTY/PID in App Shortcuts | Closed | Covered by #11922 |

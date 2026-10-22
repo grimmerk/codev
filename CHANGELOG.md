@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.94
+
+- Feat: **Ghostty switches to the right tab when several sessions share a directory** ([#63](https://github.com/grimmerk/codev/issues/63)). Ghostty's tip builds expose each terminal's `tty` (ghostty-org/ghostty#11922), so switching now works the way it does in iTerm2 and Terminal.app: by tty and by `/rename` title, in the order the session's process provenance calls for, and only then by working directory. Before, a session without a custom title went to the first tab in its directory — measured on one machine with 16 sessions sharing `~/git`, every one of them landed on the same tab. Detection's fallback cross-reference uses the tty the same way. **Stable Ghostty (1.3.1 and earlier) has no `tty`**, so there CodeV behaves exactly as before — title, then directory — until a release ships it
+- Fix: detection's fallback cross-reference no longer gives a running process to the wrong session when one `/rename` title contains another (`Fix` inside `Fix backend`). Every terminal (iTerm2, cmux, Terminal.app, Ghostty) took the first title its tab matched, from every transcript in the directory; it now takes the longest match among the sessions actually queued for that process. One function for all four, where there used to be four copies
+
 ## 1.0.93
 
 - Fix: **`⌃+⌘+R` no longer comes back to the Term tab.** Leave the app sitting on Term, switch to another app, press the Quick Switcher shortcut, and it reopened on Term — but Term has its own shortcut (`⌃+⌘+T`), and the switcher is what `⌃+⌘+R` is for. When the switcher is shown from the Term tab, it now moves to whatever **Settings → General → Default Tab** names; a window parked on Projects or Sessions keeps its place, so this is not a reset-to-default on every show. When Default Tab is itself *Terminal*, staying on Term is the same rule, not an exception. Two causes, neither of them a state bug: Default Tab was applied only when a window was created, and the Quick Switcher callback only showed, hid or focused the window without ever naming a tab
