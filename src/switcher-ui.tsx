@@ -3636,6 +3636,33 @@ function SwitcherApp() {
                           </span>
                         )}
                         {(() => {
+                          // A Claude Desktop session always opens in Desktop, so
+                          // its badge names where a click goes, running or not —
+                          // styled apart from the terminal badges, which only
+                          // report where a running session was found.
+                          if (session.entrypoint === 'claude-desktop') {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: '9px',
+                                  color: '#e8a283',
+                                  border: '1px solid #b5654a',
+                                  borderRadius: '3px',
+                                  padding: '1px 4px',
+                                  textTransform: 'uppercase',
+                                }}
+                                data-tip="Claude Desktop session — opens in Claude Desktop, running or not"
+                              >
+                                ✳{' '}
+                                <Highlighter
+                                  searchWords={searchHighlightWords}
+                                  autoEscape
+                                  textToHighlight="desktop"
+                                  highlightStyle={SEARCH_HIGHLIGHT_STYLE}
+                                />
+                              </span>
+                            );
+                          }
                           // Only show terminal/IDE badge for active sessions
                           const badge = session.isActive
                             ? (terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' ? terminalApps[session.sessionId] : null)
