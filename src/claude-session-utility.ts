@@ -1530,14 +1530,19 @@ export const openSession = async (
 
   // Check if this is an active VS Code session — switch via URI handler
   // Always pass projectPath so the correct VS Code window gets focused first
-  const entrypoint = cachedEntrypoints?.get(sessionId);
+  const entrypoint =
+    cachedEntrypoints?.get(sessionId) ??
+    cachedClosedVSCode?.find((s) => s.sessionId === sessionId)?.entrypoint;
   if (isActive && entrypoint === 'claude-vscode') {
     openSessionInVSCode(sessionId, projectPath, true);
     return;
   }
-  // Running in Claude Desktop's Code tab — its own deep link, by session id,
-  // so sessions sharing a directory cannot be confused.
-  if (isActive && entrypoint === 'claude-desktop') {
+  // A Claude Desktop Code-tab session, running or not, opens in Desktop: its
+  // deep link names the session, so sessions sharing a directory cannot be
+  // confused, and Desktop starts the process itself for a closed one — the
+  // way its own sidebar does. Resuming it in a terminal instead moved the
+  // conversation out of Desktop.
+  if (entrypoint === 'claude-desktop') {
     openSessionInClaudeDesktop(sessionId);
     return;
   }

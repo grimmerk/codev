@@ -314,6 +314,10 @@ const styleElement = document.createElement('style');
 styleElement.innerHTML = globalStyles;
 document.head.appendChild(styleElement);
 
+/** A VS Code or Claude Desktop session: listed from its transcript, never from history.jsonl. */
+const isTranscriptOnlySession = (s: { entrypoint?: string }): boolean =>
+  s.entrypoint === 'claude-vscode' || s.entrypoint === 'claude-desktop';
+
 function invokeVSCode(path: string, optionPress = false) {
   // press option for VSCode -r --reuse-window
   // Force to open a file or folder in an already opened window.
@@ -1880,12 +1884,28 @@ function SwitcherApp() {
     // Step 1: Show sessions immediately, preserve old active states (SWR via ref)
     const result = await window.electronAPI.getClaudeSessions(100);
     const cachedActive = activeStateRef.current;
-    const newSessions = (result || []).map((s: any) => {
+    const fromHistory = (result || []).map((s: any) => {
       if (s.sessionId in cachedActive) {
         return { ...s, isActive: true, activePid: cachedActive[s.sessionId] };
       }
       return s;
     });
+    // VS Code / Claude Desktop rows are not in history.jsonl; they arrive with
+    // steps 3 and 5. Keep the previous ones meanwhile, or every refetch drops
+    // them and they reappear a moment later, sliding the list under the user.
+    const historyIds = new Set(fromHistory.map((s: any) => s.sessionId));
+    const carried = allSessionsRef.current
+      .filter((s: any) => isTranscriptOnlySession(s) && !historyIds.has(s.sessionId))
+      .map((s: any) => ({
+        ...s,
+        isActive: s.sessionId in cachedActive,
+        activePid: cachedActive[s.sessionId],
+      }));
+    const newSessions = carried.length
+      ? [...fromHistory, ...carried]
+          .sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0))
+          .slice(0, 100)
+      : fromHistory;
     setAllSessions(newSessions);
     allSessionsRef.current = newSessions;
     // Read via ref, not state: this runs from persistent callbacks (window
@@ -1920,11 +1940,13 @@ function SwitcherApp() {
           activePid: activeMap[s.sessionId],
           entrypoint: entrypointMap[s.sessionId] || s.entrypoint,
         }));
-        // Merge VS Code / Claude Desktop sessions that aren't already in the list
+        // Merge VS Code / Claude Desktop sessions; a row carried over from the
+        // last fetch is replaced, so its prompts and time are current
         for (const vs of vscodeSessions) {
-          if (!updated.find((s: any) => s.sessionId === vs.sessionId)) {
-            updated.push({ ...vs, entrypoint: vs.entrypoint || 'claude-vscode' });
-          }
+          const fresh = { ...vs, entrypoint: vs.entrypoint || 'claude-vscode' };
+          const at = updated.findIndex((s: any) => s.sessionId === vs.sessionId);
+          if (at === -1) updated.push(fresh);
+          else if (isTranscriptOnlySession(updated[at])) updated[at] = fresh;
         }
         // Re-sort by lastTimestamp descending
         updated.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
@@ -1965,10 +1987,17 @@ function SwitcherApp() {
         if (closedVS && closedVS.length > 0) {
           // Merge closed VS Code sessions, deduplicate, sort, cap at 100
           const mergeAndCap = (prev: any[]) => {
-            const existingIds = new Set(prev.map((s: any) => s.sessionId));
+            // A closed row carried over from the last fetch is replaced by
+            // the scan's fresh copy; history rows keep priority.
+            const closedById = new Map(closedVS.map((s: any) => [s.sessionId, s]));
+            const kept = prev.map((s: any) =>
+              isTranscriptOnlySession(s) && !s.isActive && closedById.has(s.sessionId)
+                ? closedById.get(s.sessionId)
+                : s,
+            );
+            const existingIds = new Set(kept.map((s: any) => s.sessionId));
             const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
-            if (newSessions.length === 0) return prev;
-            const merged = [...prev, ...newSessions];
+            const merged = [...kept, ...newSessions];
             merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
             return merged.slice(0, 100);
           };
