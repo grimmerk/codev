@@ -47,6 +47,7 @@ import {
   buildTerminalAppSwitchScript,
   switchOrderFor,
 } from './terminal-switch';
+import { pickSessionByTabTitle } from './cross-ref-title';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -743,11 +744,14 @@ end tell`);
 
         const sessionTitles = await getTitlesForCwd(item.cwd);
         const tabName = itermSession.name;
-        for (const [sessionId, title] of sessionTitles) {
-          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
-            activeMap.set(sessionId, item.pid);
-            break;
-          }
+        const matched = pickSessionByTabTitle(
+          tabName,
+          item.candidates.map(c => c.sessionId),
+          sessionTitles,
+          id => activeMap.has(id),
+        );
+        if (matched) {
+          activeMap.set(matched, item.pid);
         }
       }
     })());
@@ -778,11 +782,14 @@ end tell`);
 
         const sessionTitles = await getTitlesForCwd(item.cwd);
         const tabName = cmuxSurface.title;
-        for (const [sessionId, title] of sessionTitles) {
-          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
-            activeMap.set(sessionId, item.pid);
-            break;
-          }
+        const matched = pickSessionByTabTitle(
+          tabName,
+          item.candidates.map(c => c.sessionId),
+          sessionTitles,
+          id => activeMap.has(id),
+        );
+        if (matched) {
+          activeMap.set(matched, item.pid);
         }
       }
     })());
@@ -823,11 +830,14 @@ end tell`);
 
         const sessionTitles = await getTitlesForCwd(item.cwd);
         const tabName = termTab.title;
-        for (const [sessionId, title] of sessionTitles) {
-          if (title && tabName.includes(title) && !activeMap.has(sessionId)) {
-            activeMap.set(sessionId, item.pid);
-            break;
-          }
+        const matched = pickSessionByTabTitle(
+          tabName,
+          item.candidates.map(c => c.sessionId),
+          sessionTitles,
+          id => activeMap.has(id),
+        );
+        if (matched) {
+          activeMap.set(matched, item.pid);
         }
       }
     })());
@@ -881,12 +891,15 @@ end tell`);
         if (!term) continue;
 
         const sessionTitles = await getTitlesForCwd(item.cwd);
-        for (const [sessionId, title] of sessionTitles) {
-          if (title && term.title.includes(title) && !activeMap.has(sessionId)) {
-            activeMap.set(sessionId, item.pid);
-            ghosttyMatched.add(item.pid);
-            break;
-          }
+        const matched = pickSessionByTabTitle(
+          term.title,
+          item.candidates.map(c => c.sessionId),
+          sessionTitles,
+          id => activeMap.has(id),
+        );
+        if (matched) {
+          activeMap.set(matched, item.pid);
+          ghosttyMatched.add(item.pid);
         }
       }
     })());

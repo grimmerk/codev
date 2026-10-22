@@ -495,7 +495,7 @@ Session-related settings are only visible when in Sessions mode (fixes popup int
 | Terminal | Detect | Switch | Launch | External Access |
 |----------|--------|--------|--------|----------------|
 | iTerm2 ✅ | `ps` + `lsof` + tty | Exact pid: TTY match → title fallback; guessed pid: title → TTY (PR #152) | AppleScript: new tab/window + execute | No restriction |
-| Ghostty ✅ | `ps` + parent tree | Title match → cwd fallback | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
+| Ghostty ✅ | `ps` + parent tree | Tip build: TTY and title in pid-provenance order → cwd fallback. Stable 1.3.x: title → cwd | AppleScript: `new tab`/`new window` with `surface configuration` | No restriction |
 | cmux ✅ | `ps` + `lsof` | Title match → surface TTY → cwd fallback → project name fallback (surface-level) | `cmux new-workspace --cwd --command` | Requires socket `automation`/`allowAll` |
 | Terminal.app ✅ | `ps` + tty | Same order rule as iTerm2 | AppleScript: new tab/window + execute | No restriction |
 | Custom | — | — | User command template / clipboard | — |
@@ -514,7 +514,7 @@ When multiple sessions share the same project path, there are two separate conce
 | After `/clear` (before exit) | sessionId mismatch → cwd fallback | 1 same-cwd: ✓; multiple: needs cross-ref |
 | Same-cwd + cross-ref (iTerm2) | TTY match via AppleScript | ✓ (with `/rename`) |
 | Same-cwd + cross-ref (cmux) | TTY match via tree --all | ✓ (with `/rename`) |
-| Same-cwd + cross-ref (Ghostty) | Tip build: TTY. Stable 1.3.x: no TTY → cwd fallback | Correct on tip; may be wrong on stable |
+| Same-cwd + cross-ref (Ghostty) | Tip build: TTY finds the tab, then its title must contain the session title; without a title → cwd fallback. Stable 1.3.x: no TTY → cwd fallback | Correct on tip when the session has a title; otherwise may be wrong |
 | VS Code / Claude Desktop | `entrypoint` field | ✓ (new capability) |
 
 **Legacy (without `sessions/`):**
@@ -525,7 +525,7 @@ When multiple sessions share the same project path, there are two separate conce
 | `-n "name"` / `--resume "title"` | Match against custom titles | All |
 | `claude -r` (picker) / bare `claude` | cwd fallback + cross-ref | iTerm2/cmux (with `/rename`) |
 
-Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of session` AppleScript; Terminal.app: `tty of tab` AppleScript; cmux: `tree --all` tty= field), then match tab name against custom titles. Requires `/rename`. Ghostty pending upstream TTY ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
+Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of session` AppleScript; Terminal.app: `tty of tab` AppleScript; cmux: `tree --all` tty= field; Ghostty tip builds: `«class Gtty»` of each terminal), then match tab name against custom titles. Requires `/rename`. Ghostty pending upstream TTY ([#11592](https://github.com/ghostty-org/ghostty/issues/11592)).
 
 #### Switch layer (click → jump to correct tab)
 
@@ -632,7 +632,7 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 - Last assistant response for active sessions via `tail -n 200`
 - Open/resume in iTerm2, Ghostty, or cmux
 - iTerm2: three-layer switch (title → TTY → fallback)
-- Ghostty: two-layer switch (title → cwd fallback)
+- Ghostty: two-layer switch (title → cwd fallback) — superseded in 2026-10 by tty matching on Ghostty tip builds (#63)
 - cmux: two-layer switch (title → cwd fallback, surface-level)
 - Default Tab, Launch Terminal, Launch Mode, Session Preview settings
 - 1.5-3 line layout with color-coded elements
