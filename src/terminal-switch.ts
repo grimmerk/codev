@@ -1,6 +1,6 @@
 /**
- * The AppleScript that jumps to a running session's tab (iTerm2 and
- * Terminal.app; the other terminals have their own paths). Two keys can
+ * The AppleScript that jumps to a running session's tab (iTerm2,
+ * Terminal.app and Ghostty; cmux has its own CLI path). Two keys can
  * find the tab, and the ORDER they are tried in is the whole point of this
  * module:
  *
@@ -96,17 +96,74 @@ const TERMINAL_TITLE = (
     end repeat
   end repeat`;
 
+// Ghostty exposes `tty` on its terminal class only from tip builds after
+// ghostty#11922 (stable 1.3 has none). Two guards, because AppleScript
+// resolves terminology against the app's dictionary at COMPILE time:
+// `«class Gtty»` is the raw four-char code of that property, so the script
+// still compiles where the dictionary lacks the word `tty`; and `try` turns
+// the resulting runtime error on such a Ghostty into "no match", so title
+// and cwd still run. Verified on tip build 18371: `«class Gtty»` returns the
+// same `/dev/ttysNNN` as `tty`.
+const GHOSTTY_TTY = (
+  pid: number,
+): string => `  -- tty matching (exact when the pid is; Ghostty tip only)
+  ${TTY_LOOKUP(pid)}
+  if targetTty is not "" then
+    try
+      repeat with w in windows
+        repeat with t in tabs of w
+          repeat with term in terminals of t
+            if («class Gtty» of term) ends with targetTty then
+              focus term
+              return "found-by-tty"
+            end if
+          end repeat
+        end repeat
+      end repeat
+    end try
+  end if`;
+
+const GHOSTTY_TITLE = (
+  title: string,
+): string => `  -- title matching (not unique across /branch siblings)
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with term in terminals of t
+        if name of term contains "${escapeAppleScript(title)}" then
+          focus term
+          return "found-by-title"
+        end if
+      end repeat
+    end repeat
+  end repeat`;
+
+// Last resort, Ghostty only: the first terminal sitting in the project
+// directory. Wrong whenever two sessions share a cwd — which is why tty and
+// title run first.
+const GHOSTTY_CWD = (
+  projectPath: string,
+): string => `  -- cwd matching (last resort: the first terminal in that directory)
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with term in terminals of t
+        if working directory of term is "${escapeAppleScript(projectPath)}" then
+          focus term
+          return "found-by-cwd"
+        end if
+      end repeat
+    end repeat
+  end repeat`;
+
 const assemble = (
-  app: 'iTerm2' | 'Terminal',
-  tty: string,
+  app: 'iTerm2' | 'Terminal' | 'Ghostty',
+  tty: string | undefined,
   title: string | undefined,
   order: SwitchOrder,
+  fallback?: string,
 ): string => {
-  const blocks = title
-    ? order === 'tty-first'
-      ? [tty, title]
-      : [title, tty]
-    : [tty];
+  const keyed =
+    order === 'tty-first' ? [tty, title] : [title, tty];
+  const blocks = [...keyed, fallback].filter((b): b is string => !!b);
   return `tell application "${app}"
   activate
 ${blocks.join('\n')}
@@ -124,6 +181,25 @@ export const buildITerm2SwitchScript = (
     ITERM2_TTY(pid),
     customTitle ? ITERM2_TITLE(customTitle) : undefined,
     order,
+  );
+
+/**
+ * Ghostty: tty and title in the provenance order, then cwd as a last resort.
+ * `pid` is optional — a session with no known process still gets title and
+ * cwd, which is all Ghostty could do before its tip builds exposed `tty`.
+ */
+export const buildGhosttySwitchScript = (
+  pid: number | undefined,
+  customTitle: string | undefined,
+  order: SwitchOrder,
+  projectPath: string,
+): string =>
+  assemble(
+    'Ghostty',
+    pid ? GHOSTTY_TTY(pid) : undefined,
+    customTitle ? GHOSTTY_TITLE(customTitle) : undefined,
+    order,
+    GHOSTTY_CWD(projectPath),
   );
 
 export const buildTerminalAppSwitchScript = (
