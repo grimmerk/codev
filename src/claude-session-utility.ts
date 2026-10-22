@@ -979,7 +979,21 @@ const parseAssistantMessageFromLines = (lines: string[]): string => {
 };
 
 /**
- * Read VS Code session info using head/tail (async, parallel).
+ * Entrypoints whose sessions never reach history.jsonl, so CodeV lists them
+ * from their transcripts instead: the VS Code extension, and Claude Desktop's
+ * Code tab (#111). A session from either must not fall into the CLI path,
+ * which guesses a session by cwd when history does not know the id.
+ */
+const TRANSCRIPT_ONLY_ENTRYPOINTS = new Set(['claude-vscode', 'claude-desktop']);
+export const isTranscriptOnlyEntrypoint = (entrypoint?: string): entrypoint is string =>
+  !!entrypoint && TRANSCRIPT_ONLY_ENTRYPOINTS.has(entrypoint);
+
+/** The first `entrypoint` value in a slice of transcript, if one is whole in it. */
+export const entrypointIn = (text: string): string | undefined =>
+  /"entrypoint":\s*"([^"]+)"/.exec(text)?.[1];
+
+/**
+ * Read VS Code / Claude Desktop session info using head/tail (async, parallel).
  * Single tail read extracts both last user prompt AND last assistant message,
  * avoiding duplicate reads with loadLastAssistantResponses().
  */
@@ -988,6 +1002,7 @@ const readVSCodeSessionFromJSONL = async (
   cwdOrJsonlPath: string,
   execPromise: (cmd: string) => Promise<string>,
   isJsonlPath = false,
+  projectsDir = getProjectsDir(),
 ): Promise<{
   firstUserMessage: string;
   lastUserMessage: string;
@@ -1002,16 +1017,20 @@ const readVSCodeSessionFromJSONL = async (
     jsonlPath = cwdOrJsonlPath;
   } else {
     const encodedProject = cwdOrJsonlPath.replace(/[^a-zA-Z0-9-]/g, '-');
-    const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-    jsonlPath = path.join(claudeDir, encodedProject, `${sessionId}.jsonl`);
+    jsonlPath = path.join(projectsDir, encodedProject, `${sessionId}.jsonl`);
   }
 
   if (!fs.existsSync(jsonlPath)) return result;
 
-  // Parallel: head for first prompt, tail for last prompt + assistant, grep -c for count
+  // Parallel: head for first prompt, tail for last prompt + assistant, grep -c for count.
+  // Each read is capped in bytes under the callers' 1 MiB exec maxBuffer: a
+  // pasted image makes one line hundreds of KB, and an overflowing read
+  // returned nothing at all — no prompts, no cwd, and a timestamp of 0 that
+  // sorted the session out of the list. A line cut by the cap fails to parse
+  // and is skipped like any other bad line.
   const [headOutput, tailOutput, countOutput] = await Promise.all([
-    execPromise(`head -n 20 "${jsonlPath}"`),
-    execPromise(`tail -n 100 "${jsonlPath}"`),
+    execPromise(`head -n 20 "${jsonlPath}" | head -c 1000000`),
+    execPromise(`tail -n 100 "${jsonlPath}" | tail -c 1000000`),
     execPromise(`grep -c '"type":"user"' "${jsonlPath}" 2>/dev/null`),
   ]);
 
@@ -1053,9 +1072,12 @@ let closedVSCodeTimestamp = 0;
 const CLOSED_VSCODE_CACHE_TTL_MS = 30000; // 30s — less frequent than active detection
 
 /**
- * Scan ~/.claude/projects/ for closed VS Code sessions.
+ * Scan ~/.claude/projects/ for closed VS Code and Claude Desktop sessions —
+ * the entrypoints that never reach history.jsonl.
  * Reads first 4KB of each JSONL to check entrypoint, then uses head/tail
  * to extract first/last user prompt (shared algorithm with loadLastAssistantResponses).
+ * A transcript whose first line outgrows 4KB (a pasted image) has no
+ * entrypoint in that slice; those few are asked with `grep -m1` instead.
  *
  * Uses hooks index (vscode-sessions.jsonl) to skip already-known files.
  * Skips active sessions (caller should filter by activeMap).
@@ -1082,9 +1104,10 @@ export const scanClosedVSCodeSessions = async (
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   if (!fs.existsSync(claudeDir)) return [];
 
-  // Phase 1: Identify VS Code session files
+  // Phase 1: Identify VS Code / Claude Desktop session files
   // Use hooks index for known sessions, scan remaining files
-  const vsCodeFiles: { sessionId: string; cwd: string; jsonlPath: string }[] = [];
+  const vsCodeFiles: { sessionId: string; cwd: string; jsonlPath: string; entrypoint: string }[] = [];
+  const unsniffed: { sessionId: string; jsonlPath: string }[] = [];
 
   // Add known sessions from hooks index
   for (const [sessionId, cwd] of vsCodeIndex) {
@@ -1092,7 +1115,7 @@ export const scanClosedVSCodeSessions = async (
     const encodedProject = cwd.replace(/[^a-zA-Z0-9-]/g, '-');
     const jsonlPath = path.join(claudeDir, encodedProject, `${sessionId}.jsonl`);
     if (fs.existsSync(jsonlPath)) {
-      vsCodeFiles.push({ sessionId, cwd, jsonlPath });
+      vsCodeFiles.push({ sessionId, cwd, jsonlPath, entrypoint: 'claude-vscode' });
     }
   }
 
@@ -1120,18 +1143,30 @@ export const scanClosedVSCodeSessions = async (
         } finally {
           fs.closeSync(fd);
         }
-        if (chunk.includes('"entrypoint":"claude-vscode"') || chunk.includes('"entrypoint": "claude-vscode"')) {
+        const entrypoint = entrypointIn(chunk);
+        if (!entrypoint) {
+          unsniffed.push({ sessionId, jsonlPath: filePath });
+        } else if (isTranscriptOnlyEntrypoint(entrypoint)) {
           // cwd will be read from JSONL content (directory name decode is lossy)
-          vsCodeFiles.push({ sessionId, cwd: '', jsonlPath: filePath });
+          vsCodeFiles.push({ sessionId, cwd: '', jsonlPath: filePath, entrypoint });
         }
       } catch {}
     }
   }
+  await Promise.all(
+    unsniffed.map(async ({ sessionId, jsonlPath }) => {
+      const found = await execPromise(`grep -m1 -o '"entrypoint": *"[^"]*"' "${jsonlPath}"`);
+      const entrypoint = entrypointIn(found);
+      if (isTranscriptOnlyEntrypoint(entrypoint)) {
+        vsCodeFiles.push({ sessionId, cwd: '', jsonlPath, entrypoint });
+      }
+    }),
+  );
 
   // Phase 2: Read first/last prompt + assistant for each session using head/tail (parallel)
   // Uses readVSCodeSessionFromJSONL (shared with active session detection)
   const sessions: ClaudeSession[] = [];
-  const promises = vsCodeFiles.map(async ({ sessionId, cwd, jsonlPath }) => {
+  const promises = vsCodeFiles.map(async ({ sessionId, cwd, jsonlPath, entrypoint }) => {
     // For scanned files (not from hooks index), pass jsonlPath directly to avoid lossy cwd decode
     const useJsonlPath = !vsCodeIndex.has(sessionId);
     const info = await readVSCodeSessionFromJSONL(
@@ -1149,7 +1184,7 @@ export const scanClosedVSCodeSessions = async (
       lastTimestamp: info.lastTimestamp,
       messageCount: info.messageCount,
       isActive: false,
-      entrypoint: 'claude-vscode',
+      entrypoint,
     });
   });
 
@@ -1218,14 +1253,18 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
 
           entrypoints.set(sessionId, entrypoint);
 
-          if (entrypoint === 'claude-vscode') {
-            // VS Code sessions: not in history.jsonl, add directly
+          if (isTranscriptOnlyEntrypoint(entrypoint)) {
+            // VS Code / Claude Desktop sessions: not in history.jsonl, add directly.
+            // A Desktop session used to fall into the CLI branch below, whose
+            // cwd guess handed its pid to an unrelated closed CLI session.
             activeMap.set(sessionId, pid);
             exactPids.add(pid);
             // Queue async JSONL read (head/tail in parallel)
             const startedAt = data.startedAt;
             vscodeReadPromises.push(
-              readVSCodeSessionFromJSONL(sessionId, cwd, execPromise).then((info) => {
+              readVSCodeSessionFromJSONL(
+                sessionId, cwd, execPromise, false, getProjectsDir(account.dir),
+              ).then((info) => {
                 vscodeSessions.push({
                   sessionId,
                   project: cwd,
@@ -1494,6 +1533,12 @@ export const openSession = async (
   const entrypoint = cachedEntrypoints?.get(sessionId);
   if (isActive && entrypoint === 'claude-vscode') {
     openSessionInVSCode(sessionId, projectPath, true);
+    return;
+  }
+  // Running in Claude Desktop's Code tab — its own deep link, by session id,
+  // so sessions sharing a directory cannot be confused.
+  if (isActive && entrypoint === 'claude-desktop') {
+    openSessionInClaudeDesktop(sessionId);
     return;
   }
 
@@ -1985,6 +2030,75 @@ export const openSessionInVSCode = (sessionId: string, projectPath?: string, isA
         execFile('open', [uri]);
       }, 1500);
     });
+  });
+};
+
+/**
+ * Desktop's own id for a Claude Code session, which its deep link needs.
+ * Desktop keeps one record per Code session at
+ * `claude-code-sessions/<a>/<b>/local_<desktop id>.json`, holding its id in
+ * `sessionId` and the Claude Code one in `cliSessionId`; the two differ
+ * (measured 2026-10 on all 14 records that carry both). Older records have
+ * no `cliSessionId` — Desktop used the same id then, which is why the link
+ * worked with the Claude Code id when first tried (2026-04) — so with no
+ * record, fall back to that.
+ */
+export const findClaudeDesktopRouteId = (
+  cliSessionId: string,
+  sessionsRoot = path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'claude-code-sessions'),
+): string => {
+  const fallback = `local_${cliSessionId}`;
+  try {
+    for (const a of fs.readdirSync(sessionsRoot)) {
+      const aDir = path.join(sessionsRoot, a);
+      if (!fs.statSync(aDir).isDirectory()) continue;
+      for (const b of fs.readdirSync(aDir)) {
+        const bDir = path.join(aDir, b);
+        if (!fs.statSync(bDir).isDirectory()) continue;
+        for (const f of fs.readdirSync(bDir)) {
+          if (!/^local_[0-9a-f-]+\.json$/i.test(f)) continue;
+          const text = fs.readFileSync(path.join(bDir, f), 'utf-8');
+          // Cheap filter before parsing; the records run to hundreds of KB.
+          if (!text.includes(cliSessionId)) continue;
+          try {
+            const record = JSON.parse(text);
+            if (
+              record.cliSessionId === cliSessionId &&
+              typeof record.sessionId === 'string' &&
+              /^local_[0-9a-f-]+$/i.test(record.sessionId)
+            ) {
+              return record.sessionId;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+  return fallback;
+};
+
+/**
+ * Bring a Claude Desktop Code-tab session to the front. The deep link is
+ * Desktop's own in-app route for the session (found by trial in 2026-04,
+ * #111), not a documented API; if `open` fails, focus the app instead. A
+ * route Desktop no longer knows fails silently — Desktop shows "This session
+ * couldn't be found" and `open` still exits 0.
+ */
+export const openSessionInClaudeDesktop = (sessionId: string): void => {
+  const { execFile } = require('child_process');
+  const focusApp = () =>
+    execFile('open', ['-a', 'Claude'], (error: any) => {
+      if (error) console.error('[openSessionInClaudeDesktop] failed to focus Claude:', error);
+    });
+  if (!/^[0-9a-f-]+$/i.test(sessionId)) {
+    focusApp();
+    return;
+  }
+  const routeId = findClaudeDesktopRouteId(sessionId);
+  execFile('open', [`claude://claude.ai/claude-code-desktop/${routeId}`], (error: any) => {
+    if (!error) return;
+    console.error('[openSessionInClaudeDesktop] deep link failed, focusing the app:', error);
+    focusApp();
   });
 };
 

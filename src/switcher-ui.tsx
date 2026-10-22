@@ -962,7 +962,10 @@ function SwitcherApp() {
     return allItems.filter((s) => {
       const id = s.sessionId;
       const prInfo = prLinks[id];
-      const terminalBadge = terminalApps[id] || ((s as any).entrypoint === 'claude-vscode' ? 'vscode' : '');
+      const entrypoint = (s as any).entrypoint;
+      const terminalBadge =
+        terminalApps[id] ||
+        (entrypoint === 'claude-vscode' ? 'vscode' : entrypoint === 'claude-desktop' ? 'desktop' : '');
       // A saved-list member whose session is gone has only what was captured;
       // search those fields too, or a query on its captured title drops it.
       const captured = s.__listMember as SessionListMember | undefined;
@@ -1917,10 +1920,10 @@ function SwitcherApp() {
           activePid: activeMap[s.sessionId],
           entrypoint: entrypointMap[s.sessionId] || s.entrypoint,
         }));
-        // Merge VS Code sessions that aren't already in the list
+        // Merge VS Code / Claude Desktop sessions that aren't already in the list
         for (const vs of vscodeSessions) {
           if (!updated.find((s: any) => s.sessionId === vs.sessionId)) {
-            updated.push({ ...vs, entrypoint: 'claude-vscode' });
+            updated.push({ ...vs, entrypoint: vs.entrypoint || 'claude-vscode' });
           }
         }
         // Re-sort by lastTimestamp descending
