@@ -2635,6 +2635,7 @@ function SwitcherApp() {
             switcherMode={mode}
             openToTab={settingsOpenToTab}
             onOpenToTabConsumed={() => setSettingsOpenToTab(null)}
+            onClosed={forceFocusOnInput}
             saveCallback={(key: string, value: string) => {
               if (key === 'sessionDisplayMode') {
                 setSessionDisplayMode(value);
