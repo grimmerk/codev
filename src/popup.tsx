@@ -59,6 +59,7 @@ const PopupDefaultExample = ({
   switcherMode,
   openToTab,
   onOpenToTabConsumed,
+  onClosed,
 }: {
   workingFolderPath?: string;
   saveCallback?: (key: string, value: string) => void;
@@ -66,6 +67,7 @@ const PopupDefaultExample = ({
   switcherMode?: string;
   openToTab?: 'general' | 'sessions' | 'accounts' | 'shortcuts' | null;
   onOpenToTabConsumed?: () => void;
+  onClosed?: () => void;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
@@ -504,6 +506,21 @@ const PopupDefaultExample = ({
       onOpenToTabConsumed?.();
     }
   }, [openToTab]);
+
+  // Hand focus back to the parent when the panel closes. While open, the
+  // Popup's focus trap holds focus inside the panel; the Settings button that
+  // closes it keeps focus afterwards, and the switcher's click-to-refocus
+  // skips it (it is part of the panel), so typing went nowhere until the user
+  // clicked elsewhere. The timeout runs after any focus the trap returns on
+  // deactivate, which it also defers with a 0ms timeout.
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!wasOpen || isOpen || !onClosed) return;
+    const timer = setTimeout(onClosed, 0);
+    return () => clearTimeout(timer);
+  }, [isOpen]);
 
   const handleLaunchAtLoginChange = (checked: boolean) => {
     setLaunchAtLogin(checked);
