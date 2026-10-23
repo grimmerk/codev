@@ -1068,6 +1068,12 @@ const readVSCodeSessionFromJSONL = async (
 
 // Cache for closed VS Code sessions scan
 let cachedClosedVSCode: ClaudeSession[] | null = null;
+// Every VS Code / Desktop entrypoint seen, by session id, never cleared: a
+// session's entrypoint does not change. The two caches above and below can
+// both miss a session that just exited — the closed scan skipped it while it
+// ran, and active detection drops it once it stops — and a Desktop row
+// selected in that window must still open in Desktop.
+const knownTranscriptOnlyEntrypoints = new Map<string, string>();
 let closedVSCodeTimestamp = 0;
 const CLOSED_VSCODE_CACHE_TTL_MS = 30000; // 30s — less frequent than active detection
 
@@ -1153,15 +1159,13 @@ export const scanClosedVSCodeSessions = async (
       } catch {}
     }
   }
-  await Promise.all(
-    unsniffed.map(async ({ sessionId, jsonlPath }) => {
-      const found = await execPromise(`grep -m1 -o '"entrypoint": *"[^"]*"' "${jsonlPath}"`);
-      const entrypoint = entrypointIn(found);
-      if (isTranscriptOnlyEntrypoint(entrypoint)) {
-        vsCodeFiles.push({ sessionId, cwd: '', jsonlPath, entrypoint });
-      }
-    }),
-  );
+  await runInBatches(unsniffed, 25, async ({ sessionId, jsonlPath }) => {
+    const found = await execPromise(`grep -m1 -o '"entrypoint": *"[^"]*"' "${jsonlPath}"`);
+    const entrypoint = entrypointIn(found);
+    if (isTranscriptOnlyEntrypoint(entrypoint)) {
+      vsCodeFiles.push({ sessionId, cwd: '', jsonlPath, entrypoint });
+    }
+  });
 
   // Phase 2: Read first/last prompt + assistant for each session using head/tail (parallel)
   // Uses readVSCodeSessionFromJSONL (shared with active session detection)
@@ -1192,6 +1196,7 @@ export const scanClosedVSCodeSessions = async (
   sessions.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 
   cachedClosedVSCode = sessions;
+  for (const s of sessions) knownTranscriptOnlyEntrypoints.set(s.sessionId, s.entrypoint as string);
   closedVSCodeTimestamp = now;
   return sessions.filter(s => !activeSessionIds.has(s.sessionId));
 };
@@ -1254,6 +1259,7 @@ export const detectActiveSessions = async (): Promise<ActiveSessionResult> => {
           entrypoints.set(sessionId, entrypoint);
 
           if (isTranscriptOnlyEntrypoint(entrypoint)) {
+            knownTranscriptOnlyEntrypoints.set(sessionId, entrypoint);
             // VS Code / Claude Desktop sessions: not in history.jsonl, add directly.
             // A Desktop session used to fall into the CLI branch below, whose
             // cwd guess handed its pid to an unrelated closed CLI session.
@@ -1531,8 +1537,7 @@ export const openSession = async (
   // Check if this is an active VS Code session — switch via URI handler
   // Always pass projectPath so the correct VS Code window gets focused first
   const entrypoint =
-    cachedEntrypoints?.get(sessionId) ??
-    cachedClosedVSCode?.find((s) => s.sessionId === sessionId)?.entrypoint;
+    cachedEntrypoints?.get(sessionId) ?? knownTranscriptOnlyEntrypoints.get(sessionId);
   if (isActive && entrypoint === 'claude-vscode') {
     openSessionInVSCode(sessionId, projectPath, true);
     return;
