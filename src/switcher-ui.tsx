@@ -314,6 +314,10 @@ const styleElement = document.createElement('style');
 styleElement.innerHTML = globalStyles;
 document.head.appendChild(styleElement);
 
+/** A VS Code or Claude Desktop session: listed from its transcript, never from history.jsonl. */
+const isTranscriptOnlySession = (s: { entrypoint?: string }): boolean =>
+  s.entrypoint === 'claude-vscode' || s.entrypoint === 'claude-desktop';
+
 function invokeVSCode(path: string, optionPress = false) {
   // press option for VSCode -r --reuse-window
   // Force to open a file or folder in an already opened window.
@@ -962,7 +966,10 @@ function SwitcherApp() {
     return allItems.filter((s) => {
       const id = s.sessionId;
       const prInfo = prLinks[id];
-      const terminalBadge = terminalApps[id] || ((s as any).entrypoint === 'claude-vscode' ? 'vscode' : '');
+      const entrypoint = (s as any).entrypoint;
+      const terminalBadge =
+        terminalApps[id] ||
+        (entrypoint === 'claude-vscode' ? 'vscode' : entrypoint === 'claude-desktop' ? 'desktop' : '');
       // A saved-list member whose session is gone has only what was captured;
       // search those fields too, or a query on its captured title drops it.
       const captured = s.__listMember as SessionListMember | undefined;
@@ -1877,12 +1884,28 @@ function SwitcherApp() {
     // Step 1: Show sessions immediately, preserve old active states (SWR via ref)
     const result = await window.electronAPI.getClaudeSessions(100);
     const cachedActive = activeStateRef.current;
-    const newSessions = (result || []).map((s: any) => {
+    const fromHistory = (result || []).map((s: any) => {
       if (s.sessionId in cachedActive) {
         return { ...s, isActive: true, activePid: cachedActive[s.sessionId] };
       }
       return s;
     });
+    // VS Code / Claude Desktop rows are not in history.jsonl; they arrive with
+    // steps 3 and 5. Keep the previous ones meanwhile, or every refetch drops
+    // them and they reappear a moment later, sliding the list under the user.
+    const historyIds = new Set(fromHistory.map((s: any) => s.sessionId));
+    const carried = allSessionsRef.current
+      .filter((s: any) => isTranscriptOnlySession(s) && !historyIds.has(s.sessionId))
+      .map((s: any) => ({
+        ...s,
+        isActive: s.sessionId in cachedActive,
+        activePid: cachedActive[s.sessionId],
+      }));
+    const newSessions = carried.length
+      ? [...fromHistory, ...carried]
+          .sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0))
+          .slice(0, 100)
+      : fromHistory;
     setAllSessions(newSessions);
     allSessionsRef.current = newSessions;
     // Read via ref, not state: this runs from persistent callbacks (window
@@ -1917,11 +1940,13 @@ function SwitcherApp() {
           activePid: activeMap[s.sessionId],
           entrypoint: entrypointMap[s.sessionId] || s.entrypoint,
         }));
-        // Merge VS Code sessions that aren't already in the list
+        // Merge VS Code / Claude Desktop sessions; a row carried over from the
+        // last fetch is replaced, so its prompts and time are current
         for (const vs of vscodeSessions) {
-          if (!updated.find((s: any) => s.sessionId === vs.sessionId)) {
-            updated.push({ ...vs, entrypoint: 'claude-vscode' });
-          }
+          const fresh = { ...vs, entrypoint: vs.entrypoint || 'claude-vscode' };
+          const at = updated.findIndex((s: any) => s.sessionId === vs.sessionId);
+          if (at === -1) updated.push(fresh);
+          else if (isTranscriptOnlySession(updated[at])) updated[at] = fresh;
         }
         // Re-sort by lastTimestamp descending
         updated.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
@@ -1962,10 +1987,17 @@ function SwitcherApp() {
         if (closedVS && closedVS.length > 0) {
           // Merge closed VS Code sessions, deduplicate, sort, cap at 100
           const mergeAndCap = (prev: any[]) => {
-            const existingIds = new Set(prev.map((s: any) => s.sessionId));
+            // A closed row carried over from the last fetch is replaced by
+            // the scan's fresh copy; history rows keep priority.
+            const closedById = new Map(closedVS.map((s: any) => [s.sessionId, s]));
+            const kept = prev.map((s: any) =>
+              isTranscriptOnlySession(s) && !s.isActive && closedById.has(s.sessionId)
+                ? closedById.get(s.sessionId)
+                : s,
+            );
+            const existingIds = new Set(kept.map((s: any) => s.sessionId));
             const newSessions = closedVS.filter((s: any) => !existingIds.has(s.sessionId));
-            if (newSessions.length === 0) return prev;
-            const merged = [...prev, ...newSessions];
+            const merged = [...kept, ...newSessions];
             merged.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
             return merged.slice(0, 100);
           };
@@ -3605,6 +3637,33 @@ function SwitcherApp() {
                           </span>
                         )}
                         {(() => {
+                          // A Claude Desktop session always opens in Desktop, so
+                          // its badge names where a click goes, running or not —
+                          // styled apart from the terminal badges, which only
+                          // report where a running session was found.
+                          if (session.entrypoint === 'claude-desktop') {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: '9px',
+                                  color: '#e8a283',
+                                  border: '1px solid #b5654a',
+                                  borderRadius: '3px',
+                                  padding: '1px 4px',
+                                  textTransform: 'uppercase',
+                                }}
+                                data-tip="Claude Desktop session — opens in Claude Desktop, running or not"
+                              >
+                                ✳{' '}
+                                <Highlighter
+                                  searchWords={searchHighlightWords}
+                                  autoEscape
+                                  textToHighlight="desktop"
+                                  highlightStyle={SEARCH_HIGHLIGHT_STYLE}
+                                />
+                              </span>
+                            );
+                          }
                           // Only show terminal/IDE badge for active sessions
                           const badge = session.isActive
                             ? (terminalApps[session.sessionId] && terminalApps[session.sessionId] !== 'unknown' ? terminalApps[session.sessionId] : null)

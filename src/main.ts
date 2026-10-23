@@ -2818,6 +2818,11 @@ ipcMain.handle('detect-terminal-apps', async (_event, pidMap: Record<string, num
       results[sessionId] = 'vscode';
       return;
     }
+    // Claude Desktop's Code tab: its process tree holds no terminal
+    if (entrypointMap && entrypointMap[sessionId] === 'claude-desktop') {
+      results[sessionId] = 'desktop';
+      return;
+    }
     results[sessionId] = await detectTerminalApp(pid);
   }));
   return results;
