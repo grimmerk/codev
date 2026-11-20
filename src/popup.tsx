@@ -958,6 +958,7 @@ const PopupDefaultExample = ({
               >
                 <input
                   type="checkbox"
+                  aria-label="Last assistant reply"
                   checked={sessionPreview.assistantReply}
                   onChange={(e) => {
                     const on = e.target.checked;

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   legacyModeFor,
   resolveSessionPreview,
+  matchingReply,
+  offRowPromptMatch,
   userPromptLines,
 } from './session-preview';
 
@@ -93,5 +95,49 @@ describe('userPromptLines', () => {
   it('reports no line when the chosen prompt is missing, so no gap is reserved', () => {
     expect(userPromptLines('last', 'a', undefined)).toEqual({ first: false, last: false });
     expect(userPromptLines('first', '', 'b')).toEqual({ first: false, last: false });
+  });
+});
+
+describe('offRowPromptMatch', () => {
+  it('names a hidden prompt when nothing on the row matches', () => {
+    expect(offRowPromptMatch(['needle'], ['first one'], ['first one', 'the Needle'])).toBe(
+      'the Needle',
+    );
+    expect(offRowPromptMatch(['needle'], [], ['a needle', 'b'])).toBe('a needle');
+  });
+
+  it('judges each query word: a visible match for one does not explain another', () => {
+    expect(
+      offRowPromptMatch(['alpha', 'beta'], ['has alpha'], ['has alpha', 'only beta']),
+    ).toBe('only beta');
+  });
+
+  it('names nothing when every word the hidden prompt holds is already on the row', () => {
+    expect(
+      offRowPromptMatch(['alpha', 'beta'], ['alpha and beta'], ['alpha and beta', 'beta again']),
+    ).toBeUndefined();
+    expect(offRowPromptMatch(['alpha'], ['x'], ['x', 'y'])).toBeUndefined();
+  });
+
+  it('never names a prompt that is on the row', () => {
+    expect(offRowPromptMatch(['alpha'], ['same alpha'], ['same alpha', 'same alpha'])).toBeUndefined();
+  });
+});
+
+describe('matchingReply', () => {
+  it('prefers the first source when both match', () => {
+    expect(matchingReply(['needle'], ['current needle', 'captured needle'])).toBe('current needle');
+  });
+
+  it('falls to the captured reply when only it matches', () => {
+    expect(matchingReply(['needle'], ['current, moved on', 'captured Needle'])).toBe(
+      'captured Needle',
+    );
+    expect(matchingReply(['needle'], [undefined, 'captured needle'])).toBe('captured needle');
+  });
+
+  it('is undefined when no source matches or there is no query word', () => {
+    expect(matchingReply(['needle'], ['a', 'b'])).toBeUndefined();
+    expect(matchingReply([], ['a needle'])).toBeUndefined();
   });
 });

@@ -26,6 +26,8 @@ import {
 import {
   asUserPrompt,
   DEFAULT_SESSION_PREVIEW,
+  matchingReply,
+  offRowPromptMatch,
   SessionPreviewSettings,
   userPromptLines,
 } from './session-preview';
@@ -3917,14 +3919,17 @@ function SwitcherApp() {
                       // index gave no hit for this row (a session it does not
                       // hold), and the row is not showing that prompt.
                       if (!hitLineShown) {
-                        const shown = [
-                          onRow.first ? session.firstUserMessage : '',
-                          onRow.last ? session.lastUserMessage : '',
-                        ];
-                        const offRow = [session.firstUserMessage, session.lastUserMessage].find(
-                          (p) => !!p && !shown.includes(p) && hasWord(p),
+                        // Per query word: a visible prompt matching one
+                        // word does not explain another found only off the row.
+                        const offRow = offRowPromptMatch(
+                          words,
+                          [
+                            onRow.first ? session.firstUserMessage : undefined,
+                            onRow.last ? session.lastUserMessage : undefined,
+                          ],
+                          [session.firstUserMessage, session.lastUserMessage],
                         );
-                        if (offRow && !shown.some((p) => !!p && hasWord(p))) explain.push(['prompt', offRow]);
+                        if (offRow) explain.push(['prompt', offRow]);
                       }
                       for (const r of m?.reasons ?? []) {
                         if (r === 'path') explain.push(['path', session.project || '']);
@@ -3939,9 +3944,14 @@ function SwitcherApp() {
                       }
                       // The reply is matched on this side only — the main-side
                       // search has no reply text, so it never reports it.
-                      const replyText = assistantResponses[id] || session.__listMember?.lastAssistantMessage || '';
-                      if ((hasRecapLine || !sessionPreview.assistantReply) && replyText && hasWord(replyText)) {
-                        explain.push(['reply', replyText]);
+                      // The filter searches both the current reply and a
+                      // list member's captured one, so either can be the match.
+                      if (hasRecapLine || !sessionPreview.assistantReply) {
+                        const replyText = matchingReply(words, [
+                          assistantResponses[id],
+                          session.__listMember?.lastAssistantMessage,
+                        ]);
+                        if (replyText) explain.push(['reply', replyText]);
                       }
                       for (const [field, text] of explain) {
                         if (!text) continue;

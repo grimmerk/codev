@@ -83,3 +83,37 @@ export const userPromptLines = (
     (userPrompt === 'last' && !!last) ||
     (userPrompt === 'both' && !!last && last !== first),
 });
+
+const holdsWord = (text: string, word: string): boolean =>
+  text.toLowerCase().includes(word.toLowerCase());
+
+/**
+ * A prompt that is on no row line and holds a query word that no on-row
+ * prompt holds — the one a search has to name, since nothing on the row
+ * shows why that word matched. Judged per word: a visible prompt matching
+ * one word of the query does not explain another word found only off the row.
+ */
+export const offRowPromptMatch = (
+  words: readonly string[],
+  onRow: readonly (string | undefined)[],
+  prompts: readonly (string | undefined)[],
+): string | undefined => {
+  const visible = onRow.filter((p): p is string => !!p);
+  const unexplained = words.filter((w) => !visible.some((p) => holdsWord(p, w)));
+  return prompts.find(
+    (p): p is string =>
+      !!p && !visible.includes(p) && unexplained.some((w) => holdsWord(p, w)),
+  );
+};
+
+/**
+ * The reply text a search matched, from the sources the filter searches, in
+ * display order: the first that holds a query word. A saved-list member has
+ * two (the current reply and the one captured with the list) and either can
+ * be the match.
+ */
+export const matchingReply = (
+  words: readonly string[],
+  replies: readonly (string | undefined)[],
+): string | undefined =>
+  replies.find((r): r is string => !!r && words.some((w) => holdsWord(r, w)));
