@@ -585,14 +585,11 @@ describe('the log file', () => {
 
   it('takes the count, its age and the tty from one live report, even if a newer one arrives', async () => {
     noteLiveReport({ live: [{ pid: 4242, tty: 'ttys011' }, { pid: 1, tty: 'ttys001' }] });
-    const record = await runSwitch(undefined, {
-      // A newer report lands while the deferred write is waiting on sysctl.
-      sysctl: async () => {
-        noteLiveReport({ live: [{ pid: 4242, tty: 'ttys099' }] });
-        return '';
-      },
-      psTty: async () => 'ttys077\n',
-    });
+    // The record closes synchronously inside runSwitch; its write is deferred.
+    const pending = runSwitch(undefined, { psTty: async () => 'ttys077\n' });
+    // A newer report lands in between: after the count was taken, before the tty is.
+    noteLiveReport({ live: [{ pid: 4242, tty: 'ttys099' }] });
+    const record = await pending;
     expect(record).toMatchObject({ claudeProcs: 2, tty: 'ttys011', ttySrc: 'live-report' });
   });
 
@@ -1182,8 +1179,9 @@ describe('scripts/switch-timing-summary.js', () => {
     const records = [
       rec({}, { run: 100, main: 110, total: 120 }),
       rec({}, { run: 300, main: 310, total: 320 }),
-      // Killed at the 5 s limit: a real wait, not a switch.
-      rec({ killed: true, ok: false, branch: null }, { run: 5000, main: 5010, total: 5020 }),
+      // Killed at the 5 s limit: a real wait, not a switch. Excluded for
+      // being killed, whatever `ok` says.
+      rec({ killed: true, branch: null }, { run: 5000, main: 5010, total: 5020 }),
       // A launch that failed.
       rec({ ok: false }, { run: 900, main: 910, total: 920 }),
       // Handed to another app: flagged, and an older line recognised by its tool.
@@ -1191,7 +1189,7 @@ describe('scripts/switch-timing-summary.js', () => {
       rec({ tool: 'pty', terminal: 'codev' }, { returned: 2, main: 2, total: 4 }),
     ];
     const s = summary.summarize(records);
-    expect(s).toMatchObject({ count: 6, killed: 1, failed: 2, untimed: 2, timedOut: 0, slow: 0 });
+    expect(s).toMatchObject({ count: 6, killed: 1, failed: 1, untimed: 2, timedOut: 0, slow: 0 });
     expect(s.all.total).toEqual({ n: 2, p50: 220, p90: 300 });
     expect(s.all.run).toEqual({ n: 2, p50: 200, p90: 280 });
     expect(s.all.main.n).toBe(2);
