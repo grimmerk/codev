@@ -372,6 +372,14 @@ describe('options', () => {
     expect(run('show', '--', '--no-such-title').code).toBe(1);
   });
 
+  it('does not take a property of Object.prototype for a command', () => {
+    for (const name of ['toString', 'constructor', 'hasOwnProperty', '__proto__']) {
+      const r = run(name);
+      expect([r.code, r.out]).toEqual([2, []]);
+      expect(JSON.parse(r.stderr).error).toBe(`Unknown command: ${name}`);
+    }
+  });
+
   it('accepts each command’s own options', () => {
     expect(run('list', '--path', '.', '--account', 'main', '--limit', '5', '--pretty').code).toBe(0);
     expect(run('list', '--all', '--limit=2').code).toBe(0);

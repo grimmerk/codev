@@ -102,10 +102,7 @@ describe('generateAccountsSh — shared auto-memory', () => {
   });
 
   it('is still syntactically valid shell with the helper in it', () => {
-    const file = path.join(
-      makeTempDir('accounts-sh-'),
-      'accounts.sh',
-    );
+    const file = path.join(makeTempDir('accounts-sh-'), 'accounts.sh');
     fs.writeFileSync(file, generateAccountsSh(shared()));
     expect(() => execFileSync('bash', ['-n', file])).not.toThrow();
     expect(() => execFileSync('zsh', ['-n', file])).not.toThrow();
@@ -261,9 +258,7 @@ describe('generateAccountsSh', () => {
   // place of the app binary that reports which CLI it was handed.
   describe('codev() dispatch, run in a real shell', () => {
     const setup = () => {
-      const dir = fs.realpathSync(
-        makeTempDir('codev-fn-'),
-      );
+      const dir = fs.realpathSync(makeTempDir('codev-fn-'));
       const stub = path.join(dir, 'CodeV');
       // $1 is the CLI script, the rest are the user's arguments.
       writeFileSync(

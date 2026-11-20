@@ -77,11 +77,14 @@ exception: it prints no JSON, only the shell command that the codev() shell
 function then runs — so it takes no --pretty.
 
 <title | id>:
-  a full session id, the first four or more characters of one, or a session
+  a full session id, the first four or more hex characters of one (hyphens
+  allowed), or a session
   title — its /rename name, or the title Claude Code generated when it was
   never renamed. Titles are matched whole, ignoring case; part of a title works
   when nothing matches outright. Titles are not unique — /branch copies share
   theirs — so show lists every match, while view and resume refuse to pick one.
+  titleKind in the output says what a title is: custom (a /rename name), ai
+  (generated), unknown (captured earlier — it could be either), none (no title).
 
 Which sessions: list, show, view and resume know the sessions in each account's
 history.jsonl — one that has never been given a prompt (a fresh /branch copy)
@@ -395,7 +398,12 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
   if (args[0] === 'session') args.shift();
   const [cmd, ...rest] = args;
   const { out, err } = deps;
-  const spec = cmd === undefined ? undefined : COMMANDS[cmd];
+  // Own keys only: `COMMANDS['toString']` would otherwise find a function on
+  // Object.prototype and pass for a command.
+  const spec =
+    cmd !== undefined && Object.prototype.hasOwnProperty.call(COMMANDS, cmd)
+      ? COMMANDS[cmd]
+      : undefined;
   // `resume` never speaks JSON: its stdout is a shell command.
   const pretty = rest.includes('--pretty') || cmd === 'resume';
   // One index for the whole run: every lookup below shares it.

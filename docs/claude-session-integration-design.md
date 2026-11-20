@@ -661,6 +661,8 @@ reference of the selected row), and a detail view shows the same fields (`⌘I` 
 
 - `src/cli/session-identity.ts` — the one resolver (history scan, transcript lookup,
   title, resume command). No Electron imports; the main process and the CLI both use it.
+  A title comes with a `titleKind`: `custom` (a `/rename` name), `ai` (generated),
+  `unknown` (captured earlier by the row or a saved list — it could be either) or `none`.
   Its header records where transcripts are filed: under the slug of the session's **own
   cwd**, not under the git common directory that auto-memory is keyed on (measured
   2026-11-20; counts are in that header).

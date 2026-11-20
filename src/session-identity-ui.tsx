@@ -71,6 +71,7 @@ const PANEL_STYLE = {
   outline: 'none',
 } as const;
 const ACTIVE_BG = '#094771';
+const FOCUS_RING = 'inset 0 0 0 1px #007fd4';
 const TEXT = '#e9e9e9';
 const DIM = '#888';
 const MONO = 'Menlo, Monaco, "Courier New", monospace';
@@ -142,7 +143,16 @@ const SessionDetail: FC<{
             // Space copy. A row with nothing to copy is skipped.
             tabIndex={empty ? -1 : 0}
             data-detail-row={i}
-            onFocus={() => onActiveIndex?.(i)}
+            // Focus must be visible. The overlay shows it as the active-row
+            // highlight (onActiveIndex); the inline host has no highlight, so
+            // there the row gets a ring — set on focus and cleared on blur,
+            // as terminal-tab.tsx does. Only the keyboard can focus a row
+            // (a click does not move focus), so this never shows on a click.
+            onFocus={(e) => {
+              if (onActiveIndex) onActiveIndex(i);
+              else e.currentTarget.style.boxShadow = FOCUS_RING;
+            }}
+            onBlur={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();

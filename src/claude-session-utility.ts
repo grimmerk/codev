@@ -18,6 +18,7 @@ import {
 } from './accounts';
 import {
   cdAndResume,
+  createTranscriptIndex,
   formatResumeCommand,
   locateTranscript,
   memoryArgFor as sharedMemoryArgFor,
@@ -26,6 +27,7 @@ import {
   scanHistories,
   SessionIdentity,
   titleFromRecords,
+  TranscriptIndex,
 } from './cli/session-identity';
 import {
   compileQuery,
@@ -2508,6 +2510,25 @@ const transcriptSearchDirs = (
   ].filter((d): d is string => !!d);
 };
 
+// The index behind the "not under its own slug" transcript fallback: one
+// synchronous read of every project directory (measured 3–12 ms for 100
+// directories across two accounts). A session whose transcript is gone takes
+// that fallback on every details open, so the index is kept for a short while
+// instead of being rebuilt each time. Short, because it is a snapshot — a
+// transcript that appears elsewhere is seen once this one expires.
+const TRANSCRIPT_INDEX_TTL_MS = 30000;
+let transcriptIndexCache: { index: TranscriptIndex; at: number } | null = null;
+const sharedTranscriptIndex = (): TranscriptIndex => {
+  const now = Date.now();
+  if (
+    !transcriptIndexCache ||
+    now - transcriptIndexCache.at >= TRANSCRIPT_INDEX_TTL_MS
+  ) {
+    transcriptIndexCache = { index: createTranscriptIndex(), at: now };
+  }
+  return transcriptIndexCache.index;
+};
+
 /**
  * Everything that names one session — title, id, account, project path,
  * transcript path, resume command — for the Sessions tab's copy menu and
@@ -2526,6 +2547,7 @@ export const getSessionIdentity = async (
     account,
     accountLabel,
     accountDirs: transcriptSearchDirs(sessionId, accountLabel),
+    transcriptIndex: sharedTranscriptIndex(),
     // Read back from the end of the file, so this stays in the low
     // milliseconds for any session that was ever renamed.
     title: readTranscriptTitle,
