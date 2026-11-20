@@ -363,6 +363,17 @@ export function deleteVSCodeBasedIDESqliteRecord(path: string) {
   window.electronAPI.deleteVSCodeBasedIDESqliteRecord(path);
 }
 
+// When a switch was asked for, for main's switch timing log (switch-timing.ts):
+// the wall clock, and this process's high-resolution clock as epoch ms so main
+// can subtract its own. The stamp itself carries a time and a row count;
+// which session it was, main already knows from the call's other arguments.
+const switchStamp = (via: 'enter' | 'click', rows: number) => ({
+  wallMs: Date.now(),
+  perfEpochMs: performance.timeOrigin + performance.now(),
+  via,
+  rows,
+});
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -2821,6 +2832,7 @@ function SwitcherApp() {
                     customTitles[s.sessionId],
                     // A list member's captured account, when the row itself has none.
                     s.accountLabel ?? s.__listMember?.accountLabel,
+                    switchStamp('enter', displayedSessions.length),
                   );
                 }
               } else if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
@@ -3422,6 +3434,7 @@ function SwitcherApp() {
                       session.activePid,
                       customTitles[session.sessionId],
                       session.accountLabel ?? session.__listMember?.accountLabel,
+                      switchStamp('click', displayedSessions.length),
                     );
                   }}
                   style={{

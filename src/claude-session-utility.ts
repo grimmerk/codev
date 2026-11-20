@@ -60,6 +60,7 @@ import {
   switchOrderFor,
 } from './terminal-switch';
 import { pickSessionByTabTitle } from './cross-ref-title';
+import type { SwitchTiming } from './switch-timing';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -1410,11 +1411,15 @@ const buildResumeCommand = (
   // call site that forgot to pass it must be a type error rather than a
   // session that silently keeps writing to the wrong memory directory.
   projectPath: string,
+  // Timing log only: this is where a resume's account is decided, so this
+  // is where the log learns it (it can differ from the label passed in).
+  timing?: SwitchTiming,
 ): string => {
   const { configDirEnv: configDir, account } = resumeAccountFor(
     sessionId,
     accountLabel,
   );
+  timing?.set({ account: account?.label ?? null });
   // The command itself is spelled in ONE place, shared with the CLI.
   return formatResumeCommand(
     sessionId,
@@ -1435,23 +1440,29 @@ export const openSession = async (
   terminalMode: string = 'tab',
   customTitle?: string,
   accountLabel?: string,
+  // Optional timing collector (switch-timing.ts). Absent for every caller
+  // but the click path; every use is `timing?.…`, which never throws.
+  timing?: SwitchTiming,
 ): Promise<void> => {
   let effectiveTerminal = terminalApp;
 
   // For active sessions, auto-detect which terminal they're running in
   if (isActive && activePid) {
     const detected = await detectTerminalApp(activePid);
+    timing?.mark('detect');
     if (detected !== 'unknown') {
       effectiveTerminal = detected;
       console.log(`[openSession] auto-detected terminal: ${detected} for pid ${activePid}`);
     }
   }
+  timing?.set({ terminal: effectiveTerminal });
 
   // Check if this is an active VS Code session — switch via URI handler
   // Always pass projectPath so the correct VS Code window gets focused first
   const entrypoint =
     cachedEntrypoints?.get(sessionId) ?? knownTranscriptOnlyEntrypoints.get(sessionId);
   if (isActive && entrypoint === 'claude-vscode') {
+    timing?.set({ terminal: 'vscode', tool: 'open', branch: 'deep-link' });
     openSessionInVSCode(sessionId, projectPath, true);
     return;
   }
@@ -1461,6 +1472,7 @@ export const openSession = async (
   // way its own sidebar does. Resuming it in a terminal instead moved the
   // conversation out of Desktop.
   if (entrypoint === 'claude-desktop') {
+    timing?.set({ terminal: 'claude-desktop', tool: 'open', branch: 'deep-link' });
     openSessionInClaudeDesktop(sessionId);
     return;
   }
@@ -1468,10 +1480,12 @@ export const openSession = async (
   switch (effectiveTerminal) {
     case 'vscode':
       // User selected VS Code as launch terminal — open project first, then resume
+      timing?.set({ tool: 'open', branch: 'deep-link' });
       openSessionInVSCode(sessionId, projectPath);
       return;
     case 'codev':
       // Session is in CodeV's embedded terminal — notify renderer to switch to Term tab
+      timing?.set({ tool: 'pty', branch: 'embedded' });
       openSessionInCodeV(sessionId);
       break;
     case 'cmux':
@@ -1482,6 +1496,7 @@ export const openSession = async (
         activePid,
         customTitle,
         accountLabel,
+        timing,
       );
     case 'ghostty':
       return openSessionInGhostty(
@@ -1492,6 +1507,7 @@ export const openSession = async (
         terminalMode,
         customTitle,
         accountLabel,
+        timing,
       );
     case 'terminal':
       return openSessionInTerminalApp(
@@ -1502,6 +1518,7 @@ export const openSession = async (
         terminalMode,
         customTitle,
         accountLabel,
+        timing,
       );
     case 'iterm2':
     default:
@@ -1513,6 +1530,7 @@ export const openSession = async (
         terminalMode,
         customTitle,
         accountLabel,
+        timing,
       );
   }
 };
@@ -1604,6 +1622,7 @@ export const runCommandInTerminal = (
   projectPath: string,
   terminalApp: string = 'iterm2',
   terminalMode: string = 'tab',
+  timing?: SwitchTiming,
 ): Promise<void> => {
   const { exec } = require('child_process');
   // One osascript launch as a promise: the script file is removed either
@@ -1614,12 +1633,20 @@ export const runCommandInTerminal = (
     script: string,
     label: string,
   ): Promise<void> => {
+    // The launch scripts return nothing, so the branch is what was asked for.
+    timing?.mark('script');
+    timing?.set({
+      tool: 'osascript',
+      branch: terminalMode === 'window' ? 'new-window' : 'new-tab',
+    });
     fs.writeFileSync(tmpScript, script);
     return new Promise<void>((resolve, reject) => {
+      timing?.spawned();
       exec(
         `osascript ${tmpScript}`,
         { encoding: 'utf-8', timeout: 5000 },
         (error: any) => {
+          timing?.exited(undefined, !!error?.killed);
           try {
             fs.unlinkSync(tmpScript);
           } catch {}
@@ -2043,6 +2070,7 @@ export const openSessionInITerm2 = async (
   terminalMode: string = 'tab',
   customTitle?: string,
   accountLabel?: string,
+  timing?: SwitchTiming,
 ): Promise<void> => {
   const { exec } = require('child_process');
 
@@ -2053,17 +2081,21 @@ export const openSessionInITerm2 = async (
     const order = switchOrderFor(!isGuessedPid(activePid));
     const tmpScript = '/tmp/codev-iterm-switch.scpt';
     const switchScript = buildITerm2SwitchScript(activePid, customTitle, order);
+    timing?.mark('script');
+    timing?.set({ tool: 'osascript', order, hasTitle: !!customTitle });
     console.log(
       `[iTerm2] switch: pid=${activePid}, order=${order}, customTitle=${customTitle || 'none'}`,
     );
     fs.writeFileSync(tmpScript, switchScript);
+    timing?.spawned();
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8' }, (error: any, stdout: string) => {
+      timing?.exited(stdout, !!error?.killed);
       console.log(`[iTerm2] switch result: ${(stdout || '').trim()}`, error?.message || '');
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
-    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath, timing);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode, timing);
   }
 };
 
@@ -2726,6 +2758,7 @@ export const openSessionInGhostty = async (
   terminalMode: string = 'tab',
   customTitle?: string,
   accountLabel?: string,
+  timing?: SwitchTiming,
 ): Promise<void> => {
   const { exec } = require('child_process');
 
@@ -2736,11 +2769,15 @@ export const openSessionInGhostty = async (
     const order = switchOrderFor(!!activePid && !isGuessedPid(activePid));
     const tmpScript = '/tmp/codev-ghostty-switch.scpt';
     const switchScript = buildGhosttySwitchScript(activePid, customTitle, order, projectPath);
+    timing?.mark('script');
+    timing?.set({ tool: 'osascript', order, hasTitle: !!customTitle });
     console.log(
       `[ghostty] switch: pid=${activePid ?? 'none'}, order=${order}, customTitle=${customTitle || 'none'}`,
     );
     fs.writeFileSync(tmpScript, switchScript);
+    timing?.spawned();
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
+      timing?.exited(stdout, !!error?.killed);
       const result = (stdout || '').trim();
       console.log('[ghostty] switch result:', result, error?.message || '');
       if (result === 'not found') {
@@ -2749,8 +2786,8 @@ export const openSessionInGhostty = async (
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
-    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath, timing);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode, timing);
   }
 };
 
@@ -2767,6 +2804,7 @@ export const openSessionInTerminalApp = async (
   terminalMode: string = 'tab',
   customTitle?: string,
   accountLabel?: string,
+  timing?: SwitchTiming,
 ): Promise<void> => {
   const { exec } = require('child_process');
 
@@ -2779,17 +2817,21 @@ export const openSessionInTerminalApp = async (
       customTitle,
       order,
     );
+    timing?.mark('script');
+    timing?.set({ tool: 'osascript', order, hasTitle: !!customTitle });
     console.log(
       `[Terminal.app] switch: pid=${activePid}, order=${order}, customTitle=${customTitle || 'none'}`,
     );
     fs.writeFileSync(tmpScript, switchScript);
+    timing?.spawned();
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
+      timing?.exited(stdout, !!error?.killed);
       console.log(`[Terminal.app] switch result: ${(stdout || '').trim()}`, error?.message || '');
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
-    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath, timing);
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode, timing);
   }
 };
 
@@ -2807,6 +2849,7 @@ export const openSessionInCmux = async (
   activePid?: number,
   customTitle?: string,
   accountLabel?: string,
+  timing?: SwitchTiming,
 ): Promise<void> => {
   const { exec } = require('child_process');
   const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel, projectPath)}`;
@@ -2835,6 +2878,12 @@ export const openSessionInCmux = async (
       exec('osascript -e \'tell application "cmux" to activate\'');
     };
 
+    // cmux is driven through its CLI, not a script: the matching below runs
+    // in JS, so each layer names itself, and "exited" is the last awaited
+    // CLI call (the closing `activate` is fired and not waited for).
+    timing?.mark('script');
+    timing?.set({ tool: 'cmux-cli', hasTitle: !!customTitle });
+    timing?.spawned();
     (async () => {
       // Single tree --all call for title matching, project name fallback, and workspace ID extraction.
       const treeOutput = await execPromise(`${CMUX_CLI} tree --all 2>/dev/null`);
@@ -2874,6 +2923,7 @@ export const openSessionInCmux = async (
           for (const surface of ws.surfaces) {
             if (surface.title.toLowerCase().includes(titleLower)) {
               console.log('[cmux] matched surface by title:', surface.surfaceId, 'in', ws.wsId);
+              timing?.set({ branch: 'title' });
               await selectAndActivate(ws.wsId, surface.surfaceId);
               return;
             }
@@ -2889,6 +2939,7 @@ export const openSessionInCmux = async (
             for (const surface of ws.surfaces) {
               if (surface.tty && surface.tty.endsWith(ttyOutput)) {
                 console.log('[cmux] matched surface by TTY:', surface.surfaceId, 'in', ws.wsId, 'tty=', surface.tty);
+                timing?.set({ branch: 'tty' });
                 await selectAndActivate(ws.wsId, surface.surfaceId);
                 return;
               }
@@ -2910,6 +2961,7 @@ export const openSessionInCmux = async (
         const cwdHit = cwdResults.find((r: any) => r.cwd === projectPath || r.focusedCwd === projectPath);
         if (cwdHit) {
           console.log('[cmux] matched workspace by cwd:', cwdHit.wsId);
+          timing?.set({ branch: 'cwd' });
           await selectAndActivate(cwdHit.wsId);
           return;
         }
@@ -2923,6 +2975,7 @@ export const openSessionInCmux = async (
           for (const surface of ws.surfaces) {
             if (surface.title.toLowerCase().includes(projectNameLower)) {
               console.log('[cmux] matched by surface title (project name):', surface.surfaceId, 'in', ws.wsId);
+              timing?.set({ branch: 'project-name' });
               await selectAndActivate(ws.wsId, surface.surfaceId);
               return;
             }
@@ -2931,11 +2984,18 @@ export const openSessionInCmux = async (
       }
 
       console.log('[cmux] no match found, activating cmux');
+      timing?.set({ branch: 'none' });
       exec('osascript -e \'tell application "cmux" to activate\'');
-    })();
+    })().finally(() => timing?.exited());
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
-    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux');
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath, timing);
+    // The cmux launch is several CLI calls behind one promise; time it whole.
+    timing?.mark('script');
+    timing?.set({ tool: 'cmux-cli', branch: 'new-workspace' });
+    timing?.spawned();
+    return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'cmux').finally(
+      () => timing?.exited(),
+    );
   }
 };
 

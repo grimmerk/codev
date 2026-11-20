@@ -273,6 +273,8 @@ interface IElectronAPI {
     activePid?: number,
     customTitle?: string,
     accountLabel?: string,
+    /** When the switch was asked for; feeds the switch timing log only. */
+    stamp?: { wallMs: number; perfEpochMs: number; via: 'enter' | 'click'; rows: number },
   ) => void;
   /** Resume the given saved-list members that are not running; staggered, skips report why. */
   openSessionListMembers: (
