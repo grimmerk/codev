@@ -13,6 +13,7 @@
     "start": "cross-env NODE_ENV=development electron-forge start",
     "dev": "npm run start",
     "account": "ts-node src/cli/codev-account.ts",
+    "session": "ts-node src/cli/codev-session.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "package": "electron-forge package",

@@ -22,8 +22,9 @@ const config: ForgeConfig = {
           BUILD_TYPE: process.env.BUILD_TYPE,
         }),
       );
-      // Compile the codev account CLI (plain fs/os/path TS — no bundling
-      // needed) into resources/cli. Shipped via extraResource below and run
+      // Compile the codev CLIs — `account` and `session` — (plain fs/os/path
+      // TS, everything they import lives in src/cli — no bundling needed)
+      // into resources/cli. Shipped via extraResource below and run
       // through the app binary with ELECTRON_RUN_AS_NODE (see accounts.sh
       // codev() launcher). Clean first — tsc never removes stale output, so
       // a renamed source would otherwise ship both old and new .js.
@@ -33,6 +34,7 @@ const config: ForgeConfig = {
         [
           'src/cli/account-manager.ts',
           'src/cli/codev-account.ts',
+          'src/cli/codev-session.ts',
           '--outDir',
           'resources/cli',
           '--module',

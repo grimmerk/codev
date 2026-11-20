@@ -364,7 +364,8 @@ export function generateAccountsSh(reg: Registry): string {
       exec = `${appPath}/Contents/MacOS/${exe}`;
     }
     L.push('');
-    L.push('# codev CLI — the account manager bundled inside the CodeV app.');
+    L.push('# codev CLI — `codev account` and `codev session`, bundled inside the');
+    L.push('# CodeV app.');
     L.push(
       '# ELECTRON_RUN_AS_NODE runs the app binary as plain Node (no system',
     );
@@ -372,10 +373,28 @@ export function generateAccountsSh(reg: Registry): string {
       '# Node needed). CodeV refreshes this file on every launch, so a moved',
     );
     L.push('# app self-heals the path below.');
+    const cli = (name: string): string =>
+      `ELECTRON_RUN_AS_NODE=1 "${exec}" "${appPath}/Contents/Resources/cli/${name}.js"`;
     L.push('codev() {');
-    L.push(
-      `  ELECTRON_RUN_AS_NODE=1 "${exec}" "${appPath}/Contents/Resources/cli/codev-account.js" "$@"`,
-    );
+    L.push('  case "$1" in');
+    L.push('    session)');
+    L.push('      shift');
+    // `resume` prints the command and THIS shell runs it, so claude is a
+    // child of the user's shell — not of the app binary, which CodeV's
+    // terminal detection would otherwise find in the process tree. The CLI
+    // keeps stdout for the command alone (help and errors go to stderr), and
+    // a non-zero status means there is nothing to run.
+    L.push('      if [ "$1" = "resume" ]; then');
+    L.push('        local _codev_resume');
+    L.push(`        _codev_resume=$(${cli('codev-session')} "$@") || return $?`);
+    L.push('        [ -n "$_codev_resume" ] || return 0');
+    L.push('        eval "$_codev_resume"');
+    L.push('      else');
+    L.push(`        ${cli('codev-session')} "$@"`);
+    L.push('      fi');
+    L.push('      ;;');
+    L.push(`    *) ${cli('codev-account')} "$@" ;;`);
+    L.push('  esac');
     L.push('}');
     // Tab completion (zsh). Labels are baked in and refresh on regenerate,
     // like everything else in this file. The function body is only PARSED by
@@ -390,7 +409,9 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('# Tab completion for codev (zsh; needs compinit loaded).');
     L.push('_codev() {');
     L.push('  if (( CURRENT == 2 )); then');
-    L.push('    compadd account');
+    L.push('    compadd account session');
+    L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "session" ]; then');
+    L.push('    compadd list show resume help');
     L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
     L.push(
       '    compadd list add default remove rm rename share unshare share-memory sync-settings regenerate show install uninstall help',
