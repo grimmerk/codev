@@ -146,8 +146,10 @@ interface IElectronAPI {
   setSessionTerminalApp: (app: string) => void;
   getSessionTerminalMode: () => Promise<string>;
   setSessionTerminalMode: (mode: string) => void;
-  getSessionDisplayMode: () => Promise<string>;
-  setSessionDisplayMode: (mode: string) => void;
+  /** Which preview lines a Sessions row shows; the old single setting is migrated on read. */
+  getSessionPreview: () => Promise<import('./session-preview').SessionPreviewSettings>;
+  setSessionPreviewUserPrompt: (value: import('./session-preview').UserPromptPreview) => void;
+  setSessionPreviewAssistantReply: (value: boolean) => void;
   getDefaultSwitcherMode: () => Promise<string>;
   setDefaultSwitcherMode: (mode: string) => void;
   getLoginItemSettings: () => Promise<{ openAtLogin: boolean }>;
@@ -291,6 +293,14 @@ interface IElectronAPI {
   launchNewClaudeSession: (projectPath: string, accountLabel?: string) => void;
   launchNewClaudeSessionInCodev: (projectPath: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;
+  /** null when the id is unusable or the lookup failed. */
+  getSessionIdentity: (
+    sessionId: string,
+    project: string,
+    accountLabel?: string,
+    fallbackTitle?: string,
+  ) => Promise<import('./cli/session-identity-fields').SessionIdentity | null>;
+  copyText: (text: string) => Promise<boolean>;
   loadSessionEnrichment: (sessions: any[]) => Promise<{
     titles: Record<string, string>;
     branches: Record<string, string>;

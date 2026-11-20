@@ -5,6 +5,11 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
+import {
+  identityTargetOf,
+  sessionRowKey,
+  useSessionIdentityUi,
+} from './session-identity-ui';
 import type { LiveRowInfo } from './session-list-view';
 import type { SessionList, SessionListMember } from './session-lists';
 import {
@@ -23,6 +28,14 @@ import {
   truncateMiddle,
   windowAroundMatch,
 } from './session-search';
+import {
+  asUserPrompt,
+  DEFAULT_SESSION_PREVIEW,
+  matchingReply,
+  offRowPromptMatch,
+  SessionPreviewSettings,
+  userPromptLines,
+} from './session-preview';
 import TerminalTab from './terminal-tab';
 
 type LiveReport = Awaited<ReturnType<Window['electronAPI']['getLiveSessions']>>;
@@ -756,7 +769,7 @@ function SwitcherApp() {
   const [allSessions, setAllSessions] = useState<ListViewSession[]>([]);
   const [sessions, setSessions] = useState<ListViewSession[]>([]);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState(-1);
-  const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
+  const [sessionPreview, setSessionPreview] = useState<SessionPreviewSettings>(DEFAULT_SESSION_PREVIEW);
   const [customTitles, setCustomTitles] = useState<Record<string, string>>({});
   const [branches, setBranches] = useState<Record<string, string>>({});
   const [prLinks, setPrLinks] = useState<Record<string, { prNumber: number; prUrl: string }>>({});
@@ -939,6 +952,16 @@ function SwitcherApp() {
   const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
   const [settingsOpenToTab, setSettingsOpenToTab] = useState<'general' | 'sessions' | 'shortcuts' | null>(null);
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Session identity: right-click copy menu, ⌘⇧C, detail view (⌘I / ⌘↓).
+  const flashBanner = useCallback((msg: string) => {
+    if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+    setModeBanner(msg);
+    bannerTimeoutRef.current = setTimeout(() => setModeBanner(null), 3000);
+  }, []);
+  const identityUi = useSessionIdentityUi({
+    notify: flashBanner,
+    restoreFocus: forceFocusOnInput,
+  });
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -2319,9 +2342,9 @@ function SwitcherApp() {
         if (!rawStatuses) return;
         applyStatuses(rawStatuses);
       });
-      // Refresh display mode setting
-      window.electronAPI.getSessionDisplayMode().then((mode: string) => {
-        setSessionDisplayMode(mode || 'first');
+      // Refresh the Session Preview settings
+      window.electronAPI.getSessionPreview().then((preview) => {
+        if (preview) setSessionPreview(preview);
       });
       // Ignore mouse hover briefly to prevent selected item jumping to mouse position
       ignoreMouseEnterRef.current = true;
@@ -2679,9 +2702,12 @@ function SwitcherApp() {
             openToTab={settingsOpenToTab}
             onOpenToTabConsumed={() => setSettingsOpenToTab(null)}
             onClosed={forceFocusOnInput}
-            saveCallback={(key: string, value: string) => {
-              if (key === 'sessionDisplayMode') {
-                setSessionDisplayMode(value);
+            saveCallback={(key: string, value: string | boolean) => {
+              if (key === 'sessionPreviewUserPrompt') {
+                const userPrompt = asUserPrompt(value);
+                if (userPrompt) setSessionPreview((p) => ({ ...p, userPrompt }));
+              } else if (key === 'sessionPreviewAssistantReply') {
+                setSessionPreview((p) => ({ ...p, assistantReply: value === true }));
               }
             }}
           />
@@ -2745,6 +2771,14 @@ function SwitcherApp() {
               setSelectedSessionIndex(0);
             }}
             onKeyDown={(e) => {
+              if (
+                identityUi.handleKey(
+                  e,
+                  identityTargetOf(displayedSessions[selectedSessionIndex], customTitles),
+                )
+              ) {
+                return;
+              }
               if (e.key === 'Escape') {
                 if (sessionSearchValue) {
                   setSessionSearchValue('');
@@ -3362,7 +3396,7 @@ function SwitcherApp() {
                 // A synthetic live row is keyed by pid: two processes can
                 // share one sessionId (a resumed copy, a /branch parent and
                 // child), and duplicate keys leave stale rows on screen.
-                <Fragment key={`${session.__pinnedRow ? 'pin:' : ''}${session.__live ? `live:${session.__live.pid}:` : ''}${session.sessionId}`}>
+                <Fragment key={sessionRowKey(session)}>
                 {visiblePinnedRows.length > 0 && index === visiblePinnedRows.length && (
                   <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 2px 3px' }} />
                 )}
@@ -3388,6 +3422,7 @@ function SwitcherApp() {
                 )}
                 <div
                   data-session-index={index}
+                  onContextMenu={(e) => identityUi.openMenu(e, identityTargetOf(session, customTitles))}
                   onClick={() => {
                     // A running process with no session id has nothing to resume.
                     if (session.__liveOrphan) return;
@@ -3707,23 +3742,33 @@ function SwitcherApp() {
                         </span>
                       </div>
                     </div>
-                    {/* Line 2: first/last prompt (smaller text, only if content exists) */}
-                    {(session.firstUserMessage || session.lastUserMessage) && (
+                    {/* Line 2: first/last user prompt, per Settings → Session
+                        Preview. Rendered only when a prompt will be in it, so
+                        "None" (or a missing prompt) leaves no empty line. */}
+                    {(() => {
+                      const promptLines = userPromptLines(
+                        sessionPreview.userPrompt,
+                        session.firstUserMessage,
+                        session.lastUserMessage,
+                      );
+                      if (!promptLines.first && !promptLines.last) return null;
+                      const both = sessionPreview.userPrompt === 'both';
+                      return (
                       <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '2px' }}>
-                        {(sessionDisplayMode === 'first' || sessionDisplayMode === 'both') && session.firstUserMessage && (
+                        {promptLines.first && (
                           <span style={{ color: '#999', fontSize: '12px' }}>
                             <Highlighter
                               searchWords={searchHighlightWords}
                               autoEscape
                               textToHighlight={fitToRow(
                                 session.firstUserMessage || '',
-                                sessionDisplayMode === 'both' ? 50 : 80,
+                                both ? 50 : 80,
                               )}
                               highlightStyle={SEARCH_HIGHLIGHT_STYLE}
                             />
                           </span>
                         )}
-                        {sessionDisplayMode === 'last' && session.lastUserMessage && (
+                        {promptLines.last && !both && (
                           <span style={{ color: '#c89030', fontSize: '12px' }}>
                             <Highlighter
                               searchWords={searchHighlightWords}
@@ -3736,7 +3781,7 @@ function SwitcherApp() {
                             />
                           </span>
                         )}
-                        {sessionDisplayMode === 'both' && session.lastUserMessage && session.lastUserMessage !== session.firstUserMessage && (
+                        {promptLines.last && both && (
                           <span style={{ color: '#c89030', fontSize: '12px' }}>
                             {'  →  '}
                             <Highlighter
@@ -3751,15 +3796,31 @@ function SwitcherApp() {
                           </span>
                         )}
                       </div>
-                    )}
+                      );
+                    })()}
                     {/* Matched-prompt snippet (main-side deep search) — shown when the
                         match isn't already visible in the first/last lines above */}
                     {(() => {
-                      const m = searchSnippets[session.sessionId];
-                      if (!m || !isSearchingSessions) return null;
+                      if (!isSearchingSessions) return null;
+                      // No main-side entry is not "nothing to explain": a row
+                      // can match on this side alone (the last reply, or a
+                      // session the prompt index does not hold), and a field
+                      // Settings → Session Preview hides still has to be named.
+                      const m = searchSnippets[session.sessionId] as SearchHit | undefined;
                       const words = searchHighlightWords;
+                      const hasWord = (text: string) => {
+                        const lower = text.toLowerCase();
+                        return words.some((w) => lower.includes(w.toLowerCase()));
+                      };
                       const id = session.sessionId;
-                      const hits = m.hits ?? [];
+                      // What the row renders, not what the setting asks for.
+                      const onRow = userPromptLines(
+                        sessionPreview.userPrompt,
+                        session.firstUserMessage,
+                        session.lastUserMessage,
+                      );
+                      let hitLineShown = false;
+                      const hits = m?.hits ?? [];
                       const k = Math.min(hitIndex[id] ?? 0, Math.max(0, hits.length - 1));
                       const hit = hits[k];
                       const lineStyle = { overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', marginTop: '1px' } as const;
@@ -3780,12 +3841,14 @@ function SwitcherApp() {
                       // click away and the prompts around it unfoldable. The
                       // line is still suppressed when the only hit is already
                       // on screen (first/last prompt) — vertical space rule.
-                      if (hit && words.some((w) => hit.snippet.toLowerCase().includes(w.toLowerCase()))) {
+                      if (m && hit && hasWord(hit.snippet)) {
                         // Against the prompt index, not messageCount: that
                         // counts every history line, prompts or not.
                         const lastIndex = m.promptCount - 1;
-                        const dupFirst = hit.promptIndex === 0 && (sessionDisplayMode === 'first' || sessionDisplayMode === 'both');
-                        const dupLast = hit.promptIndex === lastIndex && (sessionDisplayMode === 'last' || sessionDisplayMode === 'both');
+                        // With the prompt line off (None) nothing is on the
+                        // row, so every hit gets its own line.
+                        const dupFirst = hit.promptIndex === 0 && onRow.first;
+                        const dupLast = hit.promptIndex === lastIndex && onRow.last;
                         const expanded = expandedHits.has(id);
                         const hasContext = !!(hit.before || hit.after);
                         const prevHit = () => setHitIndex((h) => ({ ...h, [id]: (k - 1 + hits.length) % hits.length }));
@@ -3797,7 +3860,9 @@ function SwitcherApp() {
                             else next.add(id);
                             return next;
                           });
+                        if (dupFirst || dupLast) hitLineShown = true;
                         if (!(dupFirst || dupLast) || hits.length > 1 || expanded) {
+                          hitLineShown = true;
                           lines.push(
                             <div key="hit" style={lineStyle}>
                               <span style={SNIPPET_LINE_STYLE}>
@@ -3882,11 +3947,28 @@ function SwitcherApp() {
                       // Issue #141: name the field that matched when that field is
                       // not on the row — the path, the assistant's mined
                       // references, a recap the row is not showing, a reply hidden
-                      // behind a recap. Fields that render (title, branch, project
+                      // behind a recap or switched off in Settings → Session
+                      // Preview. Fields that render (title, branch, project
                       // name, badge, first/last prompt) already carry the highlight.
                       const hasRecapLine = !!session.__listMember?.recap;
                       const explain: [string, string][] = [];
-                      for (const r of m.reasons ?? []) {
+                      // A prompt that matched but is on no line: the prompt
+                      // index gave no hit for this row (a session it does not
+                      // hold), and the row is not showing that prompt.
+                      if (!hitLineShown) {
+                        // Per query word: a visible prompt matching one
+                        // word does not explain another found only off the row.
+                        const offRow = offRowPromptMatch(
+                          words,
+                          [
+                            onRow.first ? session.firstUserMessage : undefined,
+                            onRow.last ? session.lastUserMessage : undefined,
+                          ],
+                          [session.firstUserMessage, session.lastUserMessage],
+                        );
+                        if (offRow) explain.push(['prompt', offRow]);
+                      }
+                      for (const r of m?.reasons ?? []) {
                         if (r === 'path') explain.push(['path', session.project || '']);
                         else if (r === 'assistant')
                           explain.push([
@@ -3896,7 +3978,17 @@ function SwitcherApp() {
                               : parsedSearch.words.join(' '),
                           ]);
                         else if (r === 'recap' && !hasRecapLine) explain.push(['recap', recaps[id]?.text || '']);
-                        else if (r === 'reply' && hasRecapLine) explain.push(['reply', assistantResponses[id] || '']);
+                      }
+                      // The reply is matched on this side only — the main-side
+                      // search has no reply text, so it never reports it.
+                      // The filter searches both the current reply and a
+                      // list member's captured one, so either can be the match.
+                      if (hasRecapLine || !sessionPreview.assistantReply) {
+                        const replyText = matchingReply(words, [
+                          assistantResponses[id],
+                          session.__listMember?.lastAssistantMessage,
+                        ]);
+                        if (replyText) explain.push(['reply', replyText]);
                       }
                       for (const [field, text] of explain) {
                         if (!text) continue;
@@ -3914,7 +4006,9 @@ function SwitcherApp() {
                     {/* Line 3: on a saved-list member, the recap captured
                         with it — Claude Code's own "where we are, what's
                         next" line, which is what a snapshot is for. Otherwise
-                        the last assistant response. One line either way. */}
+                        the last assistant response, unless Settings → Session
+                        Preview turns it off (the recap is the list's own
+                        content and stays). One line either way. */}
                     {(() => {
                       const captured = session.__listMember;
                       const recap = captured?.recap;
@@ -3948,6 +4042,7 @@ function SwitcherApp() {
                           </div>
                         );
                       }
+                      if (!sessionPreview.assistantReply) return null;
                       const reply = assistantResponses[session.sessionId] || captured?.lastAssistantMessage;
                       if (!reply) return null;
                       return (
@@ -3965,6 +4060,7 @@ function SwitcherApp() {
                     })()}
                   </div>
                 </div>
+                {identityUi.inlineFor(identityTargetOf(session, customTitles))}
                 </Fragment>
               ))}
               {!isSearchingSessions && !minorsExpanded && minorSessions.length > 0 && (
@@ -4338,6 +4434,8 @@ function SwitcherApp() {
       )}
       </div>
       ))}
+      {/* Session copy menu + details overlay (top level, like the dialog below). */}
+      {identityUi.layer}
       {/* Save-list dialog. Top level, outside the mode branches: it is opened
           from the Sessions tab, and a modal nested inside the Projects branch
           never renders there (the first live test found exactly that). */}

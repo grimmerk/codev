@@ -67,8 +67,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setSessionTerminalApp: (app: string) => ipcRenderer.send('set-session-terminal-app', app),
   getSessionTerminalMode: () => ipcRenderer.invoke('get-session-terminal-mode'),
   setSessionTerminalMode: (mode: string) => ipcRenderer.send('set-session-terminal-mode', mode),
-  getSessionDisplayMode: () => ipcRenderer.invoke('get-session-display-mode'),
-  setSessionDisplayMode: (mode: string) => ipcRenderer.send('set-session-display-mode', mode),
+  getSessionPreview: () => ipcRenderer.invoke('get-session-preview'),
+  setSessionPreviewUserPrompt: (value: string) => ipcRenderer.send('set-session-preview-user-prompt', value),
+  setSessionPreviewAssistantReply: (value: boolean) => ipcRenderer.send('set-session-preview-assistant-reply', value),
   getDefaultSwitcherMode: () => ipcRenderer.invoke('get-default-switcher-mode'),
   setDefaultSwitcherMode: (mode: string) => ipcRenderer.send('set-default-switcher-mode', mode),
   getLoginItemSettings: () => ipcRenderer.invoke('get-login-item-settings'),
@@ -146,6 +147,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('launch-new-claude-session-in-codev', projectPath),
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>
     ipcRenderer.send('copy-claude-session-command', sessionId, projectPath),
+  getSessionIdentity: (
+    sessionId: string,
+    project: string,
+    accountLabel?: string,
+    fallbackTitle?: string,
+  ) =>
+    ipcRenderer.invoke(
+      'get-session-identity',
+      sessionId,
+      project,
+      accountLabel,
+      fallbackTitle,
+    ),
+  copyText: (text: string) => ipcRenderer.invoke('copy-text', text),
   loadSessionEnrichment: (sessions: any[]) => ipcRenderer.invoke('load-session-enrichment', sessions),
   loadLastAssistantResponses: (sessions: any[]) => ipcRenderer.invoke('load-last-assistant-responses', sessions),
   loadProjectBranches: (paths: string[]) => ipcRenderer.invoke('load-project-branches', paths),

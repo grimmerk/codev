@@ -12,6 +12,8 @@
  * the two callers now differ only in what they can put on the target.
  */
 
+import { matchesSessionId } from './cli/session-identity-fields';
+
 // ---------------------------------------------------------------------------
 // Query language
 // ---------------------------------------------------------------------------
@@ -575,20 +577,9 @@ export const matchesAllWords = (
   wordsLower: string[],
 ): boolean => wordsLower.every((w) => haystackLower.includes(w));
 
-/**
- * Does a query word name a session by its id? A PREFIX of at least four hex
- * characters (hyphens allowed), never a substring: the id is searchable so
- * the one a terminal status line shows can be typed in, and people type it
- * from the start. A substring rule would make `de` or `cafe` match nearly
- * every session on the machine through its id, regardless of content.
- */
-export const matchesSessionId = (
-  sessionId: string,
-  wordLower: string,
-): boolean =>
-  wordLower.length >= 4 &&
-  /^[0-9a-f-]+$/.test(wordLower) &&
-  sessionId.toLowerCase().startsWith(wordLower);
+// The id rule itself lives with the session-identity code, which the
+// `codev session` CLI shares; re-exported so callers here are unchanged.
+export { matchesSessionId };
 
 /**
  * `matchesAllWords` plus the id rule: every word must match the text OR

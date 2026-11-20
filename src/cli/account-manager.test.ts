@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 
 import {
   generateAccountsSh,
@@ -13,6 +13,17 @@ import {
 } from './account-manager';
 
 const HOME = os.homedir();
+
+// Every temp dir this file makes, removed when it is done.
+const tempDirs: string[] = [];
+const makeTempDir = (prefix: string): string => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+};
+afterAll(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 /** A representative two-account registry (personal default + work extra). */
 function reg(overrides: Partial<Registry> = {}): Registry {
@@ -91,10 +102,7 @@ describe('generateAccountsSh — shared auto-memory', () => {
   });
 
   it('is still syntactically valid shell with the helper in it', () => {
-    const file = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'accounts-sh-')),
-      'accounts.sh',
-    );
+    const file = path.join(makeTempDir('accounts-sh-'), 'accounts.sh');
     fs.writeFileSync(file, generateAccountsSh(shared()));
     expect(() => execFileSync('bash', ['-n', file])).not.toThrow();
     expect(() => execFileSync('zsh', ['-n', file])).not.toThrow();
@@ -205,6 +213,8 @@ describe('generateAccountsSh', () => {
     const sh = generateAccountsSh(reg({ appPath: '/Applications/CodeV.app' }));
     expect(sh).toContain('_codev() {');
     expect(sh).toContain('compdef _codev codev');
+    expect(sh).toContain('compadd account session');
+    expect(sh).toContain('compadd list show view self resume help');
     expect(sh).toContain(
       'compadd list add default remove rm rename share unshare share-memory sync-settings regenerate show install uninstall help',
     );
@@ -242,6 +252,73 @@ describe('generateAccountsSh', () => {
     expect(sh).toContain(
       'ELECTRON_RUN_AS_NODE=1 "/Applications/MyCodeV.app/Contents/MacOS/CodeV" "/Applications/MyCodeV.app/Contents/Resources/cli/codev-account.js" "$@"',
     );
+  });
+
+  // The real path: source the generated file in a real shell, with a stub in
+  // place of the app binary that reports which CLI it was handed.
+  describe('codev() dispatch, run in a real shell', () => {
+    const setup = () => {
+      const dir = fs.realpathSync(makeTempDir('codev-fn-'));
+      const stub = path.join(dir, 'CodeV');
+      // $1 is the CLI script, the rest are the user's arguments.
+      writeFileSync(
+        stub,
+        [
+          '#!/bin/sh',
+          'cli=$(basename "$1"); shift',
+          'case "$cli $*" in',
+          // A resumable session: the command on stdout, chatter on stderr.
+          '  "codev-session.js resume one") echo "note" >&2; echo "cd \'$STUB_DIR\' && echo RESUMED-IN:\\$PWD" ;;',
+          // Ambiguous: status 2, and (worse than the real CLI) noise on stdout.
+          '  "codev-session.js resume two") echo "echo MUST-NOT-RUN"; exit 2 ;;',
+          '  "codev-session.js resume --help") echo "usage" >&2 ;;',
+          '  *) echo "PASS:$cli:$*" ;;',
+          'esac',
+        ].join('\n') + '\n',
+        { mode: 0o755 },
+      );
+      const file = path.join(dir, 'accounts.sh');
+      writeFileSync(
+        file,
+        generateAccountsSh(reg({ appPath: dir, appExec: stub })),
+      );
+      const run = (shell: string, script: string): string =>
+        execFileSync(shell, ['-c', `. "${file}"\n${script}`], {
+          encoding: 'utf-8',
+          env: { PATH: '/usr/bin:/bin', HOME: dir, STUB_DIR: dir },
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+      return { dir, run };
+    };
+
+    for (const shell of ['zsh', 'bash']) {
+      it(`${shell}: resume runs the printed command in the calling shell`, () => {
+        const { dir, run } = setup();
+        expect(run(shell, 'codev session resume one; echo "now:$PWD"')).toBe(
+          `RESUMED-IN:${dir}\nnow:${dir}\n`,
+        );
+      });
+
+      it(`${shell}: a refused resume runs nothing and keeps the status`, () => {
+        const { run } = setup();
+        expect(run(shell, 'codev session resume two; echo "status:$?"')).toBe(
+          'status:2\n',
+        );
+        expect(run(shell, 'codev session resume --help; echo "status:$?"')).toBe(
+          'status:0\n',
+        );
+      });
+
+      it(`${shell}: everything else goes straight to its CLI`, () => {
+        const { run } = setup();
+        expect(run(shell, 'codev session show "billing fix" --json')).toBe(
+          'PASS:codev-session.js:show billing fix --json\n',
+        );
+        expect(run(shell, 'codev account list')).toBe(
+          'PASS:codev-account.js:account list\n',
+        );
+      });
+    }
   });
 
   it('rejects a shell-unsafe label (hand-edited registry)', () => {

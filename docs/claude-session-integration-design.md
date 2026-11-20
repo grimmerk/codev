@@ -452,15 +452,23 @@ Header with toggle buttons + `Tab` key:
 
 Line 2 only shown if prompts exist. Line 3 only shown for active sessions with assistant response.
 
-### Session display modes (Settings)
+### Session Preview (Settings)
 
-| Mode | Shows |
-|------|-------|
-| First Prompt (default) | First user message (grey) |
-| Last Prompt | Last user message (amber) |
-| First + Last | First (grey) → Last (amber) |
+Two independent settings since v1.0.95 (`src/session-preview.ts`); before that, one dropdown with the three user-prompt choices and an assistant line that was always on.
 
-**Note:** "Last prompt" is last **user** prompt from `history.jsonl`, not assistant response. Getting assistant's last response requires reading full session JSONL — may need Rust native module.
+| Setting | Choice | Shows |
+|---------|--------|-------|
+| User prompt | None | No prompt line |
+| | First (default) | First user message (grey) |
+| | Last | Last user message (amber) |
+| | First + Last | First (grey) → Last (amber) |
+| Last assistant reply | On (default) / Off | The `◀` line (blue) |
+
+None + Off is a title-only row: a line is rendered only when it has content, so nothing is reserved. A saved list's recap line is not part of the preview and stays. While searching, a match in a field the settings hide still gets its own `match …` line.
+
+**Migration:** the old key `session-display-mode` is read as a fallback for the user prompt (assistant reply on) and never deleted; saving First / Last / First + Last also mirrors it there, so an older build keeps a value it understands.
+
+**Note:** the user prompts come from `history.jsonl`; the assistant reply is read from the session transcript.
 
 ### Search
 
@@ -486,7 +494,8 @@ In the Settings popup:
 | Default Tab | Projects / Sessions | Projects | `electron-settings` |
 | Launch Terminal | iTerm2 / Ghostty / cmux | iTerm2 | `electron-settings` |
 | Launch Mode | New Tab / New Window | New Tab | `electron-settings` |
-| Session Preview | First User Prompt / Last User Prompt / First + Last | First User Prompt | `electron-settings` |
+| Session Preview: User prompt | None / First / Last / First + Last | First | `electron-settings` |
+| Session Preview: Last assistant reply | On / Off | On | `electron-settings` |
 
 Session-related settings are only visible when in Sessions mode (fixes popup interaction issue #54).
 
@@ -643,12 +652,35 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 
 - Full-text search across conversation content (may need Rust native module)
 - Bookmark functionality
-- Copy resume command (right-click or long-press)
+- ~~Copy resume command (right-click or long-press)~~ — no longer planned: shipped in
+  1.0.96, see **Session identity** below
 - Session status (Working/Idle) detection from JSONL
 - Notifications on Working → Idle transition
 - PR info display from `sessions-index.json`
 - Terminal.app support
 - Collapse/expand for full session details
+
+### Session identity (shipped in 1.0.96)
+
+The Phase 2 item "copy resume command", grown into the handful of facts that name a
+session. A right-click menu on a Sessions row copies the title, session id,
+transcript path, project path, resume command or a one-line reference (`⌘⇧C` copies the
+reference of the selected row), and a detail view shows the same fields (`⌘I` overlay,
+`⌘↓` under the row). Where it lives, so it is not researched again:
+
+- `src/cli/session-identity.ts` — the one resolver (history scan, transcript lookup,
+  title, resume command). No Electron imports; the main process and the CLI both use it.
+  A title comes with a `titleKind`: `custom` (a `/rename` name), `ai` (generated),
+  `unknown` (captured earlier by the row or a saved list — it could be either) or `none`.
+  Its header records where transcripts are filed: under the slug of the session's **own
+  cwd**, not under the git common directory that auto-memory is keyed on (measured
+  2026-11-20; counts are in that header).
+- `src/session-identity-ui.tsx` — the menu and the detail component with its two hosts.
+- `src/cli/codev-session.ts` — `codev session list | show | view | self | resume`,
+  dispatched by the `codev()` function that `account-manager.ts` generates. JSON by
+  default with `--pretty` for people — except `resume`, which prints the shell command
+  that function then runs. `session-transcript.ts` reads the last messages,
+  `session-self.ts` works out which session the caller is running in.
 
 ### Phase 3 (Future)
 

@@ -127,6 +127,11 @@ Pure CSS in `switcher-ui.tsx`.
   link **and** not active.
 - UI: collapse into a gray "· N minor sessions" row (expandable); plus a right-click
   "Hide session" for manual hiding (stored in §4.4's file, `hidden` list — ships with PR-2).
+  - *Update, 1.0.96:* hiding shipped as the hover ⊘ / `⇧⌘D`, not as a menu item. A
+    right-click menu on a Sessions row exists now (the session-identity copy menu,
+    `src/session-identity-ui.tsx`); a "Hide session" item belongs in its `menuItems()`,
+    at the comment that marks the place. The same resolver backs the `codev session` CLI
+    (`src/cli/codev-session.ts`) — see `docs/claude-session-integration-design.md`, Phase 2.
 - Conservative by design: over-showing (expand reveals everything) beats over-hiding.
 
 ### 4.4 D1: Pin ★ + Pinned section
