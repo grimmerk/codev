@@ -15,6 +15,7 @@ import {
   isSessionId,
   locateTranscript,
   matchSessions,
+  NO_TITLE,
   pickOne,
   readTranscriptTitle,
   readTranscriptTitles,
@@ -488,9 +489,12 @@ describe('matching a query to sessions', () => {
 });
 
 describe('resume command', () => {
-  it('has no prefix for the anchor account and a quoted one otherwise', () => {
+  it('unsets CLAUDE_CONFIG_DIR for the anchor account and sets a quoted one otherwise', () => {
     expect(formatResumeCommand(ID_A, null)).toBe(
-      `command claude --resume ${ID_A}`,
+      `env -u CLAUDE_CONFIG_DIR claude --resume ${ID_A}`,
+    );
+    expect(formatResumeCommand(ID_A, '')).toBe(
+      `env -u CLAUDE_CONFIG_DIR claude --resume ${ID_A}`,
     );
     expect(formatResumeCommand(ID_A, "/Users/O'Brien/.claude work")).toBe(
       `CLAUDE_CONFIG_DIR='/Users/O'\\''Brien/.claude work' command claude --resume ${ID_A}`,
@@ -557,9 +561,50 @@ describe('resume command', () => {
     ]);
   });
 
+  // #172: a shell started inside another account's session has that
+  // account's CLAUDE_CONFIG_DIR exported; the anchor's command must not
+  // inherit it, or Claude Code looks in the wrong account.
+  it("survives a shell: the anchor's command clears an inherited CLAUDE_CONFIG_DIR", () => {
+    const project = path.join(tmp, "it's acme-app");
+    const anchorDir = path.join(tmp, 'anchor');
+    fs.mkdirSync(project);
+    writeTranscript(anchorDir, project, ID_B, [userRecord(ID_B, project, 'hi')]);
+    const bin = path.join(tmp, 'bin-anchor');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(
+      path.join(bin, 'claude'),
+      '#!/bin/sh\nprintf \'%s\\n\' "${CLAUDE_CONFIG_DIR-<unset>}" "$PWD" "$*"\n',
+      { mode: 0o755 },
+    );
+    const identity = resolveSessionIdentity({
+      sessionId: ID_B,
+      project,
+      account: anchor(anchorDir),
+      accountDirs: [anchorDir],
+      title: NO_TITLE,
+      anchorDir,
+    });
+    expect(identity.resumeCommand).toBe(
+      `cd '${project.replace(/'/g, "'\\''")}' && env -u CLAUDE_CONFIG_DIR claude --resume ${ID_B}`,
+    );
+    const out = execFileSync('/bin/sh', ['-c', identity.resumeCommand], {
+      encoding: 'utf-8',
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        HOME: '/nonexistent-home',
+        CLAUDE_CONFIG_DIR: path.join(tmp, 'claude-second'),
+      },
+    });
+    expect(out.split('\n').slice(0, 3)).toEqual([
+      '<unset>',
+      project,
+      `--resume ${ID_B}`,
+    ]);
+  });
+
   it('cdAndResume omits the cd when there is no project', () => {
-    expect(cdAndResume('', 'command claude --resume x')).toBe(
-      'command claude --resume x',
+    expect(cdAndResume('', 'env -u CLAUDE_CONFIG_DIR claude --resume x')).toBe(
+      'env -u CLAUDE_CONFIG_DIR claude --resume x',
     );
   });
 
@@ -580,7 +625,7 @@ describe('resume command', () => {
     // Nobody can say any more whether that was a /rename name.
     expect(gone.titleKind).toBe('unknown');
     expect(gone.resumeCommand).toBe(
-      `cd '${path.join(tmp, 'acme-app')}' && command claude --resume ${ID_B}`,
+      `cd '${path.join(tmp, 'acme-app')}' && env -u CLAUDE_CONFIG_DIR claude --resume ${ID_B}`,
     );
 
     const bad = resolveSessionIdentity({

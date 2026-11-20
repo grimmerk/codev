@@ -233,7 +233,7 @@ flowchart TB
   CM["cmux<br/>CLI: new workspace"]
   VS["VS Code<br/>open -b IDE, then the URI handler once the extension is ready"]
   CV["CodeV<br/>the embedded Term tab"]
-  CMD["cd PROJECT, then: command claude --resume SESSION-ID<br/>CLAUDE_CONFIG_DIR=DIR prefixed for a non-anchor account"]
+  CMD["cd PROJECT, then: claude --resume SESSION-ID<br/>CLAUDE_CONFIG_DIR=DIR set for a non-anchor account, unset for the anchor"]
   CLICK --> IPC --> OS
   OS --> IT
   OS --> TA
@@ -249,7 +249,7 @@ flowchart TB
 ```
 
 - The IPC layer refuses a project path that could end a shell or AppleScript string literal, drops an account label no configured account carries, and — for `▶ open N` — resumes only the members that are not running, 700 ms apart, reporting each failure.
-- The command is `cd "<project>" && command claude --resume <id>`, prefixed with `CLAUDE_CONFIG_DIR='<dir>'` when the session belongs to a non-anchor account (multi-account, PR #122); `command` skips the shell's `claude` dispatcher. VS Code opens the project (`open -b <ide>`) and fires the extension's URI handler once the IDE lock file says the extension is ready.
+- The command is `cd "<project>" && CLAUDE_CONFIG_DIR='<dir>' command claude --resume <id>` when the session belongs to a non-anchor account (multi-account, PR #122), and `cd "<project>" && env -u CLAUDE_CONFIG_DIR claude --resume <id>` for the anchor account. Both skip the shell's `claude` dispatcher (`command` skips shell functions; `env` runs the binary from `PATH`). The anchor's form unsets the variable rather than leaving it to the shell: a shell started inside another account's Claude Code session has that account's `CLAUDE_CONFIG_DIR`, and with it Claude Code looks for the session in the wrong account (#172). It does not set `~/.claude` explicitly either — that is not the same login (multi-account design doc §3.4). VS Code opens the project (`open -b <ide>`) and fires the extension's URI handler once the IDE lock file says the extension is ready.
 
 ### 3. Switch — a row that is running (purple dot)
 

@@ -538,8 +538,9 @@ export const memoryArgFor = (
     : '';
 
 /**
- * `command claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the
- * session belongs to a non-anchor account so it resumes under the right one.
+ * The command that resumes a session under its own account:
+ * - another account: `CLAUDE_CONFIG_DIR='<dir>' command claude --resume <id>`
+ * - the anchor: `env -u CLAUDE_CONFIG_DIR claude --resume <id>`
  * The single place this command is spelled; CodeV's `buildResumeCommand` and
  * the CLI both end here.
  */
@@ -548,20 +549,27 @@ export const formatResumeCommand = (
   configDirEnv: string | null | undefined,
   memoryArg = '',
 ): string => {
+  // Both forms bypass the accounts.sh `claude` dispatcher. The exact account
+  // is already resolved, so the shell must NOT re-route a bare `claude` to a
+  // configured non-default global-default (§2e) — that would resume an
+  // anchor-account session under the wrong account.
+  if (!configDirEnv) {
+    // The anchor is "CLAUDE_CONFIG_DIR unset", never an explicit ~/.claude
+    // (that reads ~/.claude/.claude.json and looks logged out — design doc
+    // §3.4). Unset it rather than leave it alone: a shell started inside
+    // another account's session inherits that account's value, and Claude
+    // Code would then look there and report "No conversation found" (#172).
+    // `env` runs the binary from PATH, so it skips the dispatcher function
+    // as `command` does; it is how the dispatcher itself launches the anchor.
+    return `env -u CLAUDE_CONFIG_DIR claude${memoryArg} --resume ${sessionId}`;
+  }
   // Single-quote the value: some terminal injections (Ghostty `initial input`)
   // don't escape the command, so a double-quoted prefix would break their
   // AppleScript string. Single quotes are safe across all terminals + handle
   // spaces; a quote inside the path (/Users/O'Brien/…) becomes '\''.
-  const prefix = configDirEnv
-    ? `CLAUDE_CONFIG_DIR=${shellQuote(configDirEnv)} `
-    : '';
-  // `command claude` bypasses the accounts.sh `claude` dispatcher. The exact
-  // account is already resolved (the prefix, or none for the anchor), so the
-  // shell must NOT re-route a bare `claude` to a configured non-default
-  // global-default (§2e) — that would resume an anchor-account session under
-  // the wrong account. Every consumer runs the string through a shell, so the
-  // `command` builtin is available.
-  return `${prefix}command claude${memoryArg} --resume ${sessionId}`;
+  // `command claude`: every consumer runs the string through a shell, so the
+  // builtin is available.
+  return `CLAUDE_CONFIG_DIR=${shellQuote(configDirEnv)} command claude${memoryArg} --resume ${sessionId}`;
 };
 
 /**

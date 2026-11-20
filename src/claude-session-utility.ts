@@ -1401,8 +1401,9 @@ export const isSafeLaunchPath = (p: unknown): p is string =>
   typeof p === 'string' && !/["\\$`\n\r\u0000]/.test(p);
 
 /**
- * Build `command claude --resume <id>`, prefixed with CLAUDE_CONFIG_DIR when the
- * session belongs to a non-default account so it resumes under the right account.
+ * Build the resume command under the session's own account: an explicit
+ * CLAUDE_CONFIG_DIR for a non-default account, the variable unset for the
+ * anchor (`formatResumeCommand` spells both).
  */
 const buildResumeCommand = (
   sessionId: string,
@@ -1843,7 +1844,7 @@ export const launchNewClaudeSession = (
   }
   // No accountLabel: bare `claude` → the accounts.sh dispatcher → the user's
   // global default (2e). With an explicit account (2c-lite picker): bypass the
-  // dispatcher via `command claude` + explicit env, like buildResumeCommand.
+  // dispatcher via explicit env, like buildResumeCommand.
   let claudeCmd = 'claude';
   if (accountLabel) {
     const account = getAccountByLabel(accountLabel);
