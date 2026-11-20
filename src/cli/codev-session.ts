@@ -91,6 +91,8 @@ history.jsonl — one that has never been given a prompt (a fresh /branch copy)
 or that was started from VS Code or Claude Desktop is not there. self does not
 depend on history: it reads the running process's own registration.
 
+Options: a value that starts with a dash is written --option=<value>.
+
 Exit status: 0 found · 1 nothing matched or not available · 2 ambiguous or bad usage`;
 
 export interface CliIo {
@@ -223,7 +225,13 @@ const parseArgs = (
             : next !== undefined && !next.startsWith('-')
               ? args[++i]
               : undefined;
-        if (value === undefined) throw new Error(`${name} needs a value`);
+        // An empty value is a missing one too: `--path ""` would otherwise
+        // resolve to the current directory and silently scope the list.
+        if (value === undefined || value === '') {
+          throw new Error(
+            `${name} needs a value (one that starts with a dash is written ${name}=<value>)`,
+          );
+        }
         flags.set(name, value);
       } else if (boolFlags.includes(name)) {
         if (eq > 0) throw new Error(`${name} takes no value`);

@@ -172,10 +172,14 @@ const SessionDetail: FC<{
             // scrolls under a resting pointer must not take focus back from
             // the arrow keys. Inline, hovering never touches focus.
             onMouseMove={(e) => {
-              if (!onActiveIndex || empty) return;
+              if (!onActiveIndex) return;
+              // Recorded on every row, empty ones included: otherwise a
+              // pointer that crosses an empty row and comes back to the same
+              // spot would look like it had not moved.
               const { clientX: x, clientY: y } = e;
               const moved = pointer.current.x !== x || pointer.current.y !== y;
               pointer.current = { x, y };
+              if (empty) return;
               if (moved && document.activeElement !== e.currentTarget) {
                 e.currentTarget.focus({ preventScroll: true });
               }

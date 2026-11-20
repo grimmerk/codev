@@ -378,6 +378,9 @@ describe('options', () => {
       ['list', '--account', '--all'],
       ['list', '--limit', '-1'],
       ['view', ID_A, '--last', '--pretty'],
+      // An empty value would resolve to the current directory.
+      ['list', '--path', ''],
+      ['list', '--path='],
     ]) {
       const r = run(...args);
       expect([r.code, r.out]).toEqual([2, []]);
