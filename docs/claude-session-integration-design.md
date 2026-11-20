@@ -643,7 +643,21 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 
 - Full-text search across conversation content (may need Rust native module)
 - Bookmark functionality
-- Copy resume command (right-click or long-press)
+- Copy resume command (right-click or long-press) — **shipped in 1.0.96** as part of
+  "session identity": a right-click menu on a Sessions row copies the title, session id,
+  transcript path, project path, resume command or a one-line reference (`⌘⇧C` copies the
+  reference of the selected row), and a detail view shows the same fields (`⌘I` overlay,
+  `⌘↓` under the row). Where it lives, so it is not researched again:
+  - `src/cli/session-identity.ts` — the one resolver (history scan, transcript lookup,
+    title, resume command). No Electron imports; the main process and the CLI both use it.
+    Its header records where transcripts are filed: under the slug of the session's **own
+    cwd**, not under the git common directory that auto-memory is keyed on (measured
+    2026-11-20; counts are in that header).
+  - `src/session-identity-ui.tsx` — the menu and the detail component with its two hosts.
+  - `src/cli/codev-session.ts` — `codev session list | show | view | self | resume`,
+    dispatched by the `codev()` function that `account-manager.ts` generates. JSON by
+    default, `--pretty` for people. `session-transcript.ts` reads the last messages,
+    `session-self.ts` works out which session the caller is running in.
 - Session status (Working/Idle) detection from JSONL
 - Notifications on Working → Idle transition
 - PR info display from `sessions-index.json`

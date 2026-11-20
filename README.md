@@ -76,6 +76,8 @@ The `📌 Pinned (N)` header carries two independent toggles:
 
 Keyboard semantics worth knowing: the shortcuts act on the **selected row** (the one with the blue left border — hovering selects), and require an explicit selection. `⌘D` = pin/unpin toggle; `⇧⌘D` = hide (on a pinned row this unpins *and* folds in one step — pin and hide are mutually exclusive). When the last pin is removed the header disappears entirely (that's normal, not a collapse). A pinned session is never folded away as a "minor session", whatever its message count.
 
+**Copy what identifies a session** — right-click a row for a menu that copies its **title**, **session ID**, **transcript path**, **project path**, **resume command** (`cd … && claude --resume …`, under the session's own account) or a one-line **reference** (title + full id), each item showing the value it will copy. `⌘⇧C` copies the reference of the selected row. `⌘I` opens the same fields as a details overlay, `⌘↓` shows them under the row (`⌘↑` or `Esc` closes); click any line to copy it. The same fields are available from a terminal — see [`codev session`](#multi-account-support-claude-code).
+
 #### Live view and saved session lists
 
 Two chips beside the search box, on the [Session Buddy](https://sessionbuddy.com/) model — save what is open, put the windows down, come back to the set later:
@@ -159,6 +161,18 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 | `codev account unshare <name> <item> [--entry E] [--restore-backup\|--keep-copy]` | Remove the link; `--restore-backup` = true undo, `--keep-copy` = keep a fork |
 | `codev account sync-settings <name> <key...>` | Copy settings keys from the anchor (`statusLine`, `model`, `effortLevel`, `theme`) |
 | `codev account share-memory <name> on\|off` | Point that account's auto-memory at the anchor's, per project (see **Shared auto-memory** below) |
+
+**`codev session` CLI** — find, describe, read and resume sessions from a terminal, across **every** account (`claude -r` sees one). Output is **JSON** on stdout, for scripts and agents; add `--pretty` for a readable form. Errors go to stderr with a non-zero exit status.
+
+| Command | What it does |
+| --- | --- |
+| `codev session list [--path <dir>] [--account <name>] [--all \| --limit N]` | Sessions, newest first (30 by default). `--path .` = sessions whose project is this directory |
+| `codev session show <title \| id>` | Title, full id, account, project path, transcript path and resume command of **every** matching session |
+| `codev session view <title \| id> [--last N]` | The last N things the user and the assistant said (default 10; text only — no tool calls, tool results or thinking) |
+| `codev session self` | The session this command is being run from — for use inside a Claude Code session |
+| `codev session resume <title \| id>` | Resume it in the current terminal, under its own account — whatever your default-terminal setting is |
+
+`<title | id>` is a full session id, the start of one, or a session title (its `/rename` name; part of a title works when nothing matches outright). **Titles are not unique** — `/branch` copies share theirs — so `show` lists every match, while `view` and `resume` list the candidates and exit non-zero instead of picking one.
 
 > **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`). One folder = one account: registering an already-registered folder under a second name is rejected.
 >
