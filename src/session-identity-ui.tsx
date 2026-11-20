@@ -171,8 +171,15 @@ const SessionDetail: FC<{
 const SessionDetailInline: FC<{
   identity: SessionIdentity;
   onCopy: (label: string, value: string) => void;
-}> = ({ identity, onCopy }) => (
+}> = ({ identity, onCopy }) => {
+  // A row near the bottom of the list would open its panel below the fold.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    panelRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [identity.sessionId]);
+  return (
   <div
+    ref={panelRef}
     style={{
       margin: '0 4px 4px 27px',
       padding: '4px 0',
@@ -186,7 +193,8 @@ const SessionDetailInline: FC<{
       click a line to copy · ⌘↑ or Esc closes
     </div>
   </div>
-);
+  );
+};
 
 // --- HOST B: overlay --------------------------------------------------------
 
@@ -221,6 +229,9 @@ const SessionDetailOverlay: FC<{
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Session details"
         tabIndex={0}
         ref={(el) => el?.focus()}
         onClick={(e) => e.stopPropagation()}
