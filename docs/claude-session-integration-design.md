@@ -233,7 +233,7 @@ flowchart TB
   CM["cmux<br/>CLI: new workspace"]
   VS["VS Code<br/>open -b IDE, then the URI handler once the extension is ready"]
   CV["CodeV<br/>the embedded Term tab"]
-  CMD["cd PROJECT, then: claude --resume SESSION-ID<br/>CLAUDE_CONFIG_DIR=DIR set for a non-anchor account, unset for the anchor"]
+  CMD["cd PROJECT, then one of:<br/>anchor account: env -u CLAUDE_CONFIG_DIR claude --resume SESSION-ID<br/>another account: CLAUDE_CONFIG_DIR=DIR command claude --resume SESSION-ID"]
   CLICK --> IPC --> OS
   OS --> IT
   OS --> TA
