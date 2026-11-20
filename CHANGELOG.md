@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.95
+
+- Feat: **Session Preview is two settings** (Settings → Sessions): **User prompt** — None / First / Last / First + Last — and **Last assistant reply** — on / off. The old single dropdown offered "First + Last" without saying both were *user* prompts, and the assistant's reply was always shown with no way to turn it off. So two rows that were not possible before now are: the assistant's last reply alone, and a title-only list (None + off), which leaves no empty line under the title. Nothing changes until you change it: your current choice carries over with the assistant reply on, and a fresh install still shows the first user prompt plus the reply. A saved list's recap line is not part of the preview and stays
+- A search still explains itself with a line hidden: a match in a prompt or in the last reply that the settings keep off the row gets its own `match …` line, as the other off-row fields already did
+- Fix: `match reply` now appears when a search matches the last reply of a saved-list row whose reply sits behind its recap. The line was added in 1.0.89 but waited on a signal the search never sent
+
 ## 1.0.94
 
 - Feat: **Ghostty switches to the right tab when several sessions share a directory** ([#63](https://github.com/grimmerk/codev/issues/63)). Ghostty's tip builds expose each terminal's `tty` (ghostty-org/ghostty#11922), so switching now works the way it does in iTerm2 and Terminal.app: by tty and by `/rename` title, in the order the session's process provenance calls for, and only then by working directory. Before, a session without a custom title went to the first tab in its directory — measured on one machine with 16 sessions sharing `~/git`, every one of them landed on the same tab. Detection's fallback cross-reference uses the tty the same way. **Stable Ghostty (1.3.1 and earlier) has no `tty`**, so there CodeV behaves exactly as before — title, then directory — until a release ships it

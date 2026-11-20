@@ -3,6 +3,11 @@ import Button from '@atlaskit/button';
 import Popup from '@atlaskit/popup';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { closeAppClick, openFolderSelector } from './switcher-ui';
+import {
+  DEFAULT_SESSION_PREVIEW,
+  SessionPreviewSettings,
+  UserPromptPreview,
+} from './session-preview';
 
 // Brand color theme matching app.tsx
 const THEME = {
@@ -62,7 +67,7 @@ const PopupDefaultExample = ({
   onClosed,
 }: {
   workingFolderPath?: string;
-  saveCallback?: (key: string, value: string) => void;
+  saveCallback?: (key: string, value: string | boolean) => void;
   openCallback?: any;
   switcherMode?: string;
   openToTab?: 'general' | 'sessions' | 'accounts' | 'shortcuts' | null;
@@ -74,7 +79,7 @@ const PopupDefaultExample = ({
   const [appVersion, setAppVersion] = useState('');
   const [sessionTerminalApp, setSessionTerminalApp] = useState('iterm2');
   const [sessionTerminalMode, setSessionTerminalMode] = useState('tab');
-  const [sessionDisplayMode, setSessionDisplayMode] = useState('first');
+  const [sessionPreview, setSessionPreview] = useState<SessionPreviewSettings>(DEFAULT_SESSION_PREVIEW);
   const [defaultSwitcherMode, setDefaultSwitcherMode] = useState('projects');
   const [idePreference, setIdePreference] = useState('VSCode');
   const [leftClickBehavior, setLeftClickBehavior] =
@@ -448,8 +453,8 @@ const PopupDefaultExample = ({
     window.electronAPI.getSessionTerminalMode().then((mode: string) => {
       setSessionTerminalMode(mode || 'tab');
     });
-    window.electronAPI.getSessionDisplayMode().then((mode: string) => {
-      setSessionDisplayMode(mode || 'first');
+    window.electronAPI.getSessionPreview().then((preview) => {
+      if (preview) setSessionPreview(preview);
     });
     window.electronAPI.getDefaultSwitcherMode().then((mode: string) => {
       setDefaultSwitcherMode(mode || 'projects');
@@ -919,25 +924,77 @@ const PopupDefaultExample = ({
           {/* Sessions tab */}
           {settingsTab === 'sessions' && (
           <div style={{ padding: '4px 0' }}>
+            <div style={{ padding: '4px 16px 0', fontSize: '11px', color: '#888' }}>
+              Session Preview — the lines under each row's title
+            </div>
             <div style={rowStyle}>
-              <span style={labelStyle} title="User prompt display mode. Assistant response (◀ blue text) always shown.">Session Preview</span>
+              <span style={labelStyle} title="Which of the session's user prompts each row shows under its title. None hides the prompt line.">User prompt</span>
               <select
-                value={sessionDisplayMode}
+                value={sessionPreview.userPrompt}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  setSessionDisplayMode(val);
-                  window.electronAPI.setSessionDisplayMode(val);
-                  if (saveCallback) saveCallback('sessionDisplayMode', val);
+                  const val = e.target.value as UserPromptPreview;
+                  setSessionPreview((p) => ({ ...p, userPrompt: val }));
+                  window.electronAPI.setSessionPreviewUserPrompt(val);
+                  if (saveCallback) saveCallback('sessionPreviewUserPrompt', val);
                 }}
                 style={selectStyle}
               >
-                <option value="first">First User Prompt</option>
-                <option value="last">Last User Prompt</option>
+                <option value="none">None</option>
+                <option value="first">First</option>
+                <option value="last">Last</option>
                 <option value="both">First + Last</option>
               </select>
             </div>
+            <div style={rowStyle}>
+              <span style={labelStyle} title="Show the session's last assistant reply (◀ blue text) under each row. A saved list's recap line is not affected.">Last assistant reply</span>
+              <label
+                style={{
+                  position: 'relative',
+                  display: 'inline-block',
+                  width: '40px',
+                  height: '22px',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={sessionPreview.assistantReply}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setSessionPreview((p) => ({ ...p, assistantReply: on }));
+                    window.electronAPI.setSessionPreviewAssistantReply(on);
+                    if (saveCallback) saveCallback('sessionPreviewAssistantReply', on);
+                  }}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: sessionPreview.assistantReply ? THEME.primary : '#555',
+                    borderRadius: '11px',
+                    transition: 'background-color 0.2s',
+                  }}
+                />
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left: sessionPreview.assistantReply ? '20px' : '2px',
+                    width: '18px',
+                    height: '18px',
+                    backgroundColor: '#fff',
+                    borderRadius: '50%',
+                    transition: 'left 0.2s',
+                  }}
+                />
+              </label>
+            </div>
             <div style={{ padding: '0 16px 2px', fontSize: '9px', color: '#555' }}>
-              ◀ Assistant response always shown
+              None + off shows the title only. A search still shows the line it matched.
             </div>
             <div style={rowStyle}>
               <span style={labelStyle} title="Uses Claude Code hooks to detect session state">Session Status <span style={{ fontSize: '10px', color: '#888' }}>(hooks)</span></span>
