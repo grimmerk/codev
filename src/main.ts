@@ -2884,7 +2884,9 @@ ipcMain.on(
         ? accountLabel
         : undefined;
     // The log starts from the label the launch is given, not the renderer's
-    // raw one; a resume replaces it with the account it actually runs under.
+    // raw one. The terminal paths that build a resume command (iTerm2,
+    // Ghostty, Terminal.app, cmux) replace it with the account that command
+    // runs under; every other path keeps this value.
     timing?.set({ account: label ?? null });
     openSession(
       sessionId,

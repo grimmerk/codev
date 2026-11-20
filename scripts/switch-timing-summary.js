@@ -45,9 +45,10 @@ const NEEDS_EXIT = new Set(['run', 'main', 'total']);
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 
 /**
- * A path the log does not follow to the end (VS Code, Claude Desktop, the
- * embedded terminal): flagged `untimed`, or, on a line written before the
- * flag existed, recognisable by its tool.
+ * A record with no end-to-end time: flagged `untimed` by the writer (no
+ * command was started and awaited — mostly the paths handed to VS Code,
+ * Claude Desktop or the embedded terminal), or, on a line written before
+ * the flag existed, recognisable by the tool of those paths.
  */
 const isUntimed = (r) => r.untimed === true || r.tool === 'open' || r.tool === 'pty';
 
@@ -121,20 +122,25 @@ const TEXT_FIELDS = [
   'ttySrc',
 ];
 
+/** Status flags: compared with `=== true` / `=== false`, so they must be booleans. */
+const FLAG_FIELDS = ['ok', 'timedOut', 'killed', 'untimed'];
+
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
- * A line this script can summarize: an object whose `ms` is an object, and
- * whose text fields are each a string, null or absent. One rule for all of
- * them: a field of the wrong type makes the whole line malformed, rather
- * than each use having to defend itself (`String()` of an object with a
- * broken `toString` throws). Numbers need no such rule: every numeric read
- * goes through `isNum`.
+ * A line this script can summarize: an object whose `ms` is an object,
+ * whose text fields are each a string, null or absent, and whose status
+ * flags are each a boolean, null or absent. One rule for all of them: a
+ * field of the wrong type makes the whole line malformed, rather than each
+ * use having to defend itself (`String()` of an object with a broken
+ * `toString` throws; `killed: "true"` would read as "not killed"). Numbers
+ * need no such rule: every numeric read goes through `isNum`.
  */
 const isRecord = (r) =>
   isPlainObject(r) &&
   isPlainObject(r.ms) &&
-  TEXT_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'string');
+  TEXT_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'string') &&
+  FLAG_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'boolean');
 
 /** Records from JSONL text. A line that is not a record (see `isRecord`) is skipped and counted. */
 const parseLines = (text) => {
@@ -305,10 +311,16 @@ const summarize = (records, opts = {}) => {
     .map((r) => run(r) / total(r));
   return {
     count: records.length,
+    // Disjoint, in this order of precedence, so the four counts and the
+    // completed switches add up to `count`: the writer marks a killed
+    // switch `ok: false` too, and a launch that failed before its command
+    // started is also untimed.
     timedOut: records.filter((r) => r.timedOut === true).length,
-    killed: records.filter((r) => r.killed === true).length,
-    failed: records.filter((r) => r.ok === false).length,
-    untimed: records.filter(isUntimed).length,
+    killed: records.filter((r) => r.timedOut !== true && r.killed === true).length,
+    failed: records.filter((r) => r.timedOut !== true && r.killed !== true && r.ok === false).length,
+    untimed: records.filter(
+      (r) => r.timedOut !== true && r.killed !== true && r.ok !== false && isUntimed(r),
+    ).length,
     slow: records.filter((r) => isNum(total(r)) && total(r) > 1000).length,
     all: stepStats(records),
     byKind: groupBy(records, (r) => String(r.kind ?? 'unknown')),
@@ -499,9 +511,10 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
     'command), main (IPC → done), total (click → done).',
     'n is the records in the row. A cell ending in (k) is over only k of them: the',
     'rest have no value for that step. A resume does not detect. run, main and total',
-    'are over completed switches only: not one that timed out, was killed by its',
-    'timeout or failed, and not one handed to VS Code, Claude Desktop or the embedded',
-    'terminal (not timed end to end).',
+    'are over completed switches only. The other four kinds in the first line are left',
+    'out, and each switch is counted in one of them at most: timed out, else killed,',
+    'else failed, else not timed end to end (no command was started and awaited:',
+    'mostly switches handed to VS Code, Claude Desktop or the embedded terminal).',
     '',
     stepTable('All', '', [{ key: 'all', n: s.count, steps: s.all }]),
     '',

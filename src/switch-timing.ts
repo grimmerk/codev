@@ -72,10 +72,12 @@ export interface SwitchFacts {
   /**
    * The account of this switch. For a resume it is the account the launch
    * runs under, set where that is decided (`buildResumeCommand`): history's
-   * account for a session history knows, else the row's label. A switch to
-   * a running session launches nothing, so it keeps what main set: the
-   * row's label, once checked that an account carries it. Null: no account
-   * was resolved.
+   * account for a session history knows, else the row's label. Only the
+   * terminal paths that build a resume command do this (iTerm2, Ghostty,
+   * Terminal.app, cmux). Everything else keeps what main set — the row's
+   * label, once checked that an account carries it: a switch to a running
+   * session, which launches nothing, and a resume through VS Code, Claude
+   * Desktop or the embedded terminal. Null: no account was resolved.
    */
   account?: string | null;
 }
@@ -109,6 +111,14 @@ export interface SwitchSnapshot {
   /**
    * True when the command did exit, but only because its caller's own
    * timeout killed it. Its times are real waits, not a completed switch.
+   *
+   * Only the `osascript` callbacks report this (`error.killed`): the
+   * resume launches of iTerm2, Ghostty and Terminal.app, and the Ghostty
+   * and Terminal.app switches, which run with a 5 s timeout. The iTerm2
+   * switch has no timeout to be killed by. The cmux paths never set it:
+   * the cmux resume is timed around a promise that does not hand over its
+   * error, and the cmux switch discards its CLI errors. So `false` on a
+   * cmux record does not say its command was not killed.
    */
   killed?: boolean;
 }
@@ -121,7 +131,8 @@ export interface SwitchTiming {
   /**
    * It exited. `stdout`, when the command is a switch script, names the
    * branch that matched. `killed` is the callback's `error.killed`: the
-   * command was stopped by its timeout instead of finishing.
+   * command was stopped by its timeout instead of finishing. Passed by the
+   * `osascript` callbacks only (see `SwitchSnapshot.killed`).
    */
   exited(stdout?: string, killed?: boolean): void;
   /**
@@ -317,24 +328,34 @@ export interface SwitchStepMs {
    * the command timed out, or the path starts no command (`untimed`).
    */
   main: number | null;
-  /** `clickToIpc + main`: what the user waited. Null whenever `main` is. */
+  /**
+   * `clickToIpc + main`: what the user waited. Null whenever `main` is.
+   * Without a click stamp the click-to-IPC part counts as zero, so `total`
+   * then equals `main`; `clickToIpc` is null on such a record, which is how
+   * a reader can tell. (A negative `clickToIpc` — the two clocks disagreeing
+   * — also counts as zero here, and is recorded as measured.)
+   */
   total: number | null;
 }
+
+/**
+ * True for a switch this log cannot time end to end: no command was
+ * started and awaited (`spawned()` was never called), so there is no exit
+ * to measure to. That is the rule, whatever the path. In practice it is
+ * mostly the paths that hand over with a fire-and-forget `open` or a
+ * message to the renderer (VS Code, Claude Desktop, the embedded terminal;
+ * what they do next, such as VS Code's 500 ms wait before its URI command,
+ * happens out of sight). It is also a terminal launch that failed before
+ * its command started, for example when the script file could not be
+ * written: such a record is untimed with tool `osascript`.
+ */
+export const isUntimed = (snap: SwitchSnapshot): boolean => snap.spawnedAt === null;
 
 /**
  * Step durations from one snapshot. Each step is measured from the step
  * before it that this path actually reached, so a path that skips one
  * (a resume skips `detect`) does not lose the time: it lands in the next.
  */
-/**
- * True for a switch this log cannot time end to end: no command was ever
- * started and awaited, so there is no exit to measure to. Those are the
- * paths that hand over with a fire-and-forget `open` or a message to the
- * renderer; what they do next (VS Code waits 500 ms before its URI
- * command, for one) happens out of sight.
- */
-export const isUntimed = (snap: SwitchSnapshot): boolean => snap.spawnedAt === null;
-
 export const stepDurations = (
   snap: SwitchSnapshot,
   stamp: RendererStamp | undefined,
@@ -348,9 +369,9 @@ export const stepDurations = (
   // `returned` is what is known:
   // - a command that timed out never reported one (the record closed at
   //   the deadline, which is not a duration of anything);
-  // - a path that hands the switch to something this log does not follow
-  //   (VS Code, Claude Desktop, the embedded terminal) starts no command,
-  //   so `openSession` returning is not "switched" (see `isUntimed`).
+  // - a record on which no command was started and awaited (mostly the
+  //   paths handed to VS Code, Claude Desktop or the embedded terminal),
+  //   where `openSession` returning is not "switched" (see `isUntimed`).
   const end = snap.timedOut || isUntimed(snap) ? null : exitedAt;
   const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
   const clickToIpc = stamp && finite(stamp.wallMs) ? ipc.wallMs - stamp.wallMs : null;

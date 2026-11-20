@@ -105,6 +105,10 @@ describe('createSwitchTiming', () => {
     expect(h.finished).toHaveLength(1);
     expect(h.finished[0].timedOut).toBe(true);
     expect(h.finished[0].exitedAt).toBeNull();
+    // `returned` is when `openSession` settled (here, at once), not the
+    // deadline 5000 ms later at which the record closed.
+    expect(h.finished[0].marks.returned).toBe(0);
+    expect(h.finished[0].endedAt).toBe(5000);
     // A late exit does not produce a second record.
     h.timing.exited('found-by-tty');
     expect(h.finished).toHaveLength(1);
@@ -553,8 +557,12 @@ describe('the log file', () => {
     expect(ms.run).toBeNull();
     expect(ms.main).toBeNull();
     expect(ms.total).toBeNull();
-    // Measured (the collector's own clock decides how long; see the
-    // controlled-clock test of `stepDurations` for the exact value).
+    // No upper bound on purpose: this run is on the real clock, and the time
+    // before `settle()` can legitimately exceed any small limit on a busy
+    // machine. That `returned` is the settle time and not the deadline is
+    // asserted on a controlled clock in 'closes at the deadline, flagged,
+    // when the command never reports back' (`marks.returned` 0 against a
+    // 5000 ms deadline) and in the `stepDurations` timed-out case.
     expect(typeof ms.returned).toBe('number');
   });
 
@@ -1153,6 +1161,12 @@ describe('scripts/switch-timing-summary.js', () => {
       { ...good, project: { path: '/x' } },
       { ...good, tty: 4 },
       { ...good, sid: [] },
+      // A status flag that is not a boolean: `"true"` is not `true`, and
+      // reading it as "not killed" would put the row among the completed.
+      { ...good, killed: 'true' },
+      { ...good, ok: 0 },
+      { ...good, timedOut: 'false' },
+      { ...good, untimed: 1 },
       { ...good, ms: [] }, // an array is not a set of steps
       { ...good, ms: 'fast' },
       [good],
@@ -1161,6 +1175,9 @@ describe('scripts/switch-timing-summary.js', () => {
     const { records, malformed } = summary.parseLines(text);
     expect(records).toEqual([good]);
     expect(malformed).toBe(bad.length);
+    // Real booleans, and an absent or null flag, are fine.
+    const flagged = { ...good, ok: false, timedOut: false, killed: true, untimed: null };
+    expect(summary.parseLines(JSON.stringify(flagged)).records).toEqual([flagged]);
     // And what is accepted cannot make the report throw.
     expect(() => summary.formatReport(summary.summarize(records), malformed, {})).not.toThrow();
   });
@@ -1190,6 +1207,20 @@ describe('scripts/switch-timing-summary.js', () => {
     ];
     const s = summary.summarize(records);
     expect(s).toMatchObject({ count: 6, killed: 1, failed: 1, untimed: 2, timedOut: 0, slow: 0 });
+    // The writer marks a killed switch `ok: false`, and a launch that failed
+    // before its command started is untimed as well as failed. Each switch
+    // is still counted once: timed out, else killed, else failed, else untimed.
+    const overlapping = [
+      ...records,
+      rec({ killed: true, ok: false }, { run: 5000, main: 5010, total: 5020 }),
+      rec({ timedOut: true, ok: false }, { returned: 3 }),
+      rec({ untimed: true, ok: false }, { returned: 3 }),
+    ];
+    const o = summary.summarize(overlapping);
+    expect(o).toMatchObject({ count: 9, timedOut: 1, killed: 2, failed: 2, untimed: 2 });
+    const completedCount = o.all.total.n;
+    expect(completedCount).toBe(2);
+    expect(o.timedOut + o.killed + o.failed + o.untimed + completedCount).toBe(o.count);
     expect(s.all.total).toEqual({ n: 2, p50: 220, p90: 300 });
     expect(s.all.run).toEqual({ n: 2, p50: 200, p90: 280 });
     expect(s.all.main.n).toBe(2);
