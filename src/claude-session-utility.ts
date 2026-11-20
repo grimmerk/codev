@@ -16,7 +16,17 @@ import {
   getProjectsDir,
   getAccountByLabel,
 } from './accounts';
-import { memorySettingsArg } from './cli/memory-dir';
+import {
+  cdAndResume,
+  formatResumeCommand,
+  locateTranscript,
+  memoryArgFor as sharedMemoryArgFor,
+  readTranscriptTitle,
+  resolveSessionIdentity,
+  scanHistories,
+  SessionIdentity,
+  titleFromRecords,
+} from './cli/session-identity';
 import {
   compileQuery,
   explainMatch,
@@ -73,31 +83,6 @@ export interface ActiveSessionResult {
   vscodeSessions: ClaudeSession[];     // VS Code sessions not in history.jsonl
   entrypoints: Map<string, string>;    // sessionId -> entrypoint ('cli', 'claude-vscode')
 }
-
-interface HistoryLine {
-  sessionId?: string;
-  display?: string;
-  timestamp?: number;
-  project?: string;
-}
-
-interface SessionAccum {
-  sessionId: string;
-  project: string;
-  firstDisplay: string;
-  lastDisplay: string;
-  firstTimestamp: number;
-  lastTimestamp: number;
-  promptCount: number;
-  accountLabel: string;
-  accountDir: string;
-  accountConfigDirEnv: string | null;
-  accountIsAnchor: boolean;
-}
-
-const getHistoryPath = (dir: string): string => {
-  return path.join(dir, 'history.jsonl');
-};
 
 // Cache for parsed sessions to avoid re-reading history.jsonl on every keystroke
 let cachedSessions: ClaudeSession[] | null = null;
@@ -167,72 +152,14 @@ export const readClaudeSessions = (limit = 100): ClaudeSession[] => {
   }
 
   // Multi-account: scan every configured account's history.jsonl and merge.
-  // sessionIds are UUIDs (unique across accounts), so no cross-account dedupe.
-  const bySession = new Map<string, SessionAccum>();
-  const prompts = new Map<string, string[]>();
-  const promptTimes = new Map<string, number[]>();
-
-  // Per-account try/catch: one unreadable/corrupt history must not hide the
-  // sessions of every other account.
-  for (const account of getScannableAccounts()) {
-    try {
-      const historyPath = getHistoryPath(account.dir);
-      if (!fs.existsSync(historyPath)) continue;
-
-      const content = fs.readFileSync(historyPath, 'utf-8');
-      for (const line of content.split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          const raw: HistoryLine = JSON.parse(line);
-          if (!raw.sessionId) continue;
-
-          if (raw.display) {
-            const list = prompts.get(raw.sessionId);
-            if (list) list.push(raw.display);
-            else prompts.set(raw.sessionId, [raw.display]);
-            const times = promptTimes.get(raw.sessionId);
-            const at = typeof raw.timestamp === 'number' ? raw.timestamp : 0;
-            if (times) times.push(at);
-            else promptTimes.set(raw.sessionId, [at]);
-          }
-
-          const existing = bySession.get(raw.sessionId);
-          if (existing) {
-            existing.promptCount++;
-            if (raw.timestamp && raw.timestamp > existing.lastTimestamp) {
-              existing.lastTimestamp = raw.timestamp;
-              existing.lastDisplay = raw.display || existing.lastDisplay;
-            }
-            if (raw.timestamp && raw.timestamp < existing.firstTimestamp) {
-              existing.firstDisplay = raw.display || existing.firstDisplay;
-              existing.firstTimestamp = raw.timestamp;
-            }
-          } else {
-            bySession.set(raw.sessionId, {
-              sessionId: raw.sessionId,
-              project: raw.project || '',
-              firstDisplay: raw.display || '',
-              lastDisplay: raw.display || '',
-              firstTimestamp: raw.timestamp || 0,
-              lastTimestamp: raw.timestamp || 0,
-              promptCount: 1,
-              accountLabel: account.label,
-              accountDir: account.dir,
-              accountConfigDirEnv: account.configDirEnv,
-              accountIsAnchor: account.isAnchor,
-            });
-          }
-        } catch {
-          // skip malformed lines
-        }
-      }
-    } catch (error) {
-      console.error(
-        `Error reading Claude sessions for ${account.label}:`,
-        error,
-      );
-    }
-  }
+  // The scan itself is shared with the `codev session` CLI.
+  const {
+    sessions: bySession,
+    prompts,
+    promptTimes,
+  } = scanHistories(getScannableAccounts(), (label, error) => {
+    console.error(`Error reading Claude sessions for ${label}:`, error);
+  });
 
   // Unified timeline: sort the MERGED set by recency (newest first) so both
   // accounts interleave by lastTimestamp. The account badge disambiguates.
@@ -1411,17 +1338,10 @@ const detectActiveSessionsLegacy = async (
   }
 };
 
-/**
- * ` --settings <file>` when this account shares the anchor's auto-memory, else
- * ''. Anchor accounts get nothing: their memory IS the shared copy.
- */
 const memoryArgFor = (
   account: CodevAccount | undefined,
   projectPath: string,
-): string =>
-  account && !account.isAnchor && account.shareMemoryWithAnchor && projectPath
-    ? memorySettingsArg(getAnchorDir(), projectPath)
-    : '';
+): string => sharedMemoryArgFor(account, getAnchorDir(), projectPath);
 
 /**
  * codev multi-account: look up which account a session belongs to (via the
@@ -1493,21 +1413,12 @@ const buildResumeCommand = (
     sessionId,
     accountLabel,
   );
-  // Single-quote the value: some terminal injections (Ghostty `initial input`)
-  // don't escape the command, so a double-quoted prefix would break their
-  // AppleScript string. Single quotes are safe across all terminals + handle spaces.
-  // Escape single quotes (e.g. /Users/O'Brien/…) so the single-quoted prefix
-  // stays well-formed: ' becomes '\'' .
-  const prefix = configDir
-    ? `CLAUDE_CONFIG_DIR='${configDir.replace(/'/g, "'\\''")}' `
-    : '';
-  // `command claude` bypasses the accounts.sh `claude` dispatcher. CodeV has
-  // already resolved the exact account (the prefix, or none for the anchor), so
-  // the shell must NOT re-route a bare `claude` to a configured non-default
-  // global-default (§2e) — that would resume an anchor-account session under the
-  // wrong account. Every terminal here runs the string through a shell, so the
-  // `command` builtin is available.
-  return `${prefix}command claude${memoryArgFor(account, projectPath)} --resume ${sessionId}`;
+  // The command itself is spelled in ONE place, shared with the CLI.
+  return formatResumeCommand(
+    sessionId,
+    configDir,
+    memoryArgFor(account, projectPath),
+  );
 };
 
 /**
@@ -2450,27 +2361,12 @@ export const loadSessionEnrichment = async (
             readTailUtf8(jsonlPath, 256 * 1024),
           ]);
 
-        // Priority: custom-title > ai-title
-        if (titleOutput) {
-          try {
-            const parsed = JSON.parse(lastLine(titleOutput));
-            const title = (parsed.customTitle || '')
-              .replace(/^"|"$/g, '')
-              .trim();
-            if (title) {
-              titles.set(session.sessionId, title);
-            }
-          } catch {}
-        }
-        if (!titles.has(session.sessionId) && aiTitleOutput) {
-          try {
-            const parsed = JSON.parse(lastLine(aiTitleOutput));
-            const title = (parsed.aiTitle || '').trim();
-            if (title) {
-              titles.set(session.sessionId, title);
-            }
-          } catch {}
-        }
+        // Priority: custom-title > ai-title (the rule is shared with the CLI)
+        const found = titleFromRecords(
+          titleOutput ? lastLine(titleOutput) : undefined,
+          aiTitleOutput ? lastLine(aiTitleOutput) : undefined,
+        );
+        if (found.title) titles.set(session.sessionId, found.title);
 
         if (tailOutput) {
           const all = [...tailOutput.matchAll(/"gitBranch":"([^"]*)"/g)];
@@ -2589,23 +2485,54 @@ export const findTranscriptPath = (
   project: string,
   accountLabel?: string,
 ): string | null => {
-  if (!/^[0-9a-f-]+$/i.test(sessionId)) return null;
-  const encodedProject = project.replace(/[^a-zA-Z0-9-]/g, '-');
+  // The project's own slug only — this answers "can it be resumed from this
+  // project", so the read-anywhere fallback is deliberately not used here.
+  return (
+    locateTranscript(transcriptSearchDirs(sessionId, accountLabel), project, sessionId)
+      ?.path ?? null
+  );
+};
+
+/** Config dirs to look for a session's transcript in, best first. */
+const transcriptSearchDirs = (
+  sessionId: string,
+  accountLabel?: string,
+): string[] => {
   const known = readClaudeSessions(Number.MAX_SAFE_INTEGER).find(
     (s) => s.sessionId === sessionId,
   );
-  const dirs = new Set(
-    [
-      known?.accountDir,
-      accountLabel ? getAccountByLabel(accountLabel).dir : undefined,
-      ...getScannableAccounts().map((a) => a.dir),
-    ].filter((d): d is string => !!d),
-  );
-  for (const dir of dirs) {
-    const p = path.join(getProjectsDir(dir), encodedProject, `${sessionId}.jsonl`);
-    if (fs.existsSync(p)) return p;
-  }
-  return null;
+  return [
+    known?.accountDir,
+    accountLabel ? getAccountByLabel(accountLabel).dir : undefined,
+    ...getScannableAccounts().map((a) => a.dir),
+  ].filter((d): d is string => !!d);
+};
+
+/**
+ * Everything that names one session — title, id, account, project path,
+ * transcript path, resume command — for the Sessions tab's copy menu and
+ * detail view. The same resolver backs `codev session show`.
+ */
+export const getSessionIdentity = async (
+  sessionId: string,
+  project: string,
+  accountLabel?: string,
+  fallbackTitle?: string,
+): Promise<SessionIdentity> => {
+  const { account } = resumeAccountFor(sessionId, accountLabel);
+  return resolveSessionIdentity({
+    sessionId,
+    project,
+    account,
+    accountLabel,
+    accountDirs: transcriptSearchDirs(sessionId, accountLabel),
+    // Read back from the end of the file, so this stays in the low
+    // milliseconds for any session that was ever renamed.
+    title: readTranscriptTitle,
+    fallbackTitle,
+    resumeCommand: buildResumeCommand(sessionId, accountLabel, project),
+    anchorDir: getAnchorDir(),
+  });
 };
 
 export interface OpenListMember {
@@ -2998,7 +2925,10 @@ export const copyResumeCommand = (
   projectPath: string,
   accountLabel?: string,
 ): string => {
-  const command = `cd "${projectPath}" && ${buildResumeCommand(sessionId, accountLabel, projectPath)}`;
+  const command = cdAndResume(
+    projectPath,
+    buildResumeCommand(sessionId, accountLabel, projectPath),
+  );
   const { execFileSync } = require('child_process');
   execFileSync('pbcopy', { input: command });
   return command;
