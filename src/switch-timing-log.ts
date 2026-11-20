@@ -8,11 +8,16 @@
  * summary of the conversation that Claude Code generated; the prompts and
  * the transcript text themselves are not written.
  *
- * On the switch's path this costs one `os.cpus()` read, one
- * `process.cpuUsage()` and a few clock reads. Everything that spawns or
+ * What this costs in the main process, all of it synchronous and none of
+ * it a spawn or a disk access: when the IPC arrives, one `os.cpus()`, one
+ * `process.cpuUsage()` and two clock reads; a clock read per mark along the
+ * way; and when the record closes — in the callback of the command's exit,
+ * or as `openSession` settles — one more `os.cpus()`, one `os.loadavg()`
+ * and one `process.cpuUsage()`. Everything that spawns or
  * touches the disk — `sysctl` for memory pressure, a `ps` for the tty when
  * the last live-sessions report did not have it, another `ps` for the
- * busiest processes after a slow or timed-out switch, the append itself —
+ * busiest processes after a slow, timed-out or killed switch, the append
+ * itself —
  * runs after the switch has finished, and a failure in any of it is
  * dropped: the switch has already happened.
  *
@@ -84,12 +89,17 @@ export const resetLiveReportNote = (): void => {
 
 // --- append with rotation ---
 
-/** Owner-only, whatever the file was created as. A missing file is fine. */
-const makeOwnerOnly = async (filePath: string): Promise<void> => {
+/**
+ * Owner-only, whatever the file was created as. A missing file is fine:
+ * there is nothing to fix. Any other failure is returned as false — the
+ * file exists and could not be made owner-only.
+ */
+const makeOwnerOnly = async (filePath: string): Promise<boolean> => {
   try {
     await fs.promises.chmod(filePath, 0o600);
-  } catch {
-    // Not there, or not ours to change: the append below decides.
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === 'ENOENT';
   }
 };
 
@@ -101,6 +111,11 @@ const makeOwnerOnly = async (filePath: string): Promise<void> => {
  * `mode` of an append applies to a new file only, so a log that an earlier
  * build (or anything else) left group- or world-readable would stay so, and
  * rotation would carry that mode over to `.1`.
+ *
+ * If the log exists and cannot be made owner-only, this throws and the
+ * line is not written: a record names a session, and the rule is that it
+ * goes into an owner-only file or nowhere. (A `.1` that cannot be fixed
+ * does not stop the append: nothing is being written to it.)
  */
 export const appendSwitchLogLine = async (
   filePath: string,
@@ -116,7 +131,9 @@ export const appendSwitchLogLine = async (
   }
   const data = line.endsWith('\n') ? line : `${line}\n`;
   // Before the rename, so the rotated file is already owner-only.
-  await makeOwnerOnly(filePath);
+  if (!(await makeOwnerOnly(filePath))) {
+    throw new Error('switch timing log is not owner-only and could not be made so');
+  }
   if (shouldRotate(size, Buffer.byteLength(data), maxBytes)) {
     await fs.promises.rename(filePath, `${filePath}.1`);
   }
@@ -188,6 +205,10 @@ export const startSwitchTiming = (
     const onFinish = (snap: SwitchSnapshot) => {
       // The samples that describe the span are taken at its end, at once;
       // the rest waits for the event loop to be free of the switch.
+      // One reference to the live report: the count, its age and (in the
+      // deferred write) the tty must all come from the same report, and a
+      // newer one may replace `lastLive` before that write runs.
+      const live = lastLive;
       let sys: SwitchSystemSample = {};
       try {
         sys = {
@@ -195,33 +216,37 @@ export const startSwitchTiming = (
           cpuPct: cpuPercentBetween(cpusBefore, os.cpus()),
           ncpu: cpusBefore.length,
           mainCpuMicros: process.cpuUsage(cpuUsageBefore),
-          claudeProcs: lastLive ? lastLive.count : null,
-          liveAgeMs: lastLive ? Date.now() - lastLive.at : null,
+          claudeProcs: live ? live.count : null,
+          liveAgeMs: live ? Date.now() - live.at : null,
         };
       } catch {
         // A record without system figures is still a record.
       }
       setImmediate(() => {
-        void writeRecord(snap, sys).catch(() => deps.onWritten?.(null));
+        void writeRecord(snap, sys, live).catch(() => deps.onWritten?.(null));
       });
     };
 
-    const writeRecord = async (snap: SwitchSnapshot, sys: SwitchSystemSample) => {
+    const writeRecord = async (
+      snap: SwitchSnapshot,
+      sys: SwitchSystemSample,
+      live: typeof lastLive,
+    ) => {
       const ms = stepDurations(snap, stamp, ipc);
       const sysctl =
         deps.sysctl ??
         (() =>
           run('sysctl', ['-n', 'vm.swapusage', 'kern.memorystatus_vm_pressure_level'], 2000));
       const psTop = deps.psTop ?? (() => run('ps', ['-A', '-o', '%cpu=,comm='], 3000));
-      // The tty the last live-sessions report gave this pid, when it has
-      // one; otherwise one `ps`, here, after the switch.
-      const knownTty = pid !== null ? lastLive?.ttys.get(pid) ?? null : null;
+      // The tty that live-sessions report gave this pid, when it has one;
+      // otherwise one `ps`, here, after the switch.
+      const knownTty = pid !== null ? live?.ttys.get(pid) ?? null : null;
       const psTty =
         deps.psTty ??
         ((p: number) => run('ps', ['-o', 'tty=', '-p', String(p)], 1000));
       const [sysctlOut, psOut, ttyOut] = await Promise.all([
         sysctl().catch(() => ''),
-        isSlowSwitch(ms, snap.timedOut) ? psTop().catch(() => '') : Promise.resolve(null),
+        isSlowSwitch(ms, snap.timedOut || snap.killed === true) ? psTop().catch(() => '') : Promise.resolve(null),
         pid !== null && !knownTty ? psTty(pid).catch(() => '') : Promise.resolve(null),
       ]);
       const tty = knownTty ?? parseTty(ttyOut);

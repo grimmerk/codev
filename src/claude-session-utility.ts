@@ -1489,11 +1489,15 @@ const buildResumeCommand = (
   // call site that forgot to pass it must be a type error rather than a
   // session that silently keeps writing to the wrong memory directory.
   projectPath: string,
+  // Timing log only: this is where a resume's account is decided, so this
+  // is where the log learns it (it can differ from the label passed in).
+  timing?: SwitchTiming,
 ): string => {
   const { configDirEnv: configDir, account } = resumeAccountFor(
     sessionId,
     accountLabel,
   );
+  timing?.set({ account: account?.label ?? null });
   // Single-quote the value: some terminal injections (Ghostty `initial input`)
   // don't escape the command, so a double-quoted prefix would break their
   // AppleScript string. Single quotes are safe across all terminals + handle spaces.
@@ -1729,7 +1733,7 @@ export const runCommandInTerminal = (
         `osascript ${tmpScript}`,
         { encoding: 'utf-8', timeout: 5000 },
         (error: any) => {
-          timing?.exited();
+          timing?.exited(undefined, !!error?.killed);
           try {
             fs.unlinkSync(tmpScript);
           } catch {}
@@ -2172,12 +2176,12 @@ export const openSessionInITerm2 = async (
     fs.writeFileSync(tmpScript, switchScript);
     timing?.spawned();
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8' }, (error: any, stdout: string) => {
-      timing?.exited(stdout);
+      timing?.exited(stdout, !!error?.killed);
       console.log(`[iTerm2] switch result: ${(stdout || '').trim()}`, error?.message || '');
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath, timing);
     return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'iterm2', terminalMode, timing);
   }
 };
@@ -2824,7 +2828,7 @@ export const openSessionInGhostty = async (
     fs.writeFileSync(tmpScript, switchScript);
     timing?.spawned();
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
-      timing?.exited(stdout);
+      timing?.exited(stdout, !!error?.killed);
       const result = (stdout || '').trim();
       console.log('[ghostty] switch result:', result, error?.message || '');
       if (result === 'not found') {
@@ -2833,7 +2837,7 @@ export const openSessionInGhostty = async (
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath, timing);
     return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'ghostty', terminalMode, timing);
   }
 };
@@ -2872,12 +2876,12 @@ export const openSessionInTerminalApp = async (
     fs.writeFileSync(tmpScript, switchScript);
     timing?.spawned();
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
-      timing?.exited(stdout);
+      timing?.exited(stdout, !!error?.killed);
       console.log(`[Terminal.app] switch result: ${(stdout || '').trim()}`, error?.message || '');
       try { fs.unlinkSync(tmpScript); } catch {}
     });
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath, timing);
     return runCommandInTerminal(`cd "${projectPath}" && ${resumeCmd}`, resumeCmd, projectPath, 'terminal', terminalMode, timing);
   }
 };
@@ -3035,7 +3039,7 @@ export const openSessionInCmux = async (
       exec('osascript -e \'tell application "cmux" to activate\'');
     })().finally(() => timing?.exited());
   } else {
-    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath);
+    const resumeCmd = buildResumeCommand(sessionId, accountLabel, projectPath, timing);
     // The cmux launch is several CLI calls behind one promise; time it whole.
     timing?.mark('script');
     timing?.set({ tool: 'cmux-cli', branch: 'new-workspace' });

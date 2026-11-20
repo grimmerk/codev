@@ -13,9 +13,10 @@
  * first); then the total against machine load. Plain Node, no dependencies.
  * A line that is not a record is counted and skipped; a missing or empty
  * file is reported, not an error. Version 1 lines, which did not name their
- * session, count everywhere except the per-session table. A switch whose
- * command timed out is counted, and left out of the percentiles of the
- * steps it never finished.
+ * session, count everywhere except the per-session table. A switch that
+ * did not complete — its command timed out, was killed by its timeout or
+ * failed — and one handed to an app the log does not follow are counted,
+ * and left out of the percentiles of the steps that end at the exit.
  *
  * The log names sessions: id, title, account label and project path. A
  * title is the user's `/rename` name or, without one, the summary of the
@@ -38,18 +39,33 @@ const path = require('path');
 /** Steps in path order; `total` is what the user waited. */
 const STEPS = ['clickToIpc', 'settings', 'detect', 'build', 'spawn', 'run', 'main', 'total'];
 
-/** Steps that end at the command's exit, which a timed-out switch never reached. */
+/** Steps that end at the command's exit: they mean something only for a switch that completed. */
 const NEEDS_EXIT = new Set(['run', 'main', 'total']);
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 
 /**
- * One step of one record, or null when it has no measured value. A
- * timed-out switch has none for the steps that end at the exit — whatever
- * the line says: a deadline is not a duration.
+ * A path the log does not follow to the end (VS Code, Claude Desktop, the
+ * embedded terminal): flagged `untimed`, or, on a line written before the
+ * flag existed, recognisable by its tool.
+ */
+const isUntimed = (r) => r.untimed === true || r.tool === 'open' || r.tool === 'pty';
+
+/**
+ * Did the switch complete, with its command seen to exit normally? Not when
+ * it timed out (no exit was seen), was killed by its timeout (the wait is
+ * real, the switch did not happen), failed, or is untimed.
+ */
+const completed = (r) =>
+  r.timedOut !== true && r.killed !== true && r.ok !== false && !isUntimed(r);
+
+/**
+ * One step of one record, or null when it has no measured value. Only a
+ * completed switch has one for the steps that end at the exit — whatever
+ * the line says: a deadline or a kill is not the duration of a switch.
  */
 const stepValue = (r, step) => {
-  if (r.timedOut === true && NEEDS_EXIT.has(step)) return null;
+  if (NEEDS_EXIT.has(step) && !completed(r)) return null;
   const v = r.ms ? r.ms[step] : null;
   return isNum(v) ? v : null;
 };
@@ -86,7 +102,41 @@ const pearson = (pairs) => {
   return sxy / Math.sqrt(sxx * syy);
 };
 
-/** Records from JSONL text. Anything that is not an object with an `ms` object is skipped and counted. */
+/** Fields read as text: grouped on, compared, or printed. */
+const TEXT_FIELDS = [
+  'ts',
+  'via',
+  'kind',
+  'terminal',
+  'configured',
+  'tool',
+  'branch',
+  'order',
+  'sessionId',
+  'sid',
+  'title',
+  'account',
+  'project',
+  'tty',
+  'ttySrc',
+];
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * A line this script can summarize: an object whose `ms` is an object, and
+ * whose text fields are each a string, null or absent. One rule for all of
+ * them: a field of the wrong type makes the whole line malformed, rather
+ * than each use having to defend itself (`String()` of an object with a
+ * broken `toString` throws). Numbers need no such rule: every numeric read
+ * goes through `isNum`.
+ */
+const isRecord = (r) =>
+  isPlainObject(r) &&
+  isPlainObject(r.ms) &&
+  TEXT_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'string');
+
+/** Records from JSONL text. A line that is not a record (see `isRecord`) is skipped and counted. */
 const parseLines = (text) => {
   const records = [];
   let malformed = 0;
@@ -94,7 +144,7 @@ const parseLines = (text) => {
     if (!line.trim()) continue;
     try {
       const r = JSON.parse(line);
-      if (r && typeof r === 'object' && r.ms && typeof r.ms === 'object') records.push(r);
+      if (isRecord(r)) records.push(r);
       else malformed++;
     } catch {
       malformed++;
@@ -256,7 +306,9 @@ const summarize = (records, opts = {}) => {
   return {
     count: records.length,
     timedOut: records.filter((r) => r.timedOut === true).length,
+    killed: records.filter((r) => r.killed === true).length,
     failed: records.filter((r) => r.ok === false).length,
+    untimed: records.filter(isUntimed).length,
     slow: records.filter((r) => isNum(total(r)) && total(r) > 1000).length,
     all: stepStats(records),
     byKind: groupBy(records, (r) => String(r.kind ?? 'unknown')),
@@ -285,10 +337,13 @@ const summarize = (records, opts = {}) => {
 // --- printing ---
 
 // C0 controls, DEL, C1 controls, the two Unicode line separators, and the
-// bidirectional overrides and isolates. ESC and CSI start the sequences a
-// terminal obeys (move the cursor, set the window title, write the
-// clipboard); a line break forges a row; a bidi override reorders one.
-const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+// bidirectional controls: the overrides and isolates, and the three marks
+// (Arabic letter mark U+061C, left-to-right U+200E, right-to-left U+200F).
+// ESC and CSI start the sequences a terminal obeys (move the cursor, set
+// the window title, write the clipboard); a line break forges a row; a
+// bidi control reorders one.
+const UNSAFE_CHARS =
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
 /**
  * Any value as text that is safe to print: the characters above are
@@ -315,7 +370,14 @@ const clip = (s, w) => {
  */
 const renderTable = (headers, rows, align = []) => {
   const all = [headers, ...rows].map((row) => row.map(safeText));
-  const widths = headers.map((_, i) => Math.max(...all.map((row) => textLength(row[i] ?? ''))));
+  // A loop, not `Math.max(...)`: the rows are as many as the log has
+  // sessions, and a call takes only so many arguments.
+  const widths = headers.map(() => 0);
+  for (const row of all) {
+    for (let i = 0; i < widths.length; i++) {
+      widths[i] = Math.max(widths[i], textLength(row[i] ?? ''));
+    }
+  }
   return all
     .map((row) => {
       const cells = row.map((cell, i) => {
@@ -374,7 +436,8 @@ const tildePath = (p, home) => {
  */
 const sessionLabels = (ids, redacted) => {
   if (redacted) return new Map(ids.map((id) => [id, id]));
-  const longest = Math.max(SESSION_ID_MIN, ...ids.map((id) => id.length));
+  let longest = SESSION_ID_MIN;
+  for (const id of ids) longest = Math.max(longest, id.length);
   for (let len = SESSION_ID_MIN; len <= longest; len++) {
     const labels = ids.map((id) => id.slice(0, len));
     if (new Set(labels).size === new Set(ids).size) return new Map(ids.map((id, i) => [id, labels[i]]));
@@ -429,14 +492,16 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
     ...(opts.redact
       ? ['Redacted: session ids, titles, account labels and project paths are placeholders.']
       : []),
-    `${s.count} switches · ${s.slow} over 1 s · ${s.timedOut} timed out · ${s.failed} failed` +
+    `${s.count} switches · ${s.slow} over 1 s · ${s.timedOut} timed out · ${s.killed} killed by their timeout · ${s.failed} failed · ${s.untimed} not timed end to end` +
       (malformed ? ` · ${malformed} malformed line(s) skipped` : ''),
     'Cells are p50/p90 in ms. Steps: clickToIpc (renderer → main), settings, detect',
     '(which terminal), build (script text), spawn (write + start), run (the external',
     'command), main (IPC → done), total (click → done).',
     'n is the records in the row. A cell ending in (k) is over only k of them: the',
-    'rest have no value for that step (a resume does not detect; a timed-out switch',
-    'has no run, main or total).',
+    'rest have no value for that step. A resume does not detect. run, main and total',
+    'are over completed switches only: not one that timed out, was killed by its',
+    'timeout or failed, and not one handed to VS Code, Claude Desktop or the embedded',
+    'terminal (not timed end to end).',
     '',
     stepTable('All', '', [{ key: 'all', n: s.count, steps: s.all }]),
     '',
@@ -471,18 +536,33 @@ const defaultFiles = () => {
   return [`${base}.1`, base];
 };
 
+/**
+ * The files' text, and the inputs that gave none, by position in `files`:
+ * `missing` do not exist; `unreadable` exist and could not be read (no
+ * permission, a directory), with the error code. The two are different
+ * findings: a log that is not there has nothing to add, one that could not
+ * be read makes the report incomplete.
+ */
 const readFiles = (files) => {
   let text = '';
   const missing = [];
-  for (const f of files) {
+  const unreadable = [];
+  files.forEach((f, index) => {
     try {
       text += `${fs.readFileSync(f, 'utf-8')}\n`;
-    } catch {
-      missing.push(f);
+    } catch (err) {
+      if (err && err.code === 'ENOENT') missing.push(index);
+      else unreadable.push({ index, code: (err && err.code) || 'error' });
     }
-  }
-  return { text, missing };
+  });
+  return { text, missing, unreadable };
 };
+
+/** A line on the report itself, so a pasted copy says it too. */
+const incompleteNote = (unreadable) =>
+  unreadable.length > 0
+    ? `Incomplete: ${unreadable.length} input file(s) exist but could not be read.`
+    : null;
 
 /** Flags and files from the command line; an unknown flag is an error, not a file name. */
 const parseArgs = (argv) => {
@@ -507,9 +587,21 @@ const main = (argv) => {
   }
   const explicit = opts.files.length > 0;
   const files = explicit ? opts.files : defaultFiles();
-  const { text, missing } = readFiles(files);
-  // The rotated file is optional; only a file the user named is worth a note.
-  if (explicit) for (const f of missing) console.error(`cannot read ${safeText(f)}`);
+  const { text, missing, unreadable } = readFiles(files);
+  // A path can name a project or a user: a redacted run says which input, not where it is.
+  const nameOf = (index) => (opts.redact ? `input ${index + 1}` : safeText(files[index]));
+  // The rotated file is optional; only a file the user named is worth a note when absent.
+  if (explicit) for (const i of missing) console.error(`cannot read ${nameOf(i)}: no such file`);
+  // A file that is there and cannot be read is always worth one: the default
+  // run would otherwise print one half of the log as if it were all of it.
+  for (const u of unreadable) {
+    console.error(`cannot read ${nameOf(u.index)} (${safeText(u.code)}): the report is incomplete`);
+  }
+  const note = incompleteNote(unreadable);
+  if (note) {
+    console.log(note);
+    process.exitCode = 1;
+  }
   const { records, malformed } = parseLines(text);
   const shown = opts.redact ? redactRecords(records) : records;
   console.log(formatReport(summarize(shown, opts), malformed, opts));
@@ -528,6 +620,7 @@ module.exports = {
   sessionLabels,
   branchMix,
   redactRecords,
+  readFiles,
   parseArgs,
   safeText,
   clip,

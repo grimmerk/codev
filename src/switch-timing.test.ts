@@ -1,7 +1,8 @@
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   branchFromSwitchOutput,
@@ -9,6 +10,7 @@ import {
   cpuPercentBetween,
   createSwitchTiming,
   isSlowSwitch,
+  isUntimed,
   parseTopCpu,
   parseTty,
   sanitizeStamp,
@@ -114,6 +116,30 @@ describe('createSwitchTiming', () => {
     h.timing.settle(true);
     expect(h.finished).toHaveLength(1);
     expect(h.finished[0].ok).toBe(false);
+  });
+
+  it('carries the kill of a command stopped by its timeout, and only that', () => {
+    const killed = harness();
+    killed.timing.spawned();
+    killed.timing.settle(true);
+    killed.advance(5000);
+    killed.timing.exited('', true);
+    expect(killed.finished[0]).toMatchObject({ killed: true, timedOut: false, exitedAt: 5000 });
+    // An ordinary exit, with or without the argument, is not a kill.
+    const normal = harness();
+    normal.timing.spawned();
+    normal.timing.exited('found-by-tty', false);
+    normal.timing.settle(true);
+    expect(normal.finished[0].killed).toBe(false);
+  });
+
+  it('lets the launch replace the account main set first', () => {
+    // main sets the row's label; a resume then sets the account it runs under.
+    const h = harness();
+    h.timing.set({ account: 'from-the-row', configured: 'iterm2' });
+    h.timing.set({ account: 'from-history' });
+    h.timing.settle(true);
+    expect(h.finished[0].facts).toMatchObject({ account: 'from-history', configured: 'iterm2' });
   });
 
   it('measures from the origin it is given, not from its own creation', () => {
@@ -261,8 +287,34 @@ describe('stepDurations', () => {
     expect(timedOut.spawn).toBe(4);
     expect(timedOut.clickToIpc).toBeNull();
     // Without a stamp the total is main's own span, not a guess.
-    const noStamp = stepDurations(snap({ marks: { returned: 5 }, endedAt: 5 }), undefined, ipc);
+    const noStamp = stepDurations(
+      snap({ marks: { returned: 5 }, spawnedAt: 1, exitedAt: 5, endedAt: 5 }),
+      undefined,
+      ipc,
+    );
     expect(noStamp.total).toBe(5);
+  });
+
+  it('gives no end-to-end time to a path that starts no command', () => {
+    // VS Code, Claude Desktop, the embedded terminal: `openSession` returns
+    // after handing over, long before anything is switched.
+    const handedOver = snap({ marks: { settings: 2, returned: 6 }, endedAt: 6 });
+    expect(isUntimed(handedOver)).toBe(true);
+    const ms = stepDurations(handedOver, stamp, ipc);
+    expect(ms).toMatchObject({ run: null, main: null, total: null, returned: 6, settings: 2 });
+    expect(ms.clickToIpc).toBe(10);
+    expect(isSlowSwitch(ms)).toBe(false);
+    expect(isUntimed(snap({ spawnedAt: 3, exitedAt: 9 }))).toBe(false);
+  });
+
+  it('keeps the measured wait of a killed command', () => {
+    // Unlike the no-exit deadline, the ~5 s here was really waited.
+    const ms = stepDurations(
+      snap({ marks: { returned: 4 }, spawnedAt: 3, exitedAt: 5003, killed: true }),
+      undefined,
+      ipc,
+    );
+    expect(ms).toMatchObject({ run: 5000, main: 5003, total: 5003 });
   });
 
   it('counts a timed-out switch as slow although it has no total', () => {
@@ -281,7 +333,11 @@ describe('stepDurations', () => {
 
   it('does not let a renderer clock that runs ahead shorten the total', () => {
     const ahead = { ...stamp, wallMs: ipc.wallMs + 50 };
-    const ms = stepDurations(snap({ marks: { returned: 20 }, endedAt: 20 }), ahead, ipc);
+    const ms = stepDurations(
+      snap({ marks: { returned: 20 }, spawnedAt: 1, exitedAt: 20, endedAt: 20 }),
+      ahead,
+      ipc,
+    );
     expect(ms.clickToIpc).toBe(-50); // kept as measured
     expect(ms.total).toBe(20);
   });
@@ -384,7 +440,7 @@ describe('the log file', () => {
     } = {},
     session: Parameters<typeof startSwitchTiming>[0] = SESSION,
     // What main does once it has validated the row's label; `never` hangs the command.
-    { account = 'second' as string | null, exits = true } = {},
+    { account = 'second' as string | null, exits = true, killed = false } = {},
   ) =>
     new Promise<Record<string, unknown> | null>((resolve) => {
       const timing = startSwitchTiming(
@@ -406,7 +462,7 @@ describe('the log file', () => {
       timing.mark('script');
       timing.spawned();
       timing.settle(true);
-      if (exits) timing.exited('found-by-title\n');
+      if (exits) timing.exited(killed ? '' : 'found-by-title\n', killed);
     });
 
   it('writes one line per switch, naming the session it was', async () => {
@@ -497,8 +553,92 @@ describe('the log file', () => {
     expect(ms.run).toBeNull();
     expect(ms.main).toBeNull();
     expect(ms.total).toBeNull();
-    expect(ms.returned).toBeGreaterThanOrEqual(0);
-    expect(ms.returned).toBeLessThan(20); // measured, not the deadline
+    // Measured (the collector's own clock decides how long; see the
+    // controlled-clock test of `stepDurations` for the exact value).
+    expect(typeof ms.returned).toBe('number');
+  });
+
+  it('marks a killed command: not ok, sampled as slow, however short the wait', async () => {
+    let psCalls = 0;
+    const record = await runSwitch(
+      undefined,
+      {
+        psTop: async () => {
+          psCalls++;
+          return ' 55.0 /usr/bin/osascript\n';
+        },
+      },
+      SESSION,
+      { killed: true },
+    );
+    // `openSession` had resolved (the running-session paths return at once).
+    expect(record).toMatchObject({ killed: true, ok: false, timedOut: false, untimed: false, branch: null });
+    expect(psCalls).toBe(1);
+    expect(record.top).toEqual([{ cpu: 55, comm: 'osascript' }]);
+    expect(typeof (record.ms as { run: unknown }).run).toBe('number');
+  });
+
+  it('marks a normal switch as neither killed nor untimed', async () => {
+    const record = await runSwitch(undefined);
+    expect(record).toMatchObject({ killed: false, untimed: false, ok: true });
+  });
+
+  it('takes the count, its age and the tty from one live report, even if a newer one arrives', async () => {
+    noteLiveReport({ live: [{ pid: 4242, tty: 'ttys011' }, { pid: 1, tty: 'ttys001' }] });
+    const record = await runSwitch(undefined, {
+      // A newer report lands while the deferred write is waiting on sysctl.
+      sysctl: async () => {
+        noteLiveReport({ live: [{ pid: 4242, tty: 'ttys099' }] });
+        return '';
+      },
+      psTty: async () => 'ttys077\n',
+    });
+    expect(record).toMatchObject({ claudeProcs: 2, tty: 'ttys011', ttySrc: 'live-report' });
+  });
+
+  it('drops the record when an existing log cannot be made owner-only', async () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'old line\n');
+    const eperm = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    const chmod = vi.spyOn(fs.promises, 'chmod').mockRejectedValue(eperm);
+    try {
+      await expect(appendSwitchLogLine(file, 'new line', 1000)).rejects.toThrow(/owner-only/);
+      // Through the whole path too: the write is reported as dropped, not thrown.
+      expect(await runSwitch(undefined)).toBeNull();
+    } finally {
+      chmod.mockRestore();
+    }
+    expect(fs.readFileSync(file, 'utf-8')).toBe('old line\n');
+  });
+
+  it('still creates a missing log, owner-only: nothing to fix is not a failure', async () => {
+    const chmod = vi.spyOn(fs.promises, 'chmod');
+    try {
+      await appendSwitchLogLine(file, 'first line', 1000);
+      // The chmod of the absent file failed with ENOENT, and that was fine.
+      await expect(chmod.mock.results[0].value).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      chmod.mockRestore();
+    }
+    expect(fs.readFileSync(file, 'utf-8')).toBe('first line\n');
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it('writes on when only the rotated copy cannot be fixed', async () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'old line\n');
+    fs.writeFileSync(`${file}.1`, 'older\n');
+    const real = fs.promises.chmod.bind(fs.promises);
+    const eperm = Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    const chmod = vi
+      .spyOn(fs.promises, 'chmod')
+      .mockImplementation((p, mode) => (String(p).endsWith('.1') ? Promise.reject(eperm) : real(p, mode)));
+    try {
+      await appendSwitchLogLine(file, 'new line', 1000);
+    } finally {
+      chmod.mockRestore();
+    }
+    expect(fs.readFileSync(file, 'utf-8')).toBe('old line\nnew line\n');
   });
 
   it('makes an existing log and its rotated copy owner-only, not just a new one', async () => {
@@ -939,6 +1079,9 @@ describe('scripts/switch-timing-summary.js', () => {
     expect(report.split('\n').some((l) => /^\s*fake/.test(l))).toBe(false);
     expect(summary.safeText(`a${ESC}[31mb\u009b\u007fc\n`)).toBe('a[31mbc');
     expect(summary.safeText(null)).toBe('');
+    // The three direction marks: invisible, and they reorder what follows.
+    const marks = [0x061c, 0x200e, 0x200f].map((c) => String.fromCharCode(c)).join('');
+    expect(summary.safeText(`a${marks}b`)).toBe('ab');
     // Same for --redact, whose placeholders are safe but whose other fields are the log's.
     const redacted: string = summary.formatReport(
       summary.summarize(summary.redactRecords([hostile, clean])),
@@ -999,6 +1142,112 @@ describe('scripts/switch-timing-summary.js', () => {
     expect(resume).toContain('520/520');
     const session = report.split('\n').find((l) => /^ {2}one\s/.test(l));
     expect(session).toContain('350/486 (3)');
+  });
+
+  it('counts a line with a wrong-typed field as malformed, by one rule for every text field', () => {
+    const good = { v: 2, kind: 'switch', terminal: 'iterm2', branch: null, ms: { total: 5, run: 4 } };
+    const bad = [
+      { ...good, kind: { toString: null } }, // String() of this throws
+      { ...good, terminal: 7 },
+      { ...good, branch: ['tty'] },
+      { ...good, account: {} },
+      { ...good, sessionId: 12345 },
+      { ...good, title: true },
+      { ...good, project: { path: '/x' } },
+      { ...good, tty: 4 },
+      { ...good, sid: [] },
+      { ...good, ms: [] }, // an array is not a set of steps
+      { ...good, ms: 'fast' },
+      [good],
+    ];
+    const text = [good, ...bad].map((r) => JSON.stringify(r)).join('\n');
+    const { records, malformed } = summary.parseLines(text);
+    expect(records).toEqual([good]);
+    expect(malformed).toBe(bad.length);
+    // And what is accepted cannot make the report throw.
+    expect(() => summary.formatReport(summary.summarize(records), malformed, {})).not.toThrow();
+  });
+
+  it('keeps switches that did not complete out of run, main and total, and counts each kind', () => {
+    const rec = (over: Record<string, unknown>, ms: Record<string, number | null>) => ({
+      v: 2,
+      sessionId: 'one',
+      kind: 'switch',
+      terminal: 'ghostty',
+      tool: 'osascript',
+      branch: 'tty',
+      ms: { settings: 1, ...ms },
+      ...over,
+    });
+    const records = [
+      rec({}, { run: 100, main: 110, total: 120 }),
+      rec({}, { run: 300, main: 310, total: 320 }),
+      // Killed at the 5 s limit: a real wait, not a switch.
+      rec({ killed: true, ok: false, branch: null }, { run: 5000, main: 5010, total: 5020 }),
+      // A launch that failed.
+      rec({ ok: false }, { run: 900, main: 910, total: 920 }),
+      // Handed to another app: flagged, and an older line recognised by its tool.
+      rec({ untimed: true, tool: 'open', terminal: 'vscode' }, { returned: 3, main: null, total: null }),
+      rec({ tool: 'pty', terminal: 'codev' }, { returned: 2, main: 2, total: 4 }),
+    ];
+    const s = summary.summarize(records);
+    expect(s).toMatchObject({ count: 6, killed: 1, failed: 2, untimed: 2, timedOut: 0, slow: 0 });
+    expect(s.all.total).toEqual({ n: 2, p50: 220, p90: 300 });
+    expect(s.all.run).toEqual({ n: 2, p50: 200, p90: 280 });
+    expect(s.all.main.n).toBe(2);
+    // Steps before the exit are still everyone's.
+    expect(s.all.settings.n).toBe(6);
+    expect(s.runShareP50).toBeCloseTo((100 / 120 + 300 / 320) / 2, 10);
+    const report: string = summary.formatReport(s, 0, {});
+    expect(report).toContain('1 killed by their timeout');
+    expect(report).toContain('2 not timed end to end');
+  });
+
+  it('survives a log with more sessions than a call takes arguments', () => {
+    // `Math.max(...rows)` throws RangeError somewhere past 100k arguments.
+    const n = 300_000;
+    const ids = Array.from({ length: n }, (_, i) => `id-${String(i).padStart(8, '0')}`);
+    const labels = summary.sessionLabels(ids, false);
+    expect(labels.size).toBe(n);
+    expect(labels.get(ids[n - 1])).toBe(ids[n - 1]);
+    const table: string = summary.renderTable(
+      ['a', 'b'],
+      ids.map((id) => [id, 'x']),
+    );
+    expect(table.split('\n')).toHaveLength(n + 1);
+  });
+
+  it('tells a missing input from one that exists and cannot be read', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switch-summary-'));
+    try {
+      const good = path.join(dir, 'good.jsonl');
+      fs.writeFileSync(good, '{"ms":{"total":5}}\n');
+      const missing = path.join(dir, 'nope.jsonl');
+      const unreadable = path.join(dir, 'a-directory'); // reading it fails with EISDIR
+      fs.mkdirSync(unreadable);
+      const r = summary.readFiles([missing, unreadable, good]);
+      expect(r.missing).toEqual([0]);
+      expect(r.unreadable).toEqual([{ index: 1, code: 'EISDIR' }]);
+      expect(summary.parseLines(r.text).records).toHaveLength(1);
+
+      // The default run: `.1` readable, the live log not. It must say so.
+      const script = path.join(__dirname, '..', 'scripts', 'switch-timing-summary.js');
+      const plain = spawnSync(process.execPath, [script, good, unreadable], { encoding: 'utf-8' });
+      expect(plain.status).toBe(1);
+      expect(plain.stderr).toContain(`cannot read ${unreadable} (EISDIR): the report is incomplete`);
+      expect(plain.stdout).toContain('Incomplete: 1 input file(s) exist but could not be read.');
+      expect(plain.stdout).toContain('1 switches');
+
+      // Redacted: the input is named by position, never by path.
+      const redacted = spawnSync(process.execPath, [script, '--redact', good, unreadable, missing], {
+        encoding: 'utf-8',
+      });
+      expect(redacted.stderr).toContain('cannot read input 2 (EISDIR)');
+      expect(redacted.stderr).toContain('cannot read input 3: no such file');
+      expect(redacted.stderr + redacted.stdout).not.toContain(dir);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('parses flags apart from files and rejects an unknown one', () => {

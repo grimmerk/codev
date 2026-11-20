@@ -70,9 +70,12 @@ export interface SwitchFacts {
   /** Whether the script carried a title block at all (the row had a title). */
   hasTitle?: boolean;
   /**
-   * The row's account label once main has checked that an account carries
-   * it — the same value the launch is given. Null: the row had none, or
-   * named an account that does not exist.
+   * The account of this switch. For a resume it is the account the launch
+   * runs under, set where that is decided (`buildResumeCommand`): history's
+   * account for a session history knows, else the row's label. A switch to
+   * a running session launches nothing, so it keeps what main set: the
+   * row's label, once checked that an account carries it. Null: no account
+   * was resolved.
    */
   account?: string | null;
 }
@@ -103,6 +106,11 @@ export interface SwitchSnapshot {
   ok: boolean;
   /** True when the external command had not exited by the safety deadline. */
   timedOut: boolean;
+  /**
+   * True when the command did exit, but only because its caller's own
+   * timeout killed it. Its times are real waits, not a completed switch.
+   */
+  killed?: boolean;
 }
 
 export interface SwitchTiming {
@@ -112,9 +120,10 @@ export interface SwitchTiming {
   spawned(): void;
   /**
    * It exited. `stdout`, when the command is a switch script, names the
-   * branch that matched.
+   * branch that matched. `killed` is the callback's `error.killed`: the
+   * command was stopped by its timeout instead of finishing.
    */
-  exited(stdout?: string): void;
+  exited(stdout?: string, killed?: boolean): void;
   /**
    * `openSession` settled. The record closes now if nothing is still
    * running, otherwise when it exits (or at the safety deadline).
@@ -168,6 +177,7 @@ export const createSwitchTiming = (deps: SwitchTimingDeps): SwitchTiming => {
   let running = 0;
   let settled = false;
   let ok = true;
+  let killed = false;
   let finished = false;
   let timer: unknown = null;
   const since = () => deps.now() - t0;
@@ -191,6 +201,7 @@ export const createSwitchTiming = (deps: SwitchTimingDeps): SwitchTiming => {
       facts: { ...facts },
       ok,
       timedOut,
+      killed,
     });
   };
 
@@ -210,11 +221,12 @@ export const createSwitchTiming = (deps: SwitchTimingDeps): SwitchTiming => {
         running++;
         if (spawnedAt === null) spawnedAt = since();
       }),
-    exited: (stdout) =>
+    exited: (stdout, wasKilled) =>
       guard(() => {
         if (finished) return;
         running = Math.max(0, running - 1);
         exitedAt = since();
+        if (wasKilled === true) killed = true;
         if (stdout !== undefined && facts.branch === undefined) {
           facts = { ...facts, branch: branchFromSwitchOutput(stdout) };
         }
@@ -301,11 +313,11 @@ export interface SwitchStepMs {
   /** IPC arrival to `openSession` returning. */
   returned: number | null;
   /**
-   * IPC arrival to the end: the command's exit, else `openSession`
-   * returning. Null when the command timed out.
+   * IPC arrival to the command's exit. Null when there was none to see:
+   * the command timed out, or the path starts no command (`untimed`).
    */
   main: number | null;
-  /** `clickToIpc + main`: what the user waited. Null when the command timed out. */
+  /** `clickToIpc + main`: what the user waited. Null whenever `main` is. */
   total: number | null;
 }
 
@@ -314,6 +326,15 @@ export interface SwitchStepMs {
  * before it that this path actually reached, so a path that skips one
  * (a resume skips `detect`) does not lose the time: it lands in the next.
  */
+/**
+ * True for a switch this log cannot time end to end: no command was ever
+ * started and awaited, so there is no exit to measure to. Those are the
+ * paths that hand over with a fire-and-forget `open` or a message to the
+ * renderer; what they do next (VS Code waits 500 ms before its URI
+ * command, for one) happens out of sight.
+ */
+export const isUntimed = (snap: SwitchSnapshot): boolean => snap.spawnedAt === null;
+
 export const stepDurations = (
   snap: SwitchSnapshot,
   stamp: RendererStamp | undefined,
@@ -322,12 +343,15 @@ export const stepDurations = (
   const { marks, spawnedAt, exitedAt } = snap;
   const afterSettings = marks.settings ?? 0;
   const beforeScript = marks.detect ?? afterSettings;
-  // The end is the command's exit, or `openSession` returning on a path
-  // that runs no command (the collector always marks `returned` before it
-  // closes). A command that timed out never reported an exit: the record
-  // then closed at the deadline, which is not a duration of anything, so
-  // `run`, `main` and `total` stay null and `returned` is what is known.
-  const end = snap.timedOut ? null : exitedAt ?? marks.returned ?? null;
+  // The end is the command's exit and nothing else. Two kinds of record
+  // have none, and for both `run`, `main` and `total` stay null while
+  // `returned` is what is known:
+  // - a command that timed out never reported one (the record closed at
+  //   the deadline, which is not a duration of anything);
+  // - a path that hands the switch to something this log does not follow
+  //   (VS Code, Claude Desktop, the embedded terminal) starts no command,
+  //   so `openSession` returning is not "switched" (see `isUntimed`).
+  const end = snap.timedOut || isUntimed(snap) ? null : exitedAt;
   const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
   const clickToIpc = stamp && finite(stamp.wallMs) ? ipc.wallMs - stamp.wallMs : null;
   const clickToIpcHr =
@@ -358,7 +382,7 @@ export interface SwitchSystemSample {
   /** Running `claude` processes in the last live-sessions report, and its age. */
   claudeProcs?: number | null;
   liveAgeMs?: number | null;
-  /** Only for a slow or timed-out switch: the busiest processes right after it. */
+  /** Only for a slow, timed-out or killed switch: the busiest processes right after it. */
   top?: { cpu: number; comm: string }[];
   /** The target process's controlling terminal, and where the value came from. */
   tty?: string | null;
@@ -435,11 +459,12 @@ export const SLOW_SWITCH_MS = 1000;
 
 /**
  * Slow enough to also ask what the machine was busy with. A switch whose
- * command never reported back has no total to compare — and is the slowest
- * kind there is, so it always counts.
+ * command never reported back (`timedOut`) has no total to compare, and
+ * one whose command was killed by its timeout did not finish either: both
+ * are the slowest kind there is, so `cutShort` always counts.
  */
-export const isSlowSwitch = (ms: SwitchStepMs, timedOut = false): boolean =>
-  timedOut || (typeof ms.total === 'number' && ms.total > SLOW_SWITCH_MS);
+export const isSlowSwitch = (ms: SwitchStepMs, cutShort = false): boolean =>
+  cutShort || (typeof ms.total === 'number' && ms.total > SLOW_SWITCH_MS);
 
 export const buildSwitchRecord = (
   ctx: SwitchContext,
@@ -465,8 +490,11 @@ export const buildSwitchRecord = (
   branch: snap.facts.branch ?? null,
   order: snap.facts.order ?? null,
   hasTitle: snap.facts.hasTitle ?? null,
-  ok: snap.ok,
+  // A command killed by its timeout did not switch, whatever `openSession` returned.
+  ok: snap.ok && snap.killed !== true,
   timedOut: snap.timedOut,
+  killed: snap.killed === true,
+  untimed: isUntimed(snap),
   ms,
   load: (sys.loadavg ?? []).map((n) => Math.round(n * 100) / 100),
   cpuPct: sys.cpuPct ?? null,

@@ -2883,7 +2883,8 @@ ipcMain.on(
       typeof accountLabel === 'string' && findAccountByLabel(accountLabel)
         ? accountLabel
         : undefined;
-    // The log gets the label the launch gets, not the renderer's raw one.
+    // The log starts from the label the launch is given, not the renderer's
+    // raw one; a resume replaces it with the account it actually runs under.
     timing?.set({ account: label ?? null });
     openSession(
       sessionId,
