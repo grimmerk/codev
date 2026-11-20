@@ -1,8 +1,10 @@
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { generateAccountsSh } from './account-manager';
 import { CliDeps, runSessionCli } from './codev-session';
 import { IdentityAccount, transcriptSlug } from './session-identity';
 
@@ -116,6 +118,10 @@ describe('codev session resume', () => {
       `cd '${api}' && CLAUDE_CONFIG_DIR='${work.dir}' command claude --resume ${ID_C}`,
     ]);
     expect(r.stderr).toContain('as work');
+    // The anchor account: the variable is unset, never left to the shell.
+    expect(run('resume', ID_A).out).toEqual([
+      `cd '${app}' && env -u CLAUDE_CONFIG_DIR claude --resume ${ID_A}`,
+    ]);
   });
 
   it('refuses a title two sessions share: lists both, prints NO command', () => {
@@ -175,6 +181,88 @@ describe('codev session resume', () => {
   });
 });
 
+// The whole path an agent takes (#172): this CLI prints the command, the
+// `codev()` function of a generated accounts.sh evals it in a real shell, and
+// a stub `claude` on PATH reports what it was started with. The calling shell
+// exports ANOTHER account's CLAUDE_CONFIG_DIR, as a shell inside that
+// account's Claude Code session does. The global default is a third account,
+// so a command that went through the `claude` dispatcher is caught as well.
+describe('codev session resume, run by the codev() shell function', () => {
+  const setup = () => {
+    const bin = path.join(tmp, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(
+      path.join(bin, 'claude'),
+      '#!/bin/sh\necho "CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR-<unset>} PWD=$PWD ARGS=$*"\n',
+      { mode: 0o755 },
+    );
+    // Stands in for the app binary: hands back what the real CLI printed.
+    const resumeFile = path.join(tmp, 'resume-command');
+    const appExec = path.join(tmp, 'CodeV');
+    fs.writeFileSync(
+      appExec,
+      [
+        '#!/bin/sh',
+        'cli=$(basename "$1"); shift',
+        '[ "$cli $1" = "codev-session.js resume" ] && cat "$RESUME_FILE"',
+      ].join('\n') + '\n',
+      { mode: 0o755 },
+    );
+    const accountsSh = path.join(tmp, 'accounts.sh');
+    const regAccount = (label: string, isAnchor: boolean) => ({
+      label,
+      dir: path.join(tmp, `reg-${label}`),
+      identityFile: path.join(tmp, `reg-${label}`, '.claude.json'),
+      configDirEnv: isAnchor ? null : path.join(tmp, `reg-${label}`),
+      isAnchor,
+    });
+    fs.writeFileSync(
+      accountsSh,
+      generateAccountsSh({
+        version: 1,
+        defaultAccount: 'third',
+        appPath: tmp,
+        appExec,
+        accounts: [regAccount('main', true), regAccount('third', false)],
+      }),
+    );
+    const inherited = path.join(tmp, 'claude-second');
+    return (shell: string, query: string): string => {
+      const printed = run('resume', query);
+      expect(printed.code).toBe(0);
+      fs.writeFileSync(resumeFile, printed.stdout + '\n');
+      return execFileSync(
+        shell,
+        ['-c', `. "${accountsSh}"\ncodev session resume ${query}`],
+        {
+          encoding: 'utf-8',
+          env: {
+            PATH: `${bin}:/usr/bin:/bin`,
+            HOME: tmp,
+            RESUME_FILE: resumeFile,
+            CLAUDE_CONFIG_DIR: inherited,
+          },
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      );
+    };
+  };
+
+  for (const shell of ['zsh', 'bash']) {
+    it(`${shell}: an anchor session resumes with the inherited CLAUDE_CONFIG_DIR unset`, () => {
+      expect(setup()(shell, ID_A)).toBe(
+        `CLAUDE_CONFIG_DIR=<unset> PWD=${app} ARGS=--resume ${ID_A}\n`,
+      );
+    });
+
+    it(`${shell}: another account's session resumes under that account`, () => {
+      expect(setup()(shell, ID_C)).toBe(
+        `CLAUDE_CONFIG_DIR=${work.dir} PWD=${api} ARGS=--resume ${ID_C}\n`,
+      );
+    });
+  }
+});
+
 // Real record shapes (2026-11-20): an assistant turn is several records, each
 // holding ONE kind of block; a tool result comes back as a `user` record.
 const said = (
@@ -213,7 +301,7 @@ describe('codev session show', () => {
         transcriptSlug(app),
         `${ID_A}.jsonl`,
       ),
-      resumeCommand: `cd '${app}' && command claude --resume ${ID_A}`,
+      resumeCommand: `cd '${app}' && env -u CLAUDE_CONFIG_DIR claude --resume ${ID_A}`,
       reference: `billing fix (${ID_A})`,
     });
     expect(got[1].account).toBe('work');
