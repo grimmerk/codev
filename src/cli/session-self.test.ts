@@ -66,14 +66,24 @@ describe('proofFor', () => {
     expect(proofFor(stale, proc(), ID_A)).toBeNull();
   });
 
-  it('without a start time, needs the environment or a claude command', () => {
+  it('without a start time, only the environment naming the same session is proof', () => {
     const old = reg({ procStart: '' });
     expect(proofFor(old, proc({ command: '/bin/zsh' }), ID_A)).toBe('environment');
-    expect(proofFor(old, proc({ command: '/usr/local/bin/claude' }), undefined)).toBe(
-      'command-name',
-    );
     expect(proofFor(old, proc({ command: '/bin/zsh' }), ID_B)).toBeNull();
     expect(proofFor(old, proc({ command: '/bin/zsh' }), undefined)).toBeNull();
+  });
+
+  it('a process merely being called claude is not proof: the file may be an earlier process’s', () => {
+    // An old-format file left by a session that exited; a NEW claude now has
+    // its pid. Nothing ties the two together, so it must not be believed.
+    const leftover = reg({ procStart: '' });
+    for (const command of ['claude', '/usr/local/bin/claude', 'claude-code']) {
+      expect(proofFor(leftover, proc({ command }), undefined)).toBeNull();
+      expect(proofFor(leftover, proc({ command }), ID_B)).toBeNull();
+    }
+    expect(
+      resolveSelf([proc()], (pid) => (pid === 800 ? [leftover] : []), ID_B),
+    ).toMatchObject({ ok: false, reason: 'not-in-session' });
   });
 });
 

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { writeFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 
 import {
   generateAccountsSh,
@@ -13,6 +13,17 @@ import {
 } from './account-manager';
 
 const HOME = os.homedir();
+
+// Every temp dir this file makes, removed when it is done.
+const tempDirs: string[] = [];
+const makeTempDir = (prefix: string): string => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+};
+afterAll(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 /** A representative two-account registry (personal default + work extra). */
 function reg(overrides: Partial<Registry> = {}): Registry {
@@ -92,7 +103,7 @@ describe('generateAccountsSh — shared auto-memory', () => {
 
   it('is still syntactically valid shell with the helper in it', () => {
     const file = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'accounts-sh-')),
+      makeTempDir('accounts-sh-'),
       'accounts.sh',
     );
     fs.writeFileSync(file, generateAccountsSh(shared()));
@@ -251,7 +262,7 @@ describe('generateAccountsSh', () => {
   describe('codev() dispatch, run in a real shell', () => {
     const setup = () => {
       const dir = fs.realpathSync(
-        fs.mkdtempSync(path.join(os.tmpdir(), 'codev-fn-')),
+        makeTempDir('codev-fn-'),
       );
       const stub = path.join(dir, 'CodeV');
       // $1 is the CLI script, the rest are the user's arguments.

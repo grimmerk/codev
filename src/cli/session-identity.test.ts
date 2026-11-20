@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   cdAndResume,
+  createTranscriptIndex,
   foldHistoryText,
   formatReference,
   formatResumeCommand,
@@ -209,6 +210,36 @@ describe('transcript location', () => {
     ).toEqual({ path: file, accountDir: account, outsideProjectSlug: true });
   });
 
+  it('a shared index answers the fallback without reading the directories again', () => {
+    const account = path.join(tmp, 'acct');
+    const elsewhere = path.join(tmp, 'somewhere-else');
+    const project = path.join(tmp, 'acme-app');
+    const file = writeTranscript(account, elsewhere, ID_A, ['{}']);
+    const index = createTranscriptIndex();
+    expect(
+      locateTranscript([account], project, ID_A, { scanAllSlugs: index }),
+    ).toEqual({ path: file, accountDir: account, outsideProjectSlug: true });
+    // A session with no transcript anywhere: a miss, not an error.
+    expect(
+      locateTranscript([account], project, ID_B, { scanAllSlugs: index }),
+    ).toBeNull();
+    // The index is a snapshot: a file that appears later is not in it, which
+    // is what proves the second lookup did not go back to the disk…
+    const late = writeTranscript(account, elsewhere, ID_B, ['{}']);
+    expect(
+      locateTranscript([account], project, ID_B, { scanAllSlugs: index }),
+    ).toBeNull();
+    // …while a fresh one (what `true` builds) sees it.
+    expect(
+      locateTranscript([account], project, ID_B, { scanAllSlugs: true })?.path,
+    ).toBe(late);
+    // The project's own slug never goes through the index at all.
+    const own = writeTranscript(account, project, ID_C, ['{}']);
+    expect(
+      locateTranscript([account], project, ID_C, { scanAllSlugs: index }),
+    ).toEqual({ path: own, accountDir: account, outsideProjectSlug: false });
+  });
+
   it('tries the account dirs in the order given', () => {
     const first = path.join(tmp, 'first');
     const second = path.join(tmp, 'second');
@@ -388,10 +419,23 @@ describe('matching a query to sessions', () => {
     expect(ids('2222cafe')).toEqual([ID_C]);
     // A title that is also the start of another session's id: both.
     const both = [
+      { sessionId: 'abcd0000-0000-4000-8000-000000000001', title: 'x' },
+      { sessionId: 'ffff0000-0000-4000-8000-000000000002', title: 'abcd' },
+    ];
+    expect(matchSessions('abcd', both)).toHaveLength(2);
+  });
+
+  it('needs four hex characters before a query counts as an id prefix', () => {
+    // Shorter than that, nearly every query would "match" dozens of ids.
+    expect(ids('1')).toEqual([]);
+    expect(ids('111')).toEqual([]);
+    expect(ids('1111')).toEqual([ID_A, ID_B]);
+    // …but it is still a perfectly good title.
+    const short = [
       { sessionId: 'abc00000-0000-4000-8000-000000000001', title: 'x' },
       { sessionId: 'fff00000-0000-4000-8000-000000000002', title: 'abc' },
     ];
-    expect(matchSessions('abc', both)).toHaveLength(2);
+    expect(matchSessions('abc', short).map((s) => s.title)).toEqual(['abc']);
   });
 
   it('falls back to a partial title only when nothing matched outright', () => {
@@ -510,6 +554,8 @@ describe('resume command', () => {
     });
     expect(gone.transcriptPath).toBeNull();
     expect(gone.title).toBe('captured by a list');
+    // Nobody can say any more whether that was a /rename name.
+    expect(gone.titleKind).toBe('unknown');
     expect(gone.resumeCommand).toBe(
       `cd '${path.join(tmp, 'acme-app')}' && command claude --resume ${ID_B}`,
     );

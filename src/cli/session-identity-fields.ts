@@ -9,8 +9,28 @@
  * `custom` is the name `/rename` gave the session — the one another Claude
  * session can address it by. `ai` is the title Claude Code generated on its
  * own, shown when there is no custom one; it is not a messaging address.
+ * `unknown` is a title somebody captured earlier (the row, a saved list) when
+ * the transcript can no longer say which of the two it was.
  */
-export type TitleKind = 'custom' | 'ai' | 'none';
+export type TitleKind = 'custom' | 'ai' | 'unknown' | 'none';
+
+/**
+ * Does a query word name a session by its id? A PREFIX of at least four hex
+ * characters (hyphens allowed), never a substring: the id is searchable so
+ * the one a terminal status line shows can be typed in, and people type it
+ * from the start. A substring rule would make `de` or `cafe` match nearly
+ * every session on the machine through its id, regardless of content.
+ *
+ * ONE rule for the Sessions tab's search and for `codev session <id>`: it
+ * lives here because this file is the only one both can import.
+ */
+export const matchesSessionId = (
+  sessionId: string,
+  wordLower: string,
+): boolean =>
+  wordLower.length >= 4 &&
+  /^[0-9a-f-]+$/.test(wordLower) &&
+  sessionId.toLowerCase().startsWith(wordLower);
 
 /** `Title (full-id)` on one line — what to hand another session or a person. */
 export const formatReference = (title: string, sessionId: string): string => {

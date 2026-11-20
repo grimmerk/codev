@@ -162,17 +162,19 @@ The **default account** can be launched three equivalent ways: bare `claude`, `c
 | `codev account sync-settings <name> <key...>` | Copy settings keys from the anchor (`statusLine`, `model`, `effortLevel`, `theme`) |
 | `codev account share-memory <name> on\|off` | Point that account's auto-memory at the anchor's, per project (see **Shared auto-memory** below) |
 
-**`codev session` CLI** — find, describe, read and resume sessions from a terminal, across **every** account (`claude -r` sees one). Output is **JSON** on stdout, for scripts and agents; add `--pretty` for a readable form. Errors go to stderr with a non-zero exit status.
+**`codev session` CLI** — find, describe, read and resume sessions from a terminal, across **every** account (`claude -r` sees one). `list`, `show`, `view` and `self` print **JSON** on stdout, for scripts and agents; add `--pretty` for a readable form. `resume` is the exception: it prints no JSON — the `codev` shell function runs the resume command it produces — and takes no `--pretty`. Errors go to stderr with a non-zero exit status, and an option a command does not have is an error rather than ignored.
 
 | Command | What it does |
 | --- | --- |
-| `codev session list [--path <dir>] [--account <name>] [--all \| --limit N]` | Sessions, newest first (30 by default). `--path .` = sessions whose project is this directory |
+| `codev session list [--path <dir>] [--account <name>] [--all \| --limit N]` | Sessions, newest first. Without `--path`: the newest 30, unless `--all` or `--limit N`. With `--path`: **every** session of that directory, unless `--limit N`. `--path .` = sessions whose project is this directory |
 | `codev session show <title \| id>` | Title, full id, account, project path, transcript path and resume command of **every** matching session |
 | `codev session view <title \| id> [--last N]` | The last N things the user and the assistant said (default 10; text only — no tool calls, tool results or thinking) |
 | `codev session self` | The session this command is being run from — for use inside a Claude Code session |
 | `codev session resume <title \| id>` | Resume it in the current terminal, under its own account — whatever your default-terminal setting is |
 
-`<title | id>` is a full session id, the start of one, or a session title (its `/rename` name; part of a title works when nothing matches outright). **Titles are not unique** — `/branch` copies share theirs — so `show` lists every match, while `view` and `resume` list the candidates and exit non-zero instead of picking one.
+`<title | id>` is a full session id, the first **four or more** characters of one (the same rule as the Sessions tab's search), or a session title — its `/rename` name, or the title Claude Code generated for a session that was never renamed (`titleKind` in the output says which: `custom` or `ai`). A title is matched whole, ignoring case; part of a title works when nothing matches outright. **Titles are not unique** — `/branch` copies share theirs — so `show` lists every match, while `view` and `resume` list the candidates and exit non-zero instead of picking one.
+
+**Which sessions it sees.** `list`, `show`, `view` and `resume` read each account's `history.jsonl`, so a session that has never been given a prompt (a fresh `/branch` copy) or that was started from VS Code or Claude Desktop is not there — the Sessions tab shows those, the CLI does not yet. `self` does not depend on history: it identifies the running session from the registration its process keeps (`sessions/<pid>.json`), so it works for those too.
 
 > **Add is just a mapping.** `add <name>` registers *name → config folder* (default `~/.claude-<name>` — that folder **is** the account's `CLAUDE_CONFIG_DIR`). Claude Code itself creates and fills the folder on first login (`claude <name>`). One folder = one account: registering an already-registered folder under a second name is rejected.
 >

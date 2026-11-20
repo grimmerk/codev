@@ -4,9 +4,9 @@
  *
  * ONE implementation, two consumers: CodeV's main process (the Sessions tab's
  * copy menu and detail view) and the `codev session` CLI. It lives under
- * `src/cli/` and imports nothing from Electron (only fs / os / path and its
- * sibling `memory-dir`), because the CLI is compiled on
- * its own with `tsc` and run through the app binary as plain Node.
+ * `src/cli/` and imports nothing from Electron (only fs, path and its
+ * siblings `memory-dir` and `session-identity-fields`), because the CLI is
+ * compiled on its own with `tsc` and run through the app binary as plain Node.
  *
  * Where a transcript lives — measured 2026-11-20 on a two-account machine
  * (363 transcripts), NOT inherited from the memory rule in `memory-dir.ts`:
@@ -35,6 +35,7 @@ import * as path from 'path';
 import { memorySettingsArg } from './memory-dir';
 import {
   formatReference,
+  matchesSessionId,
   SessionIdentity,
   TitleKind,
 } from './session-identity-fields';
@@ -218,15 +219,69 @@ export interface TranscriptLocation {
 }
 
 /**
+ * Which slug directories of an account hold a given session's transcript —
+ * read once per account (one `readdir` per slug directory) and then answered
+ * from memory. The fallback below needs it for EVERY session that is not
+ * under its own slug, and most of those have no transcript at all (552 of 832
+ * history sessions on the reference machine), so asking the disk per session
+ * would be hundreds of directory walks that all come back empty.
+ */
+export interface TranscriptIndex {
+  slugsFor: (accountDir: string, sessionId: string) => string[];
+}
+
+export const createTranscriptIndex = (): TranscriptIndex => {
+  const byAccount = new Map<string, Map<string, string[]>>();
+  const read = (accountDir: string): Map<string, string[]> => {
+    const ids = new Map<string, string[]>();
+    const projects = path.join(accountDir, 'projects');
+    let slugs: string[] = [];
+    try {
+      slugs = fs.readdirSync(projects);
+    } catch {
+      // No projects/ under this account: nothing to index.
+    }
+    for (const slug of slugs) {
+      let files: string[];
+      try {
+        files = fs.readdirSync(path.join(projects, slug));
+      } catch {
+        continue; // not a directory
+      }
+      for (const f of files) {
+        if (!f.endsWith('.jsonl')) continue;
+        const id = f.slice(0, -'.jsonl'.length);
+        const at = ids.get(id);
+        if (at) at.push(slug);
+        else ids.set(id, [slug]);
+      }
+    }
+    return ids;
+  };
+  return {
+    slugsFor: (accountDir, sessionId) => {
+      let ids = byAccount.get(accountDir);
+      if (!ids) {
+        ids = read(accountDir);
+        byAccount.set(accountDir, ids);
+      }
+      return ids.get(sessionId) ?? [];
+    },
+  };
+};
+
+/**
  * Find `<sessionId>.jsonl`. `accountDirs` is tried in order, so put the
  * account the session is known by first. With `scanAllSlugs`, a miss on the
- * project's own slugs falls back to every directory under `projects/`.
+ * project's own slugs falls back to every directory under `projects/` — pass
+ * a `TranscriptIndex` there instead of `true` when locating many sessions, so
+ * the directories are read once.
  */
 export const locateTranscript = (
   accountDirs: string[],
   project: string,
   sessionId: string,
-  opts: { scanAllSlugs?: boolean } = {},
+  opts: { scanAllSlugs?: boolean | TranscriptIndex } = {},
 ): TranscriptLocation | null => {
   if (!isSessionId(sessionId)) return null;
   const file = `${sessionId}.jsonl`;
@@ -241,19 +296,16 @@ export const locateTranscript = (
     }
   }
   if (!opts.scanAllSlugs) return null;
+  const index =
+    opts.scanAllSlugs === true ? createTranscriptIndex() : opts.scanAllSlugs;
   for (const accountDir of dirs) {
-    let entries: string[];
-    try {
-      entries = fs.readdirSync(path.join(accountDir, 'projects'));
-    } catch {
-      continue;
-    }
-    for (const slug of entries) {
+    for (const slug of index.slugsFor(accountDir, sessionId)) {
       if (slugs.includes(slug)) continue;
-      const p = path.join(accountDir, 'projects', slug, file);
-      if (fs.existsSync(p)) {
-        return { path: p, accountDir, outsideProjectSlug: true };
-      }
+      return {
+        path: path.join(accountDir, 'projects', slug, file),
+        accountDir,
+        outsideProjectSlug: true,
+      };
     }
   }
   return null;
@@ -422,8 +474,10 @@ export const isFullSessionId = (q: string): boolean =>
  *
  * - a full id matches that one session and nothing else;
  * - otherwise the result is the UNION of sessions whose id starts with the
- *   query (when it is hex-shaped) and sessions whose title equals it,
- *   ignoring case — a title can look like hex, so neither reading is dropped;
+ *   query (`matchesSessionId`: four or more hex characters, the same rule as
+ *   the Sessions tab's search — `1` is not an id prefix) and sessions whose
+ *   title equals it, ignoring case — a title can look like hex, so neither
+ *   reading is dropped;
  * - only when both are empty does a title that merely CONTAINS the query
  *   count, so typing part of a name still finds it.
  *
@@ -439,11 +493,9 @@ export const matchSessions = <T extends Matchable>(
   if (isFullSessionId(q)) {
     return sessions.filter((s) => s.sessionId.toLowerCase() === q);
   }
-  const hexShaped = /^[0-9a-f-]+$/.test(q);
   const strong = sessions.filter(
     (s) =>
-      (hexShaped && s.sessionId.toLowerCase().startsWith(q)) ||
-      s.title.trim().toLowerCase() === q,
+      matchesSessionId(s.sessionId, q) || s.title.trim().toLowerCase() === q,
   );
   if (strong.length > 0) return strong;
   return sessions.filter((s) => s.title.toLowerCase().includes(q));
@@ -540,8 +592,13 @@ export interface IdentityInput {
   accountDirs: string[];
   /** Title already known, or a reader given the transcript path. */
   title: SessionTitle | ((transcriptPath: string) => SessionTitle);
-  /** Used when the transcript carries no title (or is gone). */
+  /**
+   * Used when the transcript carries no title (or is gone). Reported with
+   * kind `unknown`: whoever captured it may have captured a generated title.
+   */
   fallbackTitle?: string;
+  /** Reuse one index when resolving many sessions. */
+  transcriptIndex?: TranscriptIndex;
   /** The inner resume command; defaults to `formatResumeCommand`. */
   resumeCommand?: string;
   anchorDir: string;
@@ -551,7 +608,7 @@ export interface IdentityInput {
 export const resolveSessionIdentity = (input: IdentityInput): SessionIdentity => {
   const { sessionId, project, account } = input;
   const found = locateTranscript(input.accountDirs, project, sessionId, {
-    scanAllSlugs: true,
+    scanAllSlugs: input.transcriptIndex ?? true,
   });
   let title =
     typeof input.title === 'function'
@@ -560,8 +617,9 @@ export const resolveSessionIdentity = (input: IdentityInput): SessionIdentity =>
         : NO_TITLE
       : input.title;
   if (title.kind === 'none' && input.fallbackTitle?.trim()) {
-    // A saved list captured it; where it came from is no longer knowable.
-    title = { title: input.fallbackTitle.trim(), kind: 'custom' };
+    // The row or a saved list captured it; whether it was a /rename name or
+    // a generated title is no longer knowable, so it is not called either.
+    title = { title: input.fallbackTitle.trim(), kind: 'unknown' };
   }
   const inner = !isSessionId(sessionId)
     ? ''

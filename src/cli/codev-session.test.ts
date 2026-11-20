@@ -124,8 +124,11 @@ describe('codev session resume', () => {
     // stdout is what the shell function evals — it must stay empty.
     expect(r.out).toEqual([]);
     expect(r.stderr).toContain('2 sessions match');
-    expect(r.stderr).toContain(ID_A.slice(0, 8));
-    expect(r.stderr).toContain(ID_B.slice(0, 8));
+    // The two ids share their first eight characters, so the listing has to
+    // show them in full — "name one by id" is no help otherwise.
+    expect(ID_A.slice(0, 8)).toBe(ID_B.slice(0, 8));
+    expect(r.stderr).toContain(ID_A);
+    expect(r.stderr).toContain(ID_B);
     // The id that disambiguates is accepted.
     expect(run('resume', ID_B).out).toEqual([
       `cd '${app}' && CLAUDE_CONFIG_DIR='${work.dir}' command claude --resume ${ID_B}`,
@@ -150,6 +153,19 @@ describe('codev session resume', () => {
     const moved = run('resume', ID_C);
     expect([moved.code, moved.out]).toEqual([1, []]);
     expect(moved.stderr).toContain('no longer exists');
+  });
+
+  it('takes no --pretty and no unknown option: nothing reaches stdout', () => {
+    for (const args of [
+      ['resume', ID_C, '--pretty'],
+      ['resume', ID_C, '--frce'],
+      ['resume', '--last', '3', ID_C],
+    ]) {
+      const r = run(...args);
+      expect([r.code, r.out]).toEqual([2, []]);
+      expect(r.stderr).toContain('unknown option');
+      expect(r.stderr).toContain('Usage:');
+    }
   });
 
   it('keeps even its help off stdout', () => {
@@ -333,6 +349,61 @@ describe('codev session self', () => {
   it('fails outside a session', () => {
     const r = run('self');
     expect([r.code, r.out]).toEqual([1, []]);
+  });
+});
+
+describe('options', () => {
+  it('rejects an option the command does not have instead of ignoring it', () => {
+    // A typo must not run as if the option had not been given.
+    const typo = run('list', '--limt', '1');
+    expect([typo.code, typo.out]).toEqual([2, []]);
+    const e = JSON.parse(typo.stderr);
+    expect(e.error).toContain('unknown option --limt');
+    expect(e.usage).toContain('codev session list');
+    // Another command's option is unknown here too.
+    expect(run('show', ID_A, '--last', '2').code).toBe(2);
+    expect(run('view', ID_A, '--all').code).toBe(2);
+    expect(run('self', '--path', '.').code).toBe(2);
+    expect(run('list', '--all=yes').code).toBe(2);
+    // …and so is an argument a command has no use for.
+    expect(run('self', 'extra').code).toBe(2);
+    expect(run('list', 'extra').code).toBe(2);
+    // `--` ends the options: a title may start with dashes.
+    expect(run('show', '--', '--no-such-title').code).toBe(1);
+  });
+
+  it('accepts each command’s own options', () => {
+    expect(run('list', '--path', '.', '--account', 'main', '--limit', '5', '--pretty').code).toBe(0);
+    expect(run('list', '--all', '--limit=2').code).toBe(0);
+    expect(run('show', ID_A, '--pretty').code).toBe(0);
+    expect(run('view', ID_A, '--last=1', '--pretty').code).toBe(0);
+  });
+});
+
+describe('a transcript that is not under its project’s own directory', () => {
+  it('is still found — title included — through the one shared index', () => {
+    // History says the session belongs to `api`; its file sits under another
+    // slug (the project path was renamed since, say).
+    const id = '6666bbbb-0000-4000-8000-000000000006';
+    const other = path.join(tmp, 'git', 'renamed-since');
+    addSession(work, id, other, { title: 'moved house', at: 6000 });
+    const historyFile = path.join(work.dir, 'history.jsonl');
+    fs.writeFileSync(
+      historyFile,
+      fs.readFileSync(historyFile, 'utf-8').split(other).join(api),
+    );
+    const listed = JSON.parse(run('list').stdout).sessions.find(
+      (s: { sessionId: string }) => s.sessionId === id,
+    );
+    expect(listed).toMatchObject({ title: 'moved house', projectPath: api });
+    expect(listed.transcriptPath).toContain(transcriptSlug(other));
+    // Findable by its title, and flagged for what it is.
+    const shown = JSON.parse(run('show', 'moved house').stdout).sessions;
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toMatchObject({
+      sessionId: id,
+      transcriptOutsideProjectSlug: true,
+    });
   });
 });
 

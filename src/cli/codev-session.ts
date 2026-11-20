@@ -7,8 +7,8 @@
  * e.g.        yarn session list --path .
  *             yarn session show "billing fix" --pretty
  *
- * Output is JSON on stdout unless `--pretty` asks for the human-readable form:
- * the main caller is another agent. Errors go to stderr (one JSON object, or
+ * Output is JSON on stdout unless `--pretty` asks for the human-readable form
+ * (`resume` excepted — see below): the main caller is another agent. Errors go to stderr (one JSON object, or
  * plain text with `--pretty`) with a non-zero status, so stdout is always
  * either a complete answer or empty.
  *
@@ -37,6 +37,7 @@ import {
 } from './session-self';
 import { readLastMessages } from './session-transcript';
 import {
+  createTranscriptIndex,
   HistorySession,
   IdentityAccount,
   isFullSessionId,
@@ -47,6 +48,7 @@ import {
   readTranscriptTitles,
   resolveSessionIdentity,
   scanHistories,
+  TranscriptIndex,
   SessionIdentity,
   SessionTitle,
 } from './session-identity';
@@ -55,8 +57,9 @@ export const USAGE = `codev session — find, describe, read and resume Claude C
 
 Usage:
   codev session list [--path <dir>] [--account <label>] [--all | --limit N]
-                                     Sessions, newest first (30 unless --all /
-                                     --limit; every one with --path).
+                                     Sessions, newest first. Without --path: the
+                                     newest 30, unless --all or --limit N. With
+                                     --path: every one, unless --limit N.
                                      --path . = sessions whose project is this directory
   codev session show <title | id>    Title, full id, account, project path, transcript
                                      path and resume command of EVERY matching session
@@ -68,14 +71,22 @@ Usage:
   codev session resume <title | id>  Resume it in this terminal, under its own account
   codev session help                 Show this help
 
-Output: JSON on stdout; add --pretty for the human-readable form. Errors go to
-stderr with a non-zero status. (resume prints no JSON: it runs the session.)
+Output: list, show, view and self print JSON on stdout; add --pretty for the
+human-readable form. Errors go to stderr with a non-zero status. resume is the
+exception: it prints no JSON, only the shell command that the codev() shell
+function then runs — so it takes no --pretty.
 
 <title | id>:
-  a full session id, the start of one, or a session title (its /rename name).
-  Titles are matched whole, ignoring case; part of a title works when nothing
-  matches outright. Titles are not unique — /branch copies share theirs — so
-  show lists every match, while view and resume refuse to pick one.
+  a full session id, the first four or more characters of one, or a session
+  title — its /rename name, or the title Claude Code generated when it was
+  never renamed. Titles are matched whole, ignoring case; part of a title works
+  when nothing matches outright. Titles are not unique — /branch copies share
+  theirs — so show lists every match, while view and resume refuse to pick one.
+
+Which sessions: list, show, view and resume know the sessions in each account's
+history.jsonl — one that has never been given a prompt (a fresh /branch copy)
+or that was started from VS Code or Claude Desktop is not there. self does not
+depend on history: it reads the running process's own registration.
 
 Exit status: 0 found · 1 nothing matched or not available · 2 ambiguous or bad usage`;
 
@@ -97,6 +108,7 @@ export interface CliDeps extends CliIo {
 interface CliSession extends HistorySession {
   title: string;
   titleKind: SessionTitle['kind'];
+  /** Under the project's own slug, or — failing that — wherever the id's file is. */
   transcriptPath: string | null;
 }
 
@@ -122,9 +134,12 @@ const localTime = (ms: number): string => {
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
 };
 
+/** One line, at most `max` characters — counted and cut by code point, so an emoji is never halved. */
 const clip = (s: string, max: number): string => {
-  const one = s.replace(/\s+/g, ' ').trim();
-  return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
+  const points = Array.from(s.replace(/\s+/g, ' ').trim());
+  return points.length <= max
+    ? points.join('')
+    : `${points.slice(0, max - 1).join('')}…`;
 };
 
 /** Accounts from CodeV's registry; a machine with no registry has the one `~/.claude`. */
@@ -154,10 +169,34 @@ const registryAnchorDir = (): string =>
   registryAccounts().find((a) => a.isAnchor)?.dir ??
   path.join(os.homedir(), '.claude');
 
-/** Split argv into flags (with their values) and positionals. */
+/** What each command accepts. `--pretty` and `--help` are added below. */
+const COMMANDS: Record<
+  string,
+  { value: string[]; bool: string[]; positional: boolean; pretty: boolean }
+> = {
+  list: {
+    value: ['--path', '--account', '--limit'],
+    bool: ['--all'],
+    positional: false,
+    pretty: true,
+  },
+  show: { value: [], bool: [], positional: true, pretty: true },
+  view: { value: ['--last'], bool: [], positional: true, pretty: true },
+  self: { value: [], bool: [], positional: false, pretty: true },
+  // No --pretty: resume's stdout is a shell command, never JSON.
+  resume: { value: [], bool: [], positional: true, pretty: false },
+};
+COMMANDS.ls = COMMANDS.list;
+
+/**
+ * Split argv into flags (with their values) and positionals. An option the
+ * command does not have is an error, not something to skip: a mistyped
+ * `--limt 5` would otherwise run as if it had not been given.
+ */
 const parseArgs = (
   args: string[],
   valueFlags: string[],
+  boolFlags: string[],
 ): { flags: Map<string, string | true>; positional: string[] } => {
   const flags = new Map<string, string | true>();
   const positional: string[] = [];
@@ -174,8 +213,11 @@ const parseArgs = (
         const value = eq > 0 ? a.slice(eq + 1) : args[++i];
         if (value === undefined) throw new Error(`${name} needs a value`);
         flags.set(name, value);
-      } else {
+      } else if (boolFlags.includes(name)) {
+        if (eq > 0) throw new Error(`${name} takes no value`);
         flags.set(name, true);
+      } else {
+        throw new Error(`unknown option ${name}`);
       }
     } else if (a === '-h') {
       flags.set('--help', true);
@@ -193,12 +235,13 @@ const accountDirsFor = (
 
 /**
  * Every session in every account's history, newest first, with its transcript
- * located — and no title yet: reading titles is the one slow step (a grep
- * over each transcript), so `attachTitles` is called on as few as will do.
+ * located — and no title yet: reading titles opens every transcript, so
+ * `attachTitles` is called on as few as will do.
  */
 const loadSessions = (
   accounts: IdentityAccount[],
   err: (line: string) => void,
+  index: TranscriptIndex,
 ): CliSession[] => {
   const scan = scanHistories(accounts, (label, e) =>
     err(`codev session: could not read the history of "${label}": ${(e as Error).message}`),
@@ -210,8 +253,12 @@ const loadSessions = (
       title: '',
       titleKind: 'none' as const,
       transcriptPath:
-        locateTranscript(accountDirsFor(s, accounts), s.project, s.sessionId)
-          ?.path ?? null,
+        // The project's own slug first; failing that, wherever a file with
+        // this id is — through the shared index, so the directories are read
+        // once and not once per session without a transcript.
+        locateTranscript(accountDirsFor(s, accounts), s.project, s.sessionId, {
+          scanAllSlugs: index,
+        })?.path ?? null,
     }));
 };
 
@@ -231,15 +278,17 @@ const identityOf = (
   s: CliSession,
   accounts: IdentityAccount[],
   anchorDir: string,
+  index: TranscriptIndex,
 ): SessionIdentity =>
   resolveSessionIdentity({
+    transcriptIndex: index,
     sessionId: s.sessionId,
     project: s.project,
     account: accounts.find((a) => a.label === s.accountLabel),
     accountLabel: s.accountLabel,
     accountDirs: accountDirsFor(s, accounts),
-    // Already read for matching; a transcript found only by the fallback
-    // search has not been, so that one is read here.
+    // Normally already read for matching; `self` can name a session that
+    // history does not have, and that one is read here.
     title: (file) =>
       file === s.transcriptPath
         ? { title: s.title, kind: s.titleKind }
@@ -252,7 +301,9 @@ const describeTitle = (id: SessionIdentity): string =>
     ? '(none)'
     : id.titleKind === 'ai'
       ? `${id.title}   (auto-generated — not a /rename name)`
-      : id.title;
+      : id.titleKind === 'unknown'
+        ? `${id.title}   (captured earlier — may be auto-generated)`
+        : id.title;
 
 const printIdentity = (
   id: SessionIdentity,
@@ -280,14 +331,14 @@ const printIdentity = (
   );
 };
 
-const listRow = (s: CliSession, accountPad: number): string => {
+const listRow = (s: CliSession, accountPad: number, fullId: boolean): string => {
   const what = s.title
     ? s.title
     : s.firstDisplay
       ? `“${clip(s.firstDisplay, 50)}”`
       : '';
   return [
-    s.sessionId.slice(0, 8),
+    fullId ? s.sessionId : s.sessionId.slice(0, 8),
     s.accountLabel.padEnd(accountPad),
     localTime(s.lastTimestamp),
     s.transcriptPath ? ' ' : '✗',
@@ -296,12 +347,28 @@ const listRow = (s: CliSession, accountPad: number): string => {
   ].join('  ');
 };
 
-const printRows = (rows: CliSession[], line: (l: string) => void): void => {
+/**
+ * `fullId` for a list of candidates to choose from: the first eight characters
+ * are a convenience in a browse list, but two candidates can share them, and
+ * then "name one by id" must show ids that differ.
+ */
+const printRows = (
+  rows: CliSession[],
+  line: (l: string) => void,
+  fullId = false,
+): void => {
   const pad = Math.max(7, ...rows.map((s) => s.accountLabel.length));
   line(
-    ['ID      ', 'ACCOUNT'.padEnd(pad), 'LAST ACTIVE     ', ' ', 'PROJECT'.padEnd(44), 'TITLE / “FIRST PROMPT”'].join('  '),
+    [
+      'ID'.padEnd(fullId ? 36 : 8),
+      'ACCOUNT'.padEnd(pad),
+      'LAST ACTIVE     ',
+      ' ',
+      'PROJECT'.padEnd(44),
+      'TITLE / “FIRST PROMPT”',
+    ].join('  '),
   );
-  for (const s of rows) line(listRow(s, pad));
+  for (const s of rows) line(listRow(s, pad, fullId));
 };
 
 const isoOrNull = (ms: number): string | null =>
@@ -328,22 +395,32 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
   if (args[0] === 'session') args.shift();
   const [cmd, ...rest] = args;
   const { out, err } = deps;
+  const spec = cmd === undefined ? undefined : COMMANDS[cmd];
   // `resume` never speaks JSON: its stdout is a shell command.
   const pretty = rest.includes('--pretty') || cmd === 'resume';
+  // One index for the whole run: every lookup below shares it.
+  const index = createTranscriptIndex();
   const emit = (value: unknown, text: () => void): void => {
     if (pretty) text();
     else out(JSON.stringify(value));
   };
   /** Report a failure on stderr — never on stdout — and return `code`. */
-  const fail = (code: number, message: string, matches?: CliSession[]): number => {
+  const fail = (
+    code: number,
+    message: string,
+    more: { matches?: CliSession[]; usage?: boolean } = {},
+  ): number => {
+    const { matches, usage } = more;
     if (pretty) {
       err(message);
-      if (matches?.length) printRows(matches, err);
+      if (matches?.length) printRows(matches, err, true);
+      if (usage) err(`\n${USAGE}`);
     } else {
       err(
         JSON.stringify({
           error: message,
           ...(matches?.length ? { matches: matches.map(summaryOf) } : {}),
+          ...(usage ? { usage: USAGE } : {}),
         }),
       );
     }
@@ -362,7 +439,7 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
   const find = (query: string, accounts: IdentityAccount[]): CliSession[] => {
     // A full id cannot be a title match, so only that one transcript is
     // read; anything else needs every title.
-    const sessions = loadSessions(accounts, warn);
+    const sessions = loadSessions(accounts, warn, index);
     attachTitles(
       isFullSessionId(query)
         ? sessions.filter(
@@ -373,33 +450,38 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
     return matchSessions(query, sessions);
   };
 
+  if (cmd === 'help' || cmd === '--help' || cmd === '-h' || cmd === undefined) {
+    out(USAGE);
+    return 0;
+  }
+  if (!spec) {
+    return fail(2, `Unknown command: ${cmd}`, { usage: true });
+  }
   let flags: Map<string, string | true>;
   let positional: string[];
   try {
-    ({ flags, positional } = parseArgs(rest, [
-      '--path',
-      '--account',
-      '--limit',
-      '--last',
+    ({ flags, positional } = parseArgs(rest, spec.value, [
+      ...spec.bool,
+      '--help',
+      ...(spec.pretty ? ['--pretty'] : []),
     ]));
   } catch (e) {
-    return fail(2, `${cmd}: ${(e as Error).message}`);
+    return fail(2, `${cmd}: ${(e as Error).message}`, { usage: true });
   }
-  if (flags.has('--help') || cmd === 'help' || cmd === undefined) {
+  if (flags.has('--help')) {
     // `resume` keeps stdout for the command alone — help included.
     (cmd === 'resume' ? err : out)(USAGE);
     return 0;
+  }
+  if (!spec.positional && positional.length > 0) {
+    return fail(2, `${cmd}: unexpected argument "${positional[0]}"`, {
+      usage: true,
+    });
   }
 
   switch (cmd) {
     case 'list':
     case 'ls': {
-      if (positional.length > 0) {
-        return fail(
-          2,
-          `list: unexpected argument "${positional[0]}" (did you mean --path?)`,
-        );
-      }
       const accounts = deps.accounts();
       const wantPath = flags.get('--path');
       const wantAccount = flags.get('--account');
@@ -432,7 +514,7 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
         }
         return r === target;
       };
-      const all = loadSessions(accounts, warn).filter(
+      const all = loadSessions(accounts, warn, index).filter(
         (s) =>
           (target === null || sameDir(s.project)) &&
           (typeof wantAccount !== 'string' || s.accountLabel === wantAccount),
@@ -482,7 +564,7 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
       }
 
       if (cmd === 'show') {
-        const ids = matches.map((s) => identityOf(s, accounts, deps.anchorDir()));
+        const ids = matches.map((s) => identityOf(s, accounts, deps.anchorDir(), index));
         emit(
           {
             sessions: ids.map((id, i) => ({
@@ -511,11 +593,11 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
         return fail(
           2,
           `${matches.length} sessions match "${query}" — not guessing. Name one by id:`,
-          matches,
+          { matches },
         );
       }
       const s = picked.session;
-      const id = identityOf(s, accounts, deps.anchorDir());
+      const id = identityOf(s, accounts, deps.anchorDir(), index);
       if (!id.transcriptPath) {
         return fail(
           1,
@@ -590,7 +672,7 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
       const reg = found.registration;
       // History knows the directory the session STARTED in, which is where its
       // transcript is filed; the registration's cwd follows the session around.
-      const known = loadSessions(accounts, warn).find(
+      const known = loadSessions(accounts, warn, index).find(
         (s) => s.sessionId === reg.sessionId,
       );
       const session: CliSession = known ?? {
@@ -616,7 +698,7 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
       session.accountLabel = reg.accountLabel;
       session.accountDir = reg.accountDir;
       attachTitles([session]);
-      const id = identityOf(session, accounts, deps.anchorDir());
+      const id = identityOf(session, accounts, deps.anchorDir(), index);
       emit(
         {
           ...id,
@@ -643,7 +725,8 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
     }
 
     default:
-      return fail(2, `Unknown command: ${cmd} (see: codev session help)`);
+      // Unreachable: every key of COMMANDS has a case above.
+      return fail(2, `Unknown command: ${cmd}`, { usage: true });
   }
 };
 

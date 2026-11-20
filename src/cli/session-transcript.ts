@@ -108,34 +108,32 @@ export const readLastMessages = (
   const fd = fs.openSync(file, 'r');
   try {
     let end = fs.fstatSync(fd).size;
-    // The start of a line whose beginning lies before what has been read.
-    let pending: Buffer = Buffer.alloc(0);
+    // The tail of a line whose beginning lies before what has been read, as
+    // the chunks it spans (in file order). They are joined ONCE, when the
+    // line's start is finally found: joining on every chunk would copy a
+    // 200 MB line two hundred times.
+    let pending: Buffer[] = [];
+    const cast = (parts: Buffer[]) => parts as unknown as Uint8Array[];
     while (end > 0 && out.length < n) {
       const start = Math.max(0, end - chunkBytes);
       const chunk = Buffer.alloc(end - start);
       // Casts: this repo's @types/node and TS lib disagree on Buffer vs Uint8Array.
       fs.readSync(fd, chunk as unknown as Uint8Array, 0, chunk.length, start);
-      const buf = Buffer.concat([chunk, pending] as unknown as Uint8Array[]);
-      let from = 0;
-      if (start > 0) {
-        const nl = buf.indexOf(10);
-        if (nl < 0) {
-          // No line boundary yet: the whole buffer is part of one line.
-          pending = buf;
-          end = start;
-          continue;
-        }
-        pending = buf.subarray(0, nl);
-        from = nl + 1;
-      } else {
-        pending = Buffer.alloc(0);
+      end = start;
+      // `pending` never contains a newline, so the first one — if any — is in
+      // this chunk. Before it: the rest of a line that began even earlier.
+      const nl = start > 0 ? chunk.indexOf(10) : -1;
+      if (start > 0 && nl < 0) {
+        pending.unshift(chunk); // still the same line
+        continue;
       }
-      const lines = buf.toString('utf-8', from).split('\n');
+      const whole = Buffer.concat(cast([chunk.subarray(nl + 1), ...pending]));
+      pending = start > 0 ? [chunk.subarray(0, nl)] : [];
+      const lines = whole.toString('utf-8').split('\n');
       for (let i = lines.length - 1; i >= 0 && out.length < n; i--) {
         const m = messageFromLine(lines[i]);
         if (m) out.unshift(m);
       }
-      end = start;
     }
     return out;
   } finally {

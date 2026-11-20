@@ -49,7 +49,7 @@ export interface Registration {
 }
 
 /** How a registration was tied to the ancestor process. */
-export type SelfProof = 'process-start' | 'environment' | 'command-name';
+export type SelfProof = 'process-start' | 'environment';
 
 export type SelfResult =
   | {
@@ -63,11 +63,6 @@ export type SelfResult =
 
 const squash = (s: string): string => s.replace(/\s+/g, ' ').trim();
 
-const looksLikeClaude = (command: string): boolean => {
-  const base = path.basename(command);
-  return base === 'claude' || base.startsWith('claude-');
-};
-
 /** Why this registration may be trusted for this process, or null. Pure. */
 export const proofFor = (
   reg: Registration,
@@ -80,8 +75,11 @@ export const proofFor = (
       ? 'process-start'
       : null;
   }
+  // An older registration has no start time. The process being called
+  // `claude` proves nothing — a leftover file of an earlier process whose pid
+  // a NEW claude now holds would pass that test and name the wrong session.
+  // Only the environment naming the same session ties it to this process.
   if (envSessionId && reg.sessionId === envSessionId) return 'environment';
-  if (looksLikeClaude(proc.command)) return 'command-name';
   return null;
 };
 

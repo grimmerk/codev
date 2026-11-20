@@ -5,7 +5,11 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
-import { identityTargetOf, useSessionIdentityUi } from './session-identity-ui';
+import {
+  identityTargetOf,
+  sessionRowKey,
+  useSessionIdentityUi,
+} from './session-identity-ui';
 import type { LiveRowInfo } from './session-list-view';
 import type { SessionList, SessionListMember } from './session-lists';
 import {
@@ -3369,7 +3373,7 @@ function SwitcherApp() {
                 // A synthetic live row is keyed by pid: two processes can
                 // share one sessionId (a resumed copy, a /branch parent and
                 // child), and duplicate keys leave stale rows on screen.
-                <Fragment key={`${session.__pinnedRow ? 'pin:' : ''}${session.__live ? `live:${session.__live.pid}:` : ''}${session.sessionId}`}>
+                <Fragment key={sessionRowKey(session)}>
                 {visiblePinnedRows.length > 0 && index === visiblePinnedRows.length && (
                   <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 2px 3px' }} />
                 )}

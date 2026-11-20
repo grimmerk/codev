@@ -34,9 +34,19 @@ export interface IdentityTarget {
   accountLabel?: string;
   /** The title the row shows (a saved list may have captured it). */
   fallbackTitle?: string;
-  /** Distinguishes a pinned copy of a row from the row itself. */
+  /** The rendered row, not the session: see `sessionRowKey`. */
   rowKey: string;
 }
+
+/**
+ * What makes a RENDERED Sessions row unique. One session id can be on screen
+ * more than once — a pinned copy and the row itself, or several running
+ * processes with the same id (a resumed copy, a /branch parent and child) —
+ * so the id alone is not a key. The list's React key and the inline details
+ * panel both use this, so they cannot disagree about which row is which.
+ */
+export const sessionRowKey = (session: any): string =>
+  `${session.__pinnedRow ? 'pin:' : ''}${session.__live ? `live:${session.__live.pid}:` : ''}${session.sessionId}`;
 
 /** Build the target from a Sessions-tab row; null for a row with no session id. */
 export const identityTargetOf = (
@@ -49,7 +59,7 @@ export const identityTargetOf = (
     project: session.project || '',
     accountLabel: session.accountLabel ?? session.__listMember?.accountLabel,
     fallbackTitle: titles[session.sessionId] || session.__listMember?.title,
-    rowKey: `${session.__pinnedRow ? 'pin:' : ''}${session.sessionId}`,
+    rowKey: sessionRowKey(session),
   };
 };
 
@@ -85,7 +95,9 @@ const detailRows = (identity: SessionIdentity): DetailRow[] => {
     note:
       key === 'title' && identity.titleKind === 'ai'
         ? 'auto-generated — not a /rename name'
-        : key === 'transcriptPath' && identity.transcriptOutsideProjectSlug
+        : key === 'title' && identity.titleKind === 'unknown'
+          ? 'captured earlier — may be auto-generated'
+          : key === 'transcriptPath' && identity.transcriptOutsideProjectSlug
           ? "not under this project's own directory"
           : undefined,
   }));
@@ -102,10 +114,11 @@ const detailRows = (identity: SessionIdentity): DetailRow[] => {
 const SessionDetail: FC<{
   identity: SessionIdentity;
   onCopy: (label: string, value: string) => void;
-  /** Keyboard-highlighted row (the overlay drives this; inline leaves it unset). */
+  /** Highlighted row (the overlay drives this; inline leaves it unset). */
   activeIndex?: number;
-  onHoverIndex?: (i: number) => void;
-}> = ({ identity, onCopy, activeIndex, onHoverIndex }) => {
+  /** A row was hovered or took keyboard focus. */
+  onActiveIndex?: (i: number) => void;
+}> = ({ identity, onCopy, activeIndex, onActiveIndex }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -113,22 +126,38 @@ const SessionDetail: FC<{
     <div>
       {detailRows(identity).map((row, i) => {
         const empty = !row.value;
+        const activate = () => {
+          if (empty) return;
+          onCopy(row.label, row.value);
+          setCopiedKey(row.key);
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopiedKey(null), 1200);
+        };
         return (
           <div
             key={row.key}
             role="button"
             aria-disabled={empty}
+            // A real focus target, so the button role is honest: Enter and
+            // Space copy. A row with nothing to copy is skipped.
+            tabIndex={empty ? -1 : 0}
+            data-detail-row={i}
+            onFocus={() => onActiveIndex?.(i)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                activate();
+              }
+            }}
             data-tip={empty ? undefined : `Click to copy the ${row.label.toLowerCase()}`}
-            // Keep focus where it is (the search box, or the overlay).
+            // A click copies without moving focus: inline, it stays in the
+            // search box; in the overlay, on the row the keyboard is on.
             onMouseDown={(e) => e.preventDefault()}
-            onMouseEnter={() => onHoverIndex?.(i)}
+            onMouseEnter={() => onActiveIndex?.(i)}
             onClick={(e) => {
               e.stopPropagation();
-              if (empty) return;
-              onCopy(row.label, row.value);
-              setCopiedKey(row.key);
-              if (timer.current) clearTimeout(timer.current);
-              timer.current = setTimeout(() => setCopiedKey(null), 1200);
+              activate();
             }}
             style={{
               display: 'flex',
@@ -137,6 +166,7 @@ const SessionDetail: FC<{
               borderRadius: '4px',
               cursor: empty ? 'default' : 'pointer',
               backgroundColor: i === activeIndex ? ACTIVE_BG : 'transparent',
+              outline: 'none',
             }}
           >
             <span style={{ width: '104px', flexShrink: 0, color: DIM, fontSize: '11px', paddingTop: '1px' }}>
@@ -190,7 +220,7 @@ const SessionDetailInline: FC<{
   >
     <SessionDetail identity={identity} onCopy={onCopy} />
     <div style={{ color: '#666', fontSize: '10px', padding: '2px 8px 0' }}>
-      click a line to copy · ⌘↑ or Esc closes
+      click a line to copy · ⌘↑ or Esc closes · ⌘I for keyboard access
     </div>
   </div>
   );
@@ -205,15 +235,31 @@ const SessionDetailOverlay: FC<{
 }> = ({ identity, onCopy, onClose }) => {
   const rows = detailRows(identity);
   const [active, setActive] = useState(0);
-  const step = (delta: number) =>
-    setActive((i) => {
-      // Skip rows with nothing to copy.
-      for (let n = 1; n <= rows.length; n++) {
-        const next = (i + delta * n + rows.length * n) % rows.length;
-        if (rows[next].value) return next;
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  // Keyboard focus sits on a ROW (the rows are the buttons); the highlight
+  // follows it through the rows' onFocus.
+  const focusRow = (i: number) =>
+    dialogRef.current
+      ?.querySelector<HTMLElement>(`[data-detail-row="${i}"]`)
+      ?.focus();
+  /** The next row that has something to copy, wrapping around. */
+  const step = (delta: number) => {
+    for (let n = 1; n <= rows.length; n++) {
+      const next = (active + delta * n + rows.length * n) % rows.length;
+      if (rows[next].value) {
+        focusRow(next);
+        return;
       }
-      return i;
-    });
+    }
+  };
+  // On open: the first row that can be copied, else the dialog itself.
+  useEffect(() => {
+    const first = rows.findIndex((r) => r.value);
+    if (first >= 0) focusRow(first);
+    else dialogRef.current?.focus();
+    // Once per opened session — not on every highlight change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity.sessionId]);
   return (
     <div
       data-settings-panel
@@ -232,12 +278,16 @@ const SessionDetailOverlay: FC<{
         role="dialog"
         aria-modal="true"
         aria-label="Session details"
-        tabIndex={0}
-        ref={(el) => el?.focus()}
+        tabIndex={-1}
+        ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Escape' || (e.metaKey && (e.key === 'i' || e.key === 'I'))) {
+          if (e.key === 'Tab') {
+            // Keep focus inside the dialog: Tab walks the rows like ↑↓.
+            e.preventDefault();
+            step(e.shiftKey ? -1 : 1);
+          } else if (e.key === 'Escape' || (e.metaKey && (e.key === 'i' || e.key === 'I'))) {
             e.preventDefault();
             onClose();
           } else if (e.key === 'ArrowDown') {
@@ -246,22 +296,19 @@ const SessionDetailOverlay: FC<{
           } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             step(-1);
-          } else if (e.key === 'Enter') {
-            e.preventDefault();
-            const row = rows[active];
-            if (row?.value) onCopy(row.label, row.value);
           }
+          // Enter / Space are handled by the focused row itself.
         }}
         style={{ ...PANEL_STYLE, marginTop: '90px', width: 'min(640px, calc(100vw - 40px))', padding: '8px' }}
       >
         <div style={{ fontSize: '11px', color: DIM, padding: '2px 8px 6px' }}>
-          Session details — click a line to copy (↑↓ · Enter copies · Esc)
+          Session details — click a line to copy (↑↓ or Tab · Enter copies · Esc)
         </div>
         <SessionDetail
           identity={identity}
           onCopy={onCopy}
           activeIndex={active}
-          onHoverIndex={setActive}
+          onActiveIndex={setActive}
         />
       </div>
     </div>
@@ -277,6 +324,8 @@ type MenuItem =
   | { kind: 'separator' };
 
 const MENU_WIDTH = 360;
+// Only one menu is ever open, so a fixed prefix is unique.
+const menuItemId = (i: number): string => `codev-session-menu-item-${i}`;
 
 const SessionContextMenu: FC<{
   x: number;
@@ -311,6 +360,10 @@ const SessionContextMenu: FC<{
     >
       <div
         role="menu"
+        aria-label="Session actions"
+        // Focus stays on the menu; this tells assistive tech which item the
+        // arrow keys are on.
+        aria-activedescendant={active >= 0 ? menuItemId(active) : undefined}
         tabIndex={0}
         ref={(el) => el?.focus()}
         onClick={(e) => e.stopPropagation()}
@@ -336,10 +389,11 @@ const SessionContextMenu: FC<{
       >
         {items.map((item, i) =>
           item.kind === 'separator' ? (
-            <div key={i} style={{ borderTop: '1px solid #3a3a3a', margin: '4px 2px' }} />
+            <div key={i} role="separator" style={{ borderTop: '1px solid #3a3a3a', margin: '4px 2px' }} />
           ) : (
             <div
               key={i}
+              id={menuItemId(i)}
               role="menuitem"
               aria-disabled={item.disabled}
               onMouseEnter={() => { if (!item.disabled) setActive(i); }}
@@ -401,6 +455,16 @@ export const useSessionIdentityUi = (opts: {
   const [inline, setInline] = useState<{ rowKey: string; identity: SessionIdentity } | null>(null); // HOST C
   const inlineRef = useRef(inline);
   inlineRef.current = inline;
+  // HOST C: is the expanded row actually on screen in THIS render? `inlineFor`
+  // sets it while the rows are built. A panel whose row is gone — filtered
+  // out by a search, folded, dropped by a refresh, another tab — must not
+  // keep taking Esc and ⌘↑, so the keys check this and the effect below
+  // drops the state. Derived from what was rendered, not a second copy of it.
+  const inlineShownRef = useRef(false);
+  inlineShownRef.current = false;
+  useEffect(() => {
+    if (inline && !inlineShownRef.current) setInline(null);
+  });
 
   const fetchIdentity = useCallback(
     async (target: IdentityTarget): Promise<SessionIdentity | null> => {
@@ -493,7 +557,7 @@ export const useSessionIdentityUi = (opts: {
       target: IdentityTarget | null,
     ): boolean => {
       // HOST C: an open inline panel takes Esc and ⌘↑ before anything else.
-      if (inlineRef.current) {
+      if (inlineRef.current && inlineShownRef.current) {
         const closing =
           (e.key === 'Escape' && !e.metaKey) ||
           (e.key === 'ArrowUp' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey);
@@ -532,10 +596,11 @@ export const useSessionIdentityUi = (opts: {
   );
 
   /** HOST C: place right after a row; renders only under the expanded one. */
-  const inlineFor = (target: IdentityTarget | null): ReactNode =>
-    target && inline && inline.rowKey === target.rowKey ? (
-      <SessionDetailInline identity={inline.identity} onCopy={copy} />
-    ) : null;
+  const inlineFor = (target: IdentityTarget | null): ReactNode => {
+    if (!target || !inline || inline.rowKey !== target.rowKey) return null;
+    inlineShownRef.current = true;
+    return <SessionDetailInline identity={inline.identity} onCopy={copy} />;
+  };
 
   const menuItems = (): MenuItem[] => {
     if (!menu) return [];
