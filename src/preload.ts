@@ -144,6 +144,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('launch-new-claude-session-in-codev', projectPath),
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) =>
     ipcRenderer.send('copy-claude-session-command', sessionId, projectPath),
+  getSessionIdentity: (
+    sessionId: string,
+    project: string,
+    accountLabel?: string,
+    fallbackTitle?: string,
+  ) =>
+    ipcRenderer.invoke(
+      'get-session-identity',
+      sessionId,
+      project,
+      accountLabel,
+      fallbackTitle,
+    ),
+  copyText: (text: string) => ipcRenderer.invoke('copy-text', text),
   loadSessionEnrichment: (sessions: any[]) => ipcRenderer.invoke('load-session-enrichment', sessions),
   loadLastAssistantResponses: (sessions: any[]) => ipcRenderer.invoke('load-last-assistant-responses', sessions),
   loadProjectBranches: (paths: string[]) => ipcRenderer.invoke('load-project-branches', paths),

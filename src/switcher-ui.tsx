@@ -5,6 +5,7 @@ import Highlighter from 'react-highlight-words';
 import Select, { components, OptionProps } from 'react-select';
 import { HoverButton } from './HoverButton';
 import PopupDefaultExample from './popup';
+import { identityTargetOf, useSessionIdentityUi } from './session-identity-ui';
 import type { LiveRowInfo } from './session-list-view';
 import type { SessionList, SessionListMember } from './session-lists';
 import {
@@ -928,6 +929,16 @@ function SwitcherApp() {
   const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
   const [settingsOpenToTab, setSettingsOpenToTab] = useState<'general' | 'sessions' | 'shortcuts' | null>(null);
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Session identity: right-click copy menu, ⌘⇧C, detail view (⌘I / ⌘↓).
+  const flashBanner = useCallback((msg: string) => {
+    if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
+    setModeBanner(msg);
+    bannerTimeoutRef.current = setTimeout(() => setModeBanner(null), 3000);
+  }, []);
+  const identityUi = useSessionIdentityUi({
+    notify: flashBanner,
+    restoreFocus: forceFocusOnInput,
+  });
 
   const updateWorkingPathUIAndList = async (path: string) => {
     setWorkingFolderPath(path);
@@ -2734,6 +2745,14 @@ function SwitcherApp() {
               setSelectedSessionIndex(0);
             }}
             onKeyDown={(e) => {
+              if (
+                identityUi.handleKey(
+                  e,
+                  identityTargetOf(displayedSessions[selectedSessionIndex], customTitles),
+                )
+              ) {
+                return;
+              }
               if (e.key === 'Escape') {
                 if (sessionSearchValue) {
                   setSessionSearchValue('');
@@ -3376,6 +3395,7 @@ function SwitcherApp() {
                 )}
                 <div
                   data-session-index={index}
+                  onContextMenu={(e) => identityUi.openMenu(e, identityTargetOf(session, customTitles))}
                   onClick={() => {
                     // A running process with no session id has nothing to resume.
                     if (session.__liveOrphan) return;
@@ -3952,6 +3972,7 @@ function SwitcherApp() {
                     })()}
                   </div>
                 </div>
+                {identityUi.inlineFor(identityTargetOf(session, customTitles))}
                 </Fragment>
               ))}
               {!isSearchingSessions && !minorsExpanded && minorSessions.length > 0 && (
@@ -4325,6 +4346,8 @@ function SwitcherApp() {
       )}
       </div>
       ))}
+      {/* Session copy menu + details overlay (top level, like the dialog below). */}
+      {identityUi.layer}
       {/* Save-list dialog. Top level, outside the mode branches: it is opened
           from the Sessions tab, and a modal nested inside the Projects branch
           never renders there (the first live test found exactly that). */}

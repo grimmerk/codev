@@ -31,6 +31,7 @@ import {
   launchNewClaudeSession,
   scanClosedVSCodeSessions,
   getSessionsByIds,
+  getSessionIdentity,
   findAccountByLabel,
   flushEnrichmentCache,
   isSafeLaunchPath,
@@ -2926,6 +2927,40 @@ ipcMain.on('launch-new-claude-session-in-codev', (_event, projectPath: string) =
 
 ipcMain.on('copy-claude-session-command', (_event, sessionId: string, projectPath: string) => {
   copyResumeCommand(sessionId, projectPath);
+});
+
+// Session identity (title, id, account, paths, resume command) for the
+// Sessions tab's copy menu and detail view — same resolver as `codev session`.
+ipcMain.handle(
+  'get-session-identity',
+  async (
+    _event,
+    sessionId: unknown,
+    project: unknown,
+    accountLabel?: unknown,
+    fallbackTitle?: unknown,
+  ) => {
+    if (typeof sessionId !== 'string' || !sessionId) return null;
+    try {
+      return await getSessionIdentity(
+        sessionId,
+        typeof project === 'string' ? project : '',
+        typeof accountLabel === 'string' ? accountLabel : undefined,
+        typeof fallbackTitle === 'string' ? fallbackTitle : undefined,
+      );
+    } catch (error) {
+      console.error('[get-session-identity]', error);
+      return null;
+    }
+  },
+);
+
+// Clipboard writes go through main: the renderer's own clipboard API needs
+// the document focused, which a menu-bar window cannot promise.
+ipcMain.handle('copy-text', (_event, text: unknown) => {
+  if (typeof text !== 'string' || !text) return false;
+  clipboard.writeText(text);
+  return true;
 });
 
 ipcMain.handle('load-session-enrichment', async (_event, sessions: any[]) => {
