@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { runSessionCli } from './codev-session';
+import { CliDeps, runSessionCli } from './codev-session';
 import { IdentityAccount, transcriptSlug } from './session-identity';
 
 // Record shapes follow real files (see session-identity.test.ts); values are invented.
@@ -22,7 +22,7 @@ const addSession = (
   account: IdentityAccount,
   sessionId: string,
   project: string,
-  opts: { title?: string; at: number; transcript?: boolean },
+  opts: { title?: string; at: number; transcript?: boolean; extra?: string[] },
 ): void => {
   fs.appendFileSync(
     path.join(account.dir, 'history.jsonl'),
@@ -52,8 +52,11 @@ const addSession = (
       JSON.stringify({ type: 'custom-title', customTitle: opts.title, sessionId }),
     );
   }
+  lines.push(...(opts.extra ?? []));
   fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), lines.join('\n') + '\n');
 };
+
+let selfDeps: Pick<CliDeps, 'ancestors' | 'env'> = {};
 
 const run = (...argv: string[]) => {
   const out: string[] = [];
@@ -64,11 +67,15 @@ const run = (...argv: string[]) => {
     accounts: () => [main, work],
     anchorDir: () => main.dir,
     cwd: () => app,
+    ancestors: () => [],
+    env: () => ({}),
+    ...selfDeps,
   });
   return { code, out, err, stdout: out.join('\n'), stderr: err.join('\n') };
 };
 
 beforeEach(() => {
+  selfDeps = {};
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'codev-sess-')));
   main = {
     label: 'main',
@@ -152,11 +159,32 @@ describe('codev session resume', () => {
   });
 });
 
+// Real record shapes (2026-11-20): an assistant turn is several records, each
+// holding ONE kind of block; a tool result comes back as a `user` record.
+const said = (
+  role: 'user' | 'assistant',
+  sessionId: string,
+  content: unknown,
+  extra: Record<string, unknown> = {},
+): string =>
+  JSON.stringify({
+    parentUuid: null,
+    isSidechain: false,
+    message: { role, content },
+    type: role,
+    uuid: '00000000-0000-4000-8000-00000000abcd',
+    timestamp: '2026-11-01T10:00:00.000Z',
+    cwd: '/Users/dev/git/acme-app',
+    sessionId,
+    ...extra,
+  });
+
 describe('codev session show', () => {
-  it('shows every session sharing the title, each under its own account', () => {
-    const r = run('show', 'billing fix', '--json');
+  it('prints JSON by default: every session sharing the title, each under its own account', () => {
+    const r = run('show', 'billing fix');
     expect(r.code).toBe(0);
-    const got = JSON.parse(r.stdout);
+    expect(r.out).toHaveLength(1); // one line, parseable as a whole
+    const got = JSON.parse(r.stdout).sessions;
     expect(got.map((g: { sessionId: string }) => g.sessionId)).toEqual([ID_A, ID_B]);
     expect(got[0]).toMatchObject({
       title: 'billing fix',
@@ -176,27 +204,149 @@ describe('codev session show', () => {
     expect(got[1].resumeCommand).toContain(`CLAUDE_CONFIG_DIR='${work.dir}'`);
   });
 
-  it('prints every field as text, and says when the transcript is gone', () => {
-    const text = run('show', ID_D.slice(0, 8)).stdout;
+  it('--pretty prints every field as text, and says when the transcript is gone', () => {
+    const text = run('show', ID_D.slice(0, 8), '--pretty').stdout;
     expect(text).toContain(`Session ID:   ${ID_D}`);
     expect(text).toContain('Title:        (none)');
     expect(text).toContain('Transcript:   (not found');
-    expect(run('show', 'nothing like this').code).toBe(1);
-    expect(run('show').code).toBe(2);
+  });
+
+  it('keeps stdout empty on failure and puts a JSON error on stderr', () => {
+    const none = run('show', 'nothing like this');
+    expect([none.code, none.out]).toEqual([1, []]);
+    expect(JSON.parse(none.stderr).error).toContain('No session matches');
+    const usage = run('show');
+    expect([usage.code, usage.out]).toEqual([2, []]);
+    expect(run('show', 'zzz', '--pretty').stderr).toContain('No session matches');
+  });
+});
+
+describe('codev session view', () => {
+  it('prints the last N spoken messages of the one matching session', () => {
+    addSession(work, '5555aaaa-0000-4000-8000-000000000005', api, {
+      title: 'talkative',
+      at: 5000,
+      extra: [
+        said('user', ID_C, 'first question'),
+        said('assistant', ID_C, [{ type: 'thinking', thinking: 'hmm', signature: 's' }]),
+        said('assistant', ID_C, [{ type: 'text', text: 'first answer' }]),
+        said('assistant', ID_C, [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }]),
+        said('user', ID_C, [{ tool_use_id: 't1', type: 'tool_result', content: 'file.txt' }], {
+          toolUseResult: { stdout: 'file.txt' },
+        }),
+        said('assistant', ID_C, [{ type: 'text', text: 'second answer' }]),
+        'not json',
+        said('user', ID_C, 'second question'),
+      ],
+    });
+    const r = run('view', 'talkative', '--last', '3');
+    expect(r.code).toBe(0);
+    const got = JSON.parse(r.stdout);
+    expect(got).toMatchObject({ title: 'talkative', account: 'work' });
+    expect(got.messages).toEqual([
+      { role: 'assistant', timestamp: '2026-11-01T10:00:00.000Z', text: 'first answer' },
+      { role: 'assistant', timestamp: '2026-11-01T10:00:00.000Z', text: 'second answer' },
+      { role: 'user', timestamp: '2026-11-01T10:00:00.000Z', text: 'second question' },
+    ]);
+    const pretty = run('view', 'talkative', '--last', '1', '--pretty').stdout;
+    expect(pretty).toContain('── user');
+    expect(pretty).toContain('second question');
+    expect(pretty).not.toContain('second answer');
+  });
+
+  it('refuses to pick among several matches: no stdout, the candidates on stderr', () => {
+    const r = run('view', 'billing fix');
+    expect([r.code, r.out]).toEqual([2, []]);
+    const e = JSON.parse(r.stderr);
+    expect(e.error).toContain('2 sessions match');
+    expect(e.matches.map((m: { sessionId: string }) => m.sessionId)).toEqual([
+      ID_A,
+      ID_B,
+    ]);
+  });
+
+  it('fails cleanly when the transcript is gone or --last is not a count', () => {
+    const gone = run('view', ID_D);
+    expect([gone.code, gone.out]).toEqual([1, []]);
+    expect(run('view', ID_A, '--last', 'many').code).toBe(2);
+    expect(run('view', ID_A, '--last').code).toBe(2);
+  });
+});
+
+describe('codev session self', () => {
+  const START = 'Sun Nov  1 10:00:00 2026';
+  const register = (
+    account: IdentityAccount,
+    pid: number,
+    sessionId: string,
+    procStart = START,
+  ): void => {
+    fs.mkdirSync(path.join(account.dir, 'sessions'), { recursive: true });
+    // Key order of a real sessions/<pid>.json.
+    fs.writeFileSync(
+      path.join(account.dir, 'sessions', `${pid}.json`),
+      JSON.stringify({
+        pid,
+        sessionId,
+        cwd: api,
+        startedAt: 1,
+        procStart,
+        version: '2.1.329',
+        kind: 'interactive',
+        entrypoint: 'cli',
+        name: 'api cleanup',
+        nameSource: 'user',
+        status: 'busy',
+      }),
+    );
+  };
+  const chain = [
+    { pid: 900, ppid: 800, startUtc: 'Sun Nov 1 10:05:00 2026', command: '/bin/zsh' },
+    { pid: 800, ppid: 1, startUtc: 'Sun Nov 1 10:00:00 2026', command: 'claude' },
+  ];
+
+  it('names the session of the nearest registered ancestor, under the account that holds the registration', () => {
+    register(work, 800, ID_C);
+    selfDeps = { ancestors: () => chain, env: () => ({ CLAUDE_CODE_SESSION_ID: ID_C }) };
+    const r = run('self');
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({
+      sessionId: ID_C,
+      title: 'api cleanup',
+      account: 'work',
+      projectPath: api,
+      pid: 800,
+      name: 'api cleanup',
+      proof: 'process-start',
+      environmentAgrees: true,
+    });
+  });
+
+  it('does not take a leftover registration of an earlier process with the same pid', () => {
+    register(work, 800, ID_C, 'Sat Oct 31 08:00:00 2026');
+    selfDeps = { ancestors: () => chain, env: () => ({}) };
+    const r = run('self');
+    expect([r.code, r.out]).toEqual([1, []]);
+    expect(JSON.parse(r.stderr).error).toContain('self:');
+  });
+
+  it('fails outside a session', () => {
+    const r = run('self');
+    expect([r.code, r.out]).toEqual([1, []]);
   });
 });
 
 describe('codev session list', () => {
   const idsOf = (stdout: string): string[] =>
-    JSON.parse(stdout).map((s: { sessionId: string }) => s.sessionId);
+    JSON.parse(stdout).sessions.map((s: { sessionId: string }) => s.sessionId);
 
   it('lists all accounts newest first', () => {
-    expect(idsOf(run('list', '--json').stdout)).toEqual([ID_A, ID_B, ID_C, ID_D]);
-    expect(idsOf(run('list', '--json', '--limit', '2').stdout)).toEqual([
+    expect(idsOf(run('list').stdout)).toEqual([ID_A, ID_B, ID_C, ID_D]);
+    expect(idsOf(run('list', '--limit', '2').stdout)).toEqual([
       ID_A,
       ID_B,
     ]);
-    expect(idsOf(run('list', '--json', '--account', 'work').stdout)).toEqual([
+    expect(idsOf(run('list', '--account', 'work').stdout)).toEqual([
       ID_B,
       ID_C,
     ]);
@@ -204,23 +354,25 @@ describe('codev session list', () => {
 
   it('--path keeps sessions of exactly that directory, not of one inside it', () => {
     // cwd is the app directory; ID_D lives in app/packages.
-    expect(idsOf(run('list', '--path', '.', '--json').stdout)).toEqual([
+    expect(idsOf(run('list', '--path', '.').stdout)).toEqual([
       ID_A,
       ID_B,
     ]);
-    expect(idsOf(run('list', '--path', 'packages', '--json').stdout)).toEqual([
+    expect(idsOf(run('list', '--path', 'packages').stdout)).toEqual([
       ID_D,
     ]);
     // A symlink to the directory names the same directory.
     const link = path.join(tmp, 'link-to-api');
     fs.symlinkSync(api, link);
-    expect(idsOf(run('list', '--path', link, '--json').stdout)).toEqual([ID_C]);
+    expect(idsOf(run('list', '--path', link).stdout)).toEqual([ID_C]);
+    // No sessions there is an answer, not a failure.
     const empty = run('list', '--path', tmp);
-    expect(empty.code).toBe(1);
+    expect(empty.code).toBe(0);
+    expect(JSON.parse(empty.stdout)).toEqual({ total: 0, sessions: [] });
   });
 
   it('marks a session whose transcript is gone, and rejects bad usage', () => {
-    const r = run('list');
+    const r = run('list', '--pretty');
     const row = r.out.find((l) => l.startsWith(ID_D.slice(0, 8)));
     expect(row).toContain('✗');
     expect(r.out.find((l) => l.startsWith(ID_A.slice(0, 8)))).not.toContain('✗');

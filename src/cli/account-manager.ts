@@ -411,7 +411,7 @@ export function generateAccountsSh(reg: Registry): string {
     L.push('  if (( CURRENT == 2 )); then');
     L.push('    compadd account session');
     L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "session" ]; then');
-    L.push('    compadd list show resume help');
+    L.push('    compadd list show view self resume help');
     L.push('  elif (( CURRENT == 3 )) && [ "${words[2]}" = "account" ]; then');
     L.push(
       '    compadd list add default remove rm rename share unshare share-memory sync-settings regenerate show install uninstall help',

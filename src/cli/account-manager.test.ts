@@ -206,7 +206,7 @@ describe('generateAccountsSh', () => {
     expect(sh).toContain('_codev() {');
     expect(sh).toContain('compdef _codev codev');
     expect(sh).toContain('compadd account session');
-    expect(sh).toContain('compadd list show resume help');
+    expect(sh).toContain('compadd list show view self resume help');
     expect(sh).toContain(
       'compadd list add default remove rm rename share unshare share-memory sync-settings regenerate show install uninstall help',
     );
