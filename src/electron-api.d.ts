@@ -146,8 +146,10 @@ interface IElectronAPI {
   setSessionTerminalApp: (app: string) => void;
   getSessionTerminalMode: () => Promise<string>;
   setSessionTerminalMode: (mode: string) => void;
-  getSessionDisplayMode: () => Promise<string>;
-  setSessionDisplayMode: (mode: string) => void;
+  /** Which preview lines a Sessions row shows; the old single setting is migrated on read. */
+  getSessionPreview: () => Promise<import('./session-preview').SessionPreviewSettings>;
+  setSessionPreviewUserPrompt: (value: import('./session-preview').UserPromptPreview) => void;
+  setSessionPreviewAssistantReply: (value: boolean) => void;
   getDefaultSwitcherMode: () => Promise<string>;
   setDefaultSwitcherMode: (mode: string) => void;
   getLoginItemSettings: () => Promise<{ openAtLogin: boolean }>;

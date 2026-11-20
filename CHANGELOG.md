@@ -8,6 +8,11 @@
 - The menu, the details and the CLI read from one resolver (`src/cli/session-identity.ts`), which the app's own resume and history code now use too. The copied resume command single-quotes the project path, so a path with a space or a `$` pastes correctly
 - Measured rather than assumed: a transcript is filed under the slug of the session's **own working directory**, not under the git common directory that auto-memory uses. On one two-account machine, 2 of 2 sessions started in a repository subdirectory and 18 of 18 started in a linked worktree sat under their own directory's slug; the 17 that did not match the first `cwd` they record were all `/branch` copies, which start with their parent's records. So the existing lookups were right and are unchanged; the new resolver additionally checks that the file exists, and can fall back to searching every project directory when only reading is needed
 - Reading a session's title for these features scans back from the end of the transcript instead of running `grep` over it: macOS's `grep` took about 1.5 s on one 255 MB transcript, the backward scan about 0.55 s for all 363 transcripts on that machine
+## 1.0.95
+
+- Feat: **Session Preview is two settings** (Settings → Sessions): **User prompt** — None / First / Last / First + Last — and **Last assistant reply** — on / off. The old single dropdown offered "First + Last" without saying both were *user* prompts, and the assistant's reply was always shown with no way to turn it off. So two rows that were not possible before now are: the assistant's last reply alone, and a title-only list (None + off), which leaves no empty line under the title. Nothing changes until you change it: your current choice carries over with the assistant reply on, and a fresh install still shows the first user prompt plus the reply. A saved list's recap line is not part of the preview and stays
+- A search still explains itself with a line hidden: a match in a prompt or in the last reply that the settings keep off the row gets its own `match …` line, as the other off-row fields already did
+- Fix: `match reply` now appears when a search matches the last reply of a saved-list row whose reply sits behind its recap. The line was added in 1.0.89 but waited on a signal the search never sent
 
 ## 1.0.94
 

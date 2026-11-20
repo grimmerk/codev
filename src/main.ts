@@ -58,6 +58,14 @@ import {
   withRenamedList,
 } from './session-lists';
 import { collectLiveSessions } from './live-sessions';
+import {
+  asUserPrompt,
+  legacyModeFor,
+  resolveSessionPreview,
+  SETTINGS_KEY_ASSISTANT_REPLY,
+  SETTINGS_KEY_LEGACY_MODE,
+  SETTINGS_KEY_USER_PROMPT,
+} from './session-preview';
 import { randomUUID } from 'crypto';
 import {
   installHooks,
@@ -2555,12 +2563,28 @@ ipcMain.on('set-session-terminal-mode', async (_event, mode: string) => {
   await settings.set('session-terminal-mode', mode);
 });
 
-ipcMain.handle('get-session-display-mode', async () => {
-  return (await settings.get('session-display-mode')) || 'first';
+// Session Preview: two settings (user prompt, last assistant reply). The old
+// single key is read as a fallback and never deleted — see session-preview.ts.
+ipcMain.handle('get-session-preview', async () => {
+  return resolveSessionPreview({
+    userPrompt: await settings.get(SETTINGS_KEY_USER_PROMPT),
+    assistantReply: await settings.get(SETTINGS_KEY_ASSISTANT_REPLY),
+    legacyMode: await settings.get(SETTINGS_KEY_LEGACY_MODE),
+  });
 });
 
-ipcMain.on('set-session-display-mode', async (_event, mode: string) => {
-  await settings.set('session-display-mode', mode);
+ipcMain.on('set-session-preview-user-prompt', async (_event, value: unknown) => {
+  const userPrompt = asUserPrompt(value);
+  if (!userPrompt) return;
+  await settings.set(SETTINGS_KEY_USER_PROMPT, userPrompt);
+  // Mirror what the old key can express, for a downgraded build.
+  const legacy = legacyModeFor(userPrompt);
+  if (legacy) await settings.set(SETTINGS_KEY_LEGACY_MODE, legacy);
+});
+
+ipcMain.on('set-session-preview-assistant-reply', async (_event, value: unknown) => {
+  if (typeof value !== 'boolean') return;
+  await settings.set(SETTINGS_KEY_ASSISTANT_REPLY, value);
 });
 
 ipcMain.handle('get-default-switcher-mode', async () => {
