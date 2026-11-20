@@ -57,6 +57,7 @@ import {
   withRenamedList,
 } from './session-lists';
 import { collectLiveSessions } from './live-sessions';
+import { noteLiveReport, startSwitchTiming } from './switch-timing-log';
 import { randomUUID } from 'crypto';
 import {
   installHooks,
@@ -2792,7 +2793,9 @@ ipcMain.handle('rename-session-list', (_event, id: string, name: string) => {
 
 ipcMain.handle('get-live-sessions', async () => {
   try {
-    return await collectLiveSessions();
+    const report = await collectLiveSessions();
+    noteLiveReport(report); // the process count the switch timing log reuses
+    return report;
   } catch (err) {
     // null, not an empty report: "we could not look" must never render as
     // "nothing is running" — the renderer keeps its last good report.
@@ -2843,6 +2846,7 @@ ipcMain.on(
     activePid?: number,
     customTitle?: string,
     accountLabel?: string,
+    stamp?: unknown,
   ) => {
     // The path is embedded in shell and AppleScript strings by every
     // launcher; refuse one that could end either literal (see isSafeLaunchPath).
@@ -2850,6 +2854,9 @@ ipcMain.on(
       console.warn('[open-claude-session] refusing unsafe project path:', projectPath);
       return;
     }
+    // Timing only (switch-timing.ts): undefined if it cannot start, and no
+    // call on it can throw, so the switch below runs the same either way.
+    const timing = startSwitchTiming(sessionId, !!isActive, stamp);
     // Switching to a running session never needs the path (iTerm2 matches by
     // tty); a resume does — `cd ""` would start the session in the wrong place.
     if (!isActive && !projectPath) {
@@ -2858,6 +2865,8 @@ ipcMain.on(
     }
     const terminalApp = ((await settings.get('session-terminal-app')) || 'iterm2') as string;
     const terminalMode = ((await settings.get('session-terminal-mode')) || 'tab') as string;
+    timing?.mark('settings');
+    timing?.set({ configured: terminalApp });
     // A label no account carries is dropped, not trusted: history decides the
     // account for any session it knows, and the anchor is the documented
     // fallback for one it does not.
@@ -2874,9 +2883,13 @@ ipcMain.on(
       terminalMode,
       customTitle,
       label,
-    ).catch((err) => {
-      console.error('[open-claude-session] launch failed:', err);
-    });
+      timing,
+    )
+      .then(() => timing?.settle(true))
+      .catch((err) => {
+        timing?.settle(false);
+        console.error('[open-claude-session] launch failed:', err);
+      });
   },
 );
 

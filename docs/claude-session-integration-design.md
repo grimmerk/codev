@@ -665,6 +665,65 @@ TypeScript is sufficient for MVP. `history.jsonl` reading (~40ms) and session li
 
 **Rust native module justified for:** full JSONL parsing (last assistant response, full-text search across 771MB), where the 5-10x speedup matters. claude-history achieves <1s for 170 files using Rust + rayon parallel.
 
+### Measuring a switch: the timing log
+
+Before rewriting any part of the switch path for speed, measure where a switch spends its time. Since 1.0.97 every switch started from the Sessions tab (Enter or a click) appends one JSON line to `~/.config/codev/switch-timing.jsonl`. The question it is meant to answer: is the time in CodeV's own JavaScript, which a rewrite could shorten, or in the external command (`osascript`, or the cmux CLI) and a loaded machine, which it could not?
+
+**What a line holds: timings and counts only.** No title, prompt or path; the only trace of the session is the first 8 characters of its id. The file is capped at about 1 MB: at the cap it is renamed to `switch-timing.jsonl.1` (one old file is kept) and a new one starts. Logging is always on; there is no setting.
+
+```
+ renderer            main process                                  terminal
+ ────────            ────────────                                  ────────
+ ① click / Enter
+        │ IPC
+        └──────────► ② IPC arrives
+                     ③ settings read          (ms.settings)
+                     ④ detectTerminalApp      (ms.detect; running sessions only)
+                     ⑤ script text built      (ms.build)
+                     ⑥ file written, command started (ms.spawn)
+                              └──────────────────────────────────► osascript runs
+                     ⑦ command exits          (ms.run) ◄────────── prints the branch
+                     ⑧ afterwards: sysctl, ps (slow switches only), append the line
+```
+
+Steps ① to ⑦ are the switch. Step ⑧ runs only after it, so nothing that spawns a process or touches the disk for the log sits on the switch's path; what the log adds to the path itself is one `os.cpus()` read, one `process.cpuUsage()` and a few clock reads. Any failure in the timing code is swallowed and the switch runs as before.
+
+| Field | Meaning |
+|---|---|
+| `v` | Record version (1). |
+| `ts` | ISO time the IPC arrived in the main process. |
+| `sid` | First 8 characters of the session id. |
+| `via` | `enter` or `click`. |
+| `kind` | `switch` (the session was running) or `resume` (it was not; a new tab runs `claude --resume`). |
+| `terminal`, `configured` | Where the switch went after auto-detection, and the terminal named in Settings. |
+| `tool` | What ran the switch: `osascript`, `cmux-cli`, `open` (VS Code, Claude Desktop) or `pty` (the embedded terminal). |
+| `branch` | Which key found the tab: `tty`, `title`, `cwd`, `project-name` (cmux), `none` (the script ran and matched nothing); for a resume `new-tab`, `new-window` or `new-workspace`; `deep-link`, `embedded`. `null` means unknown, for example a script that failed. |
+| `order`, `hasTitle` | Which key the script tried first (`tty-first` or `title-first`), and whether it had a title block at all. |
+| `ok`, `timedOut` | `ok` is false when the launch was rejected; `timedOut` is true when the command had not reported an exit after 15 s (then `ms.run` and `ms.total` are `null`). |
+| `ms.clickToIpc`, `ms.clickToIpcHr` | ① to ②, on the wall clock (whole ms) and on the two processes' high-resolution clocks. |
+| `ms.settings`, `ms.detect`, `ms.build`, `ms.spawn`, `ms.run` | The steps in the diagram. A step a path skips is `null`, and its time counts in the next one. |
+| `ms.returned` | ② to `openSession` returning. For a running session this is before the script exits. |
+| `ms.main`, `ms.total` | ② to ⑦, and ① to ⑦ (what the user waited). |
+| `load`, `ncpu` | `os.loadavg()` at the end of the switch, and the core count. |
+| `cpuPct` | Whole-machine CPU busy % over the span, from two `os.cpus()` samples. `null` for a span too short to measure (the counters tick every 10 ms). |
+| `mainCpuMs` | CPU time CodeV's main process itself used over the span (`process.cpuUsage()` delta). |
+| `mem` | macOS memory-pressure level (1 normal, 2 warn, 4 critical) and swap in MB — the same `sysctl` reading as the memory chip, taken after the switch. |
+| `claudeProcs`, `liveAgeMs` | Running `claude` processes in the last live-sessions report the window asked for, and how old that report was. No extra `ps` is run for it. |
+| `rows` | Rows in the session list when the switch was started. |
+| `top` | Only when `ms.total` is over 1 s: the three busiest processes (`%CPU`, executable name) right after the switch. |
+
+The branch costs nothing to record: the switch scripts already end in `return "found-by-tty"` and the like, and `osascript` prints that value. cmux matches in JavaScript, so each layer names itself. No script and no matching order changed.
+
+Not recorded: the number of terminal tabs (only the terminal knows, and asking would cost a second script), and opening a whole saved list (several staggered launches, not one switch).
+
+To summarize the log:
+
+```bash
+yarn switch-timing            # or: node scripts/switch-timing-summary.js [file ...]
+```
+
+It prints p50/p90 (50th and 90th percentile) per step and for the total — for all switches, and grouped by kind, terminal and branch — then the share of the total spent inside the external command, and the total against load: buckets of 1-minute load per core, and Pearson correlations of the total with load and with CPU %. Malformed lines are counted and skipped; a missing or empty log prints "No switch records."
+
 ### `history.jsonl` vs `session-metadata.db`
 
 `session-metadata.db` has richer data but is a stale cache. `history.jsonl` is always up to date. Same approach used by c9watch's history page.

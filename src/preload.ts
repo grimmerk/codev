@@ -120,6 +120,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     activePid?: number,
     customTitle?: string,
     accountLabel?: string,
+    stamp?: unknown,
   ) =>
     ipcRenderer.send(
       'open-claude-session',
@@ -129,6 +130,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       activePid,
       customTitle,
       accountLabel,
+      stamp,
     ),
   openSessionListMembers: (
     members: {
