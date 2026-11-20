@@ -1,7 +1,7 @@
 {
   "name": "CodeV",
   "productName": "CodeV",
-  "version": "1.0.95",
+  "version": "1.0.96",
   "description": "Quick switcher for VS Code, Cursor, and Claude Code sessions",
   "repository": {
     "type": "git",
@@ -13,6 +13,7 @@
     "start": "cross-env NODE_ENV=development electron-forge start",
     "dev": "npm run start",
     "account": "ts-node src/cli/codev-account.ts",
+    "session": "ts-node src/cli/codev-session.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "package": "electron-forge package",

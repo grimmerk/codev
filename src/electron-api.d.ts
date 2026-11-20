@@ -291,6 +291,14 @@ interface IElectronAPI {
   launchNewClaudeSession: (projectPath: string, accountLabel?: string) => void;
   launchNewClaudeSessionInCodev: (projectPath: string) => void;
   copyClaudeSessionCommand: (sessionId: string, projectPath: string) => void;
+  /** null when the id is unusable or the lookup failed. */
+  getSessionIdentity: (
+    sessionId: string,
+    project: string,
+    accountLabel?: string,
+    fallbackTitle?: string,
+  ) => Promise<import('./cli/session-identity-fields').SessionIdentity | null>;
+  copyText: (text: string) => Promise<boolean>;
   loadSessionEnrichment: (sessions: any[]) => Promise<{
     titles: Record<string, string>;
     branches: Record<string, string>;

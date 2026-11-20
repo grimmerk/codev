@@ -652,12 +652,35 @@ Ghostty has full AppleScript support via `Ghostty.sdef`:
 
 - Full-text search across conversation content (may need Rust native module)
 - Bookmark functionality
-- Copy resume command (right-click or long-press)
+- ~~Copy resume command (right-click or long-press)~~ — no longer planned: shipped in
+  1.0.96, see **Session identity** below
 - Session status (Working/Idle) detection from JSONL
 - Notifications on Working → Idle transition
 - PR info display from `sessions-index.json`
 - Terminal.app support
 - Collapse/expand for full session details
+
+### Session identity (shipped in 1.0.96)
+
+The Phase 2 item "copy resume command", grown into the handful of facts that name a
+session. A right-click menu on a Sessions row copies the title, session id,
+transcript path, project path, resume command or a one-line reference (`⌘⇧C` copies the
+reference of the selected row), and a detail view shows the same fields (`⌘I` overlay,
+`⌘↓` under the row). Where it lives, so it is not researched again:
+
+- `src/cli/session-identity.ts` — the one resolver (history scan, transcript lookup,
+  title, resume command). No Electron imports; the main process and the CLI both use it.
+  A title comes with a `titleKind`: `custom` (a `/rename` name), `ai` (generated),
+  `unknown` (captured earlier by the row or a saved list — it could be either) or `none`.
+  Its header records where transcripts are filed: under the slug of the session's **own
+  cwd**, not under the git common directory that auto-memory is keyed on (measured
+  2026-11-20; counts are in that header).
+- `src/session-identity-ui.tsx` — the menu and the detail component with its two hosts.
+- `src/cli/codev-session.ts` — `codev session list | show | view | self | resume`,
+  dispatched by the `codev()` function that `account-manager.ts` generates. JSON by
+  default with `--pretty` for people — except `resume`, which prints the shell command
+  that function then runs. `session-transcript.ts` reads the last messages,
+  `session-self.ts` works out which session the caller is running in.
 
 ### Phase 3 (Future)
 
