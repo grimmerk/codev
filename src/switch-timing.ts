@@ -14,9 +14,14 @@
  * - **Nothing here throws into a switch.** Every collector method swallows
  *   its own errors, and every call site uses `timing?.…`, so a switch with
  *   no collector, or with a broken one, runs exactly as it did before.
- * - **A record holds timings and counts, never content**: no title, prompt
- *   or path. The only trace of the session is the first 8 characters of its
- *   id, enough to tell two switches to one session from two sessions.
+ * - **A record says which session it was, and nothing a session said.**
+ *   It holds the session id, its title, account label, project path, pid
+ *   and tty, so that per-session patterns show (one crowded window, one
+ *   account, a session that always falls back to cwd). Prompts and
+ *   transcript text are never recorded. The log stays on this machine in an
+ *   owner-only (0600) file; titles and paths are the owner's, so results
+ *   quoted anywhere public should carry placeholders instead (the summary
+ *   script's `--redact`).
  */
 
 /** Points on the path, in the order a terminal switch passes them. */
@@ -334,6 +339,9 @@ export interface SwitchSystemSample {
   liveAgeMs?: number | null;
   /** Only for a slow switch: the busiest processes right after it. */
   top?: { cpu: number; comm: string }[];
+  /** The target process's controlling terminal, and where the value came from. */
+  tty?: string | null;
+  ttySrc?: 'live-report' | 'ps' | null;
 }
 
 export interface SwitchContext {
@@ -341,7 +349,33 @@ export interface SwitchContext {
   ts: string;
   sessionId: string;
   active: boolean;
+  /** The session's `/rename` title, as the click carried it. */
+  title?: string | null;
+  /** The account label the row carried; none for the anchor account. */
+  accountLabel?: string | null;
+  projectPath?: string | null;
+  /** The process switched to; none for a resume. */
+  pid?: number | null;
 }
+
+/** A title is one line of the user's own text; anything longer is cut. */
+export const SWITCH_TITLE_MAX = 200;
+
+const textOrNull = (v: unknown, max = 4096): string | null =>
+  typeof v === 'string' && v !== '' ? v.slice(0, max) : null;
+
+/** A usable pid, else null: the value crossed an IPC boundary. */
+export const pidOrNull = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null;
+
+/**
+ * The tty from `ps -o tty= -p <pid>`: `ttys004`, or null when the process
+ * has none (`??`), is gone (empty output), or `ps` failed.
+ */
+export const parseTty = (psOut: string | null | undefined): string | null => {
+  const t = (psOut || '').trim();
+  return t && t !== '??' && /^[\w/.-]+$/.test(t) ? t : null;
+};
 
 /**
  * The stamp crosses an IPC boundary, so it is checked rather than trusted:
@@ -361,7 +395,12 @@ export const sanitizeStamp = (raw: unknown): RendererStamp | undefined => {
   };
 };
 
-export const SWITCH_RECORD_VERSION = 1;
+/**
+ * 2: the record names its session (`sessionId`, `title`, `account`,
+ * `project`, `pid`, `tty`, `ttySrc`); version 1 had only `sid`, the first 8
+ * characters of the id.
+ */
+export const SWITCH_RECORD_VERSION = 2;
 
 /** A switch slower than this also records the busiest processes. */
 export const SLOW_SWITCH_MS = 1000;
@@ -378,7 +417,13 @@ export const buildSwitchRecord = (
 ): Record<string, unknown> => ({
   v: SWITCH_RECORD_VERSION,
   ts: ctx.ts,
-  sid: String(ctx.sessionId || '').slice(0, 8),
+  sessionId: textOrNull(ctx.sessionId, 128),
+  title: textOrNull(ctx.title, SWITCH_TITLE_MAX),
+  account: textOrNull(ctx.accountLabel, 128),
+  project: textOrNull(ctx.projectPath),
+  pid: pidOrNull(ctx.pid),
+  tty: sys.tty ?? null,
+  ttySrc: sys.tty ? sys.ttySrc ?? null : null,
   via: stamp?.via ?? null,
   kind: ctx.active ? 'switch' : 'resume',
   terminal: snap.facts.terminal ?? snap.facts.configured ?? null,

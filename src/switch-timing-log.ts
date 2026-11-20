@@ -3,6 +3,9 @@
  * is measured and why): start a collector when a switch's IPC arrives, and
  * when the switch is over, sample the machine and append one JSON line to
  * `~/.config/codev/switch-timing.jsonl`, beside the marks and lists stores.
+ * The line names the session (id, title, account, project path, pid, tty),
+ * so the file is created owner-only; it never holds prompts or transcript
+ * text.
  *
  * On the switch's path this costs one `os.cpus()` read, one
  * `process.cpuUsage()` and a few clock reads. Everything that spawns or
@@ -24,10 +27,13 @@ import {
   createSwitchTiming,
   isSlowSwitch,
   parseTopCpu,
+  parseTty,
+  pidOrNull,
   sanitizeStamp,
   shouldRotate,
   stepDurations,
   SWITCH_LOG_MAX_BYTES,
+  SwitchContext,
   SwitchSnapshot,
   SwitchSystemSample,
   SwitchTiming,
@@ -43,14 +49,25 @@ export const defaultSwitchLogPath = (): string =>
 // The Sessions tab asks main for a live-sessions report (a `ps`) each time
 // the window opens. Remembering that report's size gives every switch a
 // process count without a `ps` of its own; the age says how stale it is.
-let lastLive: { count: number; at: number } | null = null;
+// The same report lists each process's tty, which saves the record a `ps`
+// for the session it switched to.
+let lastLive: { count: number; at: number; ttys: Map<number, string> } | null = null;
 
 export const noteLiveReport = (
-  report: { live?: unknown[]; measuredAt?: number } | null | undefined,
+  report:
+    | { live?: { pid?: number; tty?: string | null }[]; measuredAt?: number }
+    | null
+    | undefined,
 ): void => {
   try {
     if (report && Array.isArray(report.live)) {
-      lastLive = { count: report.live.length, at: Date.now() };
+      const ttys = new Map<number, string>();
+      for (const p of report.live) {
+        if (p && typeof p.pid === 'number' && typeof p.tty === 'string' && p.tty) {
+          ttys.set(p.pid, p.tty);
+        }
+      }
+      lastLive = { count: report.live.length, at: Date.now(), ttys };
     }
   } catch {
     // Not worth a failed report.
@@ -113,6 +130,8 @@ export interface SwitchLogDeps {
   sysctl?: () => Promise<string>;
   /** `ps -A -o %cpu=,comm=`; empty on failure. */
   psTop?: () => Promise<string>;
+  /** `ps -o tty= -p <pid>`; empty on failure. */
+  psTty?: (pid: number) => Promise<string>;
   maxBytes?: number;
   /** Called after the line is written (or dropped). For tests. */
   onWritten?: (record: Record<string, unknown> | null) => void;
@@ -125,8 +144,7 @@ export interface SwitchLogDeps {
  * caller uses `timing?.…`, so the switch then runs untimed.
  */
 export const startSwitchTiming = (
-  sessionId: string,
-  active: boolean,
+  session: Omit<SwitchContext, 'ts'>,
   rawStamp: unknown,
   deps: SwitchLogDeps = {},
 ): SwitchTiming | undefined => {
@@ -138,7 +156,8 @@ export const startSwitchTiming = (
     const stamp = sanitizeStamp(rawStamp);
     const cpusBefore = os.cpus();
     const cpuUsageBefore = process.cpuUsage();
-    const ctx = { ts: new Date(ipc.wallMs).toISOString(), sessionId, active };
+    const ctx: SwitchContext = { ...session, ts: new Date(ipc.wallMs).toISOString() };
+    const pid = pidOrNull(session.pid);
 
     const onFinish = (snap: SwitchSnapshot) => {
       // The samples that describe the span are taken at its end, at once;
@@ -168,12 +187,22 @@ export const startSwitchTiming = (
         (() =>
           run('sysctl', ['-n', 'vm.swapusage', 'kern.memorystatus_vm_pressure_level'], 2000));
       const psTop = deps.psTop ?? (() => run('ps', ['-A', '-o', '%cpu=,comm='], 3000));
-      const [sysctlOut, psOut] = await Promise.all([
+      // The tty the last live-sessions report gave this pid, when it has
+      // one; otherwise one `ps`, here, after the switch.
+      const knownTty = pid !== null ? lastLive?.ttys.get(pid) ?? null : null;
+      const psTty =
+        deps.psTty ??
+        ((p: number) => run('ps', ['-o', 'tty=', '-p', String(p)], 1000));
+      const [sysctlOut, psOut, ttyOut] = await Promise.all([
         sysctl().catch(() => ''),
         isSlowSwitch(ms) ? psTop().catch(() => '') : Promise.resolve(null),
+        pid !== null && !knownTty ? psTty(pid).catch(() => '') : Promise.resolve(null),
       ]);
+      const tty = knownTty ?? parseTty(ttyOut);
       const full: SwitchSystemSample = {
         ...sys,
+        tty,
+        ttySrc: tty ? (knownTty ? 'live-report' : 'ps') : null,
         memory: parseMemoryPressure(sysctlOut),
         ...(psOut !== null ? { top: parseTopCpu(psOut) } : {}),
       };

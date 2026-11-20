@@ -669,7 +669,7 @@ TypeScript is sufficient for MVP. `history.jsonl` reading (~40ms) and session li
 
 Before rewriting any part of the switch path for speed, measure where a switch spends its time. Since 1.0.97 every switch started from the Sessions tab (Enter or a click) appends one JSON line to `~/.config/codev/switch-timing.jsonl`. The question it is meant to answer: is the time in CodeV's own JavaScript, which a rewrite could shorten, or in the external command (`osascript`, or the cmux CLI) and a loaded machine, which it could not?
 
-**What a line holds: timings and counts only.** No title, prompt or path; the only trace of the session is the first 8 characters of its id. The file is capped at about 1 MB: at the cap it is renamed to `switch-timing.jsonl.1` (one old file is kept) and a new one starts. Logging is always on; there is no setting.
+**What a line holds: timings, counts, and which session it was.** Each line names its session — the session id, its title, account label, project path, the pid switched to and that process's tty — so that per-session patterns show up: one crowded terminal window, one account, a session that always falls back to cwd. **Prompts and transcript text are not recorded.** The file stays on this machine and is created owner-only (mode 0600), like the stores beside it. Titles and paths are the owner's own words and directories, so anyone quoting results in public (an issue, a pull request) should replace them with placeholders; the summary script's `--redact` does that. The file is capped at about 1 MB: at the cap it is renamed to `switch-timing.jsonl.1` (one old file is kept) and a new one starts. Logging is always on; there is no setting.
 
 ```
  renderer            main process                                  terminal
@@ -690,9 +690,14 @@ Steps ① to ⑦ are the switch. Step ⑧ runs only after it, so nothing that sp
 
 | Field | Meaning |
 |---|---|
-| `v` | Record version (1). |
+| `v` | Record version. 2 names the session (the six fields below); version 1 lines, written by the first build of this log, carry only `sid`, the first 8 characters of the id. |
 | `ts` | ISO time the IPC arrived in the main process. |
-| `sid` | First 8 characters of the session id. |
+| `sessionId` | The full session id. |
+| `title` | The session's `/rename` title when the switch was started; `null` when it has none. |
+| `account` | The account label the row carried; `null` for the anchor account. |
+| `project` | The session's project path. |
+| `pid` | The process switched to; `null` for a resume, which has none yet. |
+| `tty`, `ttySrc` | That process's controlling terminal (for example `ttys004`), and where the value came from: `live-report` (the last live-sessions report already listed it) or `ps` (one `ps -o tty= -p <pid>`, run after the switch). `null` when there is no pid, the process has no tty, or the lookup failed. |
 | `via` | `enter` or `click`. |
 | `kind` | `switch` (the session was running) or `resume` (it was not; a new tab runs `claude --resume`). |
 | `terminal`, `configured` | Where the switch went after auto-detection, and the terminal named in Settings. |
@@ -719,10 +724,19 @@ Not recorded: the number of terminal tabs (only the terminal knows, and asking w
 To summarize the log:
 
 ```bash
-yarn switch-timing            # or: node scripts/switch-timing-summary.js [file ...]
+yarn switch-timing            # or: node scripts/switch-timing-summary.js [options] [file ...]
+yarn switch-timing --redact   # for anything that will be pasted somewhere public
 ```
 
-It prints p50/p90 (50th and 90th percentile) per step and for the total — for all switches, and grouped by kind, terminal and branch — then the share of the total spent inside the external command, and the total against load: buckets of 1-minute load per core, and Pearson correlations of the total with load and with CPU %. Malformed lines are counted and skipped; a missing or empty log prints "No switch records."
+It prints p50/p90 (50th and 90th percentile) per step and for the total — for all switches, and grouped by kind, terminal, branch and account. Then a per-session table: the number of switches, p50/p90 of the total and of the external command, the terminal, the account, the branch mix (for example `tty×5 cwd×2`), the title and the project path. Then the share of the total spent inside the external command, and the total against load: buckets of 1-minute load per core, and Pearson correlations of the total with load and with CPU %.
+
+| Option | Effect |
+|---|---|
+| `--redact` | Replaces every session id, title, account label and project path with a placeholder (`session-1`, `title of session-1`, `account-1`, `~/project-1`). The numbering follows first appearance in the log, so the same log always gives the same names. Timings, branches, terminals, pids and ttys are kept. |
+| `--all` | Lists every session; the default is the first 20. |
+| `--sort=p90` | Sorts sessions by p90 total, slowest first; the default, `--sort=n`, is by number of switches. |
+
+Malformed lines are counted and skipped; a missing or empty log prints "No switch records." Version 1 lines still count in every grouping except the per-session table (they do not name a session), and fall under `(unknown)` in the account table.
 
 ### `history.jsonl` vs `session-metadata.db`
 

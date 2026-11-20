@@ -2856,7 +2856,17 @@ ipcMain.on(
     }
     // Timing only (switch-timing.ts): undefined if it cannot start, and no
     // call on it can throw, so the switch below runs the same either way.
-    const timing = startSwitchTiming(sessionId, !!isActive, stamp);
+    const timing = startSwitchTiming(
+      {
+        sessionId,
+        active: !!isActive,
+        title: customTitle,
+        accountLabel,
+        projectPath,
+        pid: isActive ? activePid : null,
+      },
+      stamp,
+    );
     // Switching to a running session never needs the path (iTerm2 matches by
     // tty); a resume does — `cd ""` would start the session in the wrong place.
     if (!isActive && !projectPath) {

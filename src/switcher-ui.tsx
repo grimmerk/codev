@@ -352,7 +352,8 @@ export function deleteVSCodeBasedIDESqliteRecord(path: string) {
 
 // When a switch was asked for, for main's switch timing log (switch-timing.ts):
 // the wall clock, and this process's high-resolution clock as epoch ms so main
-// can subtract its own. Counts only — nothing about the session.
+// can subtract its own. The stamp itself carries a time and a row count;
+// which session it was, main already knows from the call's other arguments.
 const switchStamp = (via: 'enter' | 'click', rows: number) => ({
   wallMs: Date.now(),
   perfEpochMs: performance.timeOrigin + performance.now(),
