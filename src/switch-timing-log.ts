@@ -84,7 +84,8 @@ export const appendSwitchLogLine = async (
   if (shouldRotate(size, Buffer.byteLength(data), maxBytes)) {
     await fs.promises.rename(filePath, `${filePath}.1`);
   }
-  await fs.promises.appendFile(filePath, data, 'utf-8');
+  // Owner-only when created, like the marks and lists stores beside it.
+  await fs.promises.appendFile(filePath, data, { encoding: 'utf-8', mode: 0o600 });
 };
 
 // One append at a time: two switches finishing together must not both
