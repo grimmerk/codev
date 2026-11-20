@@ -669,7 +669,7 @@ TypeScript is sufficient for MVP. `history.jsonl` reading (~40ms) and session li
 
 Before rewriting any part of the switch path for speed, measure where a switch spends its time. Since 1.0.97 every switch started from the Sessions tab (Enter or a click) appends one JSON line to `~/.config/codev/switch-timing.jsonl`. The question it is meant to answer: is the time in CodeV's own JavaScript, which a rewrite could shorten, or in the external command (`osascript`, or the cmux CLI) and a loaded machine, which it could not?
 
-**What a line holds: timings, counts, and which session it was.** Each line names its session — the session id, its title, account label, project path, the pid switched to and that process's tty — so that per-session patterns show up: one crowded terminal window, one account, a session that always falls back to cwd. **Prompts and transcript text are not recorded.** The file stays on this machine and is created owner-only (mode 0600), like the stores beside it. Titles and paths are the owner's own words and directories, so anyone quoting results in public (an issue, a pull request) should replace them with placeholders; the summary script's `--redact` does that. The file is capped at about 1 MB: at the cap it is renamed to `switch-timing.jsonl.1` (one old file is kept) and a new one starts. Logging is always on; there is no setting.
+**What a line holds: timings, counts, and which session it was.** Each line names its session — the session id, its title, account label, project path, the pid switched to and that process's tty — so that per-session patterns show up: one crowded terminal window, one account, a session that always falls back to cwd. **The title is the one the Sessions tab shows for the row**: the name the user gave with `/rename`, or, for a session never renamed, the title Claude Code generated — a few words written by the model that summarize the conversation. So a line can carry a summary of what a session was about. **The prompts and the transcript text themselves are not recorded.** The file stays on this machine and is kept owner-only (mode 0600), like the stores beside it: the mode is set again on every write, on the log and on its rotated copy, so a file that was created looser does not stay that way. Titles and paths describe the owner's work, so anyone quoting results in public (an issue, a pull request) should replace them with placeholders; the summary script's `--redact` does that. The file is capped at about 1 MB: at the cap it is renamed to `switch-timing.jsonl.1` (one old file is kept) and a new one starts. Logging is always on; there is no setting.
 
 ```
  renderer            main process                                  terminal
@@ -683,18 +683,24 @@ Before rewriting any part of the switch path for speed, measure where a switch s
                      ⑥ file written, command started (ms.spawn)
                               └──────────────────────────────────► osascript runs
                      ⑦ command exits          (ms.run) ◄────────── prints the branch
-                     ⑧ afterwards: sysctl, ps (slow switches only), append the line
+                     ⑧ afterwards, off the switch's path:
+                        ⑧a sysctl             memory pressure and swap — every switch
+                        ⑧b ps -o tty= -p PID  the tty — only when the last
+                                              live-sessions report did not list the pid
+                        ⑧c ps -A (%CPU)       the three busiest processes — only when
+                                              the switch took over 1 s or timed out
+                        ⑧d append the line
 ```
 
-Steps ① to ⑦ are the switch. Step ⑧ runs only after it, so nothing that spawns a process or touches the disk for the log sits on the switch's path; what the log adds to the path itself is one `os.cpus()` read, one `process.cpuUsage()` and a few clock reads. Any failure in the timing code is swallowed and the switch runs as before.
+Steps ① to ⑦ are the switch. The two `ps` calls in step ⑧ are different commands with different conditions (⑧b looks up one process's tty, ⑧c lists every process's CPU share); a fast switch to a session the live report already knows runs neither. Step ⑧ runs only after the switch, so nothing that spawns a process or touches the disk for the log sits on the switch's path; what the log adds to the path itself is one `os.cpus()` read, one `process.cpuUsage()` and a few clock reads. Any failure in the timing code is swallowed and the switch runs as before.
 
 | Field | Meaning |
 |---|---|
 | `v` | Record version. 2 names the session (the six fields below); version 1 lines, written by the first build of this log, carry only `sid`, the first 8 characters of the id. |
 | `ts` | ISO time the IPC arrived in the main process. |
 | `sessionId` | The full session id. |
-| `title` | The session's `/rename` title when the switch was started; `null` when it has none. |
-| `account` | The account label the row carried; `null` for the anchor account. |
+| `title` | The row's title when the switch was started: the `/rename` name, else the title Claude Code generated (a model-written summary of the conversation); `null` when the session has neither. Cut at 200 characters. |
+| `account` | The row's account label, after the main process has checked that an account with that label exists — the same value the launch is given. Every account has a label, the anchor included. `null` means the row carried no label, or one that no account has any more; it does not mean the anchor. |
 | `project` | The session's project path. |
 | `pid` | The process switched to; `null` for a resume, which has none yet. |
 | `tty`, `ttySrc` | That process's controlling terminal (for example `ttys004`), and where the value came from: `live-report` (the last live-sessions report already listed it) or `ps` (one `ps -o tty= -p <pid>`, run after the switch). `null` when there is no pid, the process has no tty, or the lookup failed. |
@@ -704,18 +710,18 @@ Steps ① to ⑦ are the switch. Step ⑧ runs only after it, so nothing that sp
 | `tool` | What ran the switch: `osascript`, `cmux-cli`, `open` (VS Code, Claude Desktop) or `pty` (the embedded terminal). |
 | `branch` | Which key found the tab: `tty`, `title`, `cwd`, `project-name` (cmux), `none` (the script ran and matched nothing); for a resume `new-tab`, `new-window` or `new-workspace`; `deep-link`, `embedded`. `null` means unknown, for example a script that failed. |
 | `order`, `hasTitle` | Which key the script tried first (`tty-first` or `title-first`), and whether it had a title block at all. |
-| `ok`, `timedOut` | `ok` is false when the launch was rejected; `timedOut` is true when the command had not reported an exit after 15 s (then `ms.run` and `ms.total` are `null`). |
+| `ok`, `timedOut` | `ok` is false when the launch was rejected. `timedOut` is true when the command had not reported an exit after 15 s. The record then says only what was measured: `ms.run`, `ms.main` and `ms.total` are `null` (15 s is when the record was closed, not how long anything took), the earlier steps and `ms.returned` are kept, and `top` is recorded as for a slow switch. |
 | `ms.clickToIpc`, `ms.clickToIpcHr` | ① to ②, on the wall clock (whole ms) and on the two processes' high-resolution clocks. |
 | `ms.settings`, `ms.detect`, `ms.build`, `ms.spawn`, `ms.run` | The steps in the diagram. A step a path skips is `null`, and its time counts in the next one. |
 | `ms.returned` | ② to `openSession` returning. For a running session this is before the script exits. |
-| `ms.main`, `ms.total` | ② to ⑦, and ① to ⑦ (what the user waited). |
+| `ms.main`, `ms.total` | ② to ⑦, and ① to ⑦ (what the user waited). On a path that runs no command (VS Code, Claude Desktop, the embedded terminal) the end is `openSession` returning. Time zero for every `ms` value except the two `clickToIpc` ones is the first thing the handler does, before the timing code's own setup, so that setup is inside `ms.settings` and `ms.main`. |
 | `load`, `ncpu` | `os.loadavg()` at the end of the switch, and the core count. |
 | `cpuPct` | Whole-machine CPU busy % over the span, from two `os.cpus()` samples. `null` for a span too short to measure (the counters tick every 10 ms). |
-| `mainCpuMs` | CPU time CodeV's main process itself used over the span (`process.cpuUsage()` delta). |
+| `mainCpuMs` | An object, `{ "user": …, "system": … }`: the CPU time in ms that CodeV's main process itself used over the span, in user mode and in system mode (`process.cpuUsage()` delta). |
 | `mem` | macOS memory-pressure level (1 normal, 2 warn, 4 critical) and swap in MB — the same `sysctl` reading as the memory chip, taken after the switch. |
 | `claudeProcs`, `liveAgeMs` | Running `claude` processes in the last live-sessions report the window asked for, and how old that report was. No extra `ps` is run for it. |
 | `rows` | Rows in the session list when the switch was started. |
-| `top` | Only when `ms.total` is over 1 s: the three busiest processes (`%CPU`, executable name) right after the switch. |
+| `top` | Only when `ms.total` is over 1 s, or the switch timed out: the three busiest processes (`%CPU`, executable name) right after it. |
 
 The branch costs nothing to record: the switch scripts already end in `return "found-by-tty"` and the like, and `osascript` prints that value. cmux matches in JavaScript, so each layer names itself. No script and no matching order changed.
 
@@ -736,7 +742,14 @@ It prints p50/p90 (50th and 90th percentile) per step and for the total — for 
 | `--all` | Lists every session; the default is the first 20. |
 | `--sort=p90` | Sorts sessions by p90 total, slowest first; the default, `--sort=n`, is by number of switches. |
 
-Malformed lines are counted and skipped; a missing or empty log prints "No switch records." Version 1 lines still count in every grouping except the per-session table (they do not name a session), and fall under `(unknown)` in the account table.
+How to read the tables:
+
+- **`n` is the number of records in the row; a cell ending in `(k)` covers only `k` of them.** Not every record has every step: a resume has no `detect`, and a timed-out switch has no `run`, `main` or `total`. Timed-out switches are counted in the first line of the report and are never part of those three percentiles.
+- **Accounts.** `(none)` is a record whose row had no account label; `(unknown)` is a version 1 line, which did not record one.
+- **Session labels** are the first 8 characters of the id, or more when two sessions would otherwise share a label. Under `--redact` they are the placeholders, never shortened. Only the title is cut (40 characters).
+- **Control characters are removed from everything printed**, with or without `--redact`: a title is free text, and an escape sequence or a line break in one could otherwise drive the terminal or forge a row.
+
+Malformed lines are counted and skipped; a missing or empty log prints "No switch records." Version 1 lines still count in every grouping except the per-session table (they do not name a session).
 
 ### `history.jsonl` vs `session-metadata.db`
 

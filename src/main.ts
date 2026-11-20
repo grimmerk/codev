@@ -2794,7 +2794,7 @@ ipcMain.handle('rename-session-list', (_event, id: string, name: string) => {
 ipcMain.handle('get-live-sessions', async () => {
   try {
     const report = await collectLiveSessions();
-    noteLiveReport(report); // the process count the switch timing log reuses
+    noteLiveReport(report); // the process count and ttys the switch timing log reuses
     return report;
   } catch (err) {
     // null, not an empty report: "we could not look" must never render as
@@ -2861,7 +2861,6 @@ ipcMain.on(
         sessionId,
         active: !!isActive,
         title: customTitle,
-        accountLabel,
         projectPath,
         pid: isActive ? activePid : null,
       },
@@ -2884,6 +2883,8 @@ ipcMain.on(
       typeof accountLabel === 'string' && findAccountByLabel(accountLabel)
         ? accountLabel
         : undefined;
+    // The log gets the label the launch gets, not the renderer's raw one.
+    timing?.set({ account: label ?? null });
     openSession(
       sessionId,
       projectPath,

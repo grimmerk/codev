@@ -13,13 +13,21 @@
  * first); then the total against machine load. Plain Node, no dependencies.
  * A line that is not a record is counted and skipped; a missing or empty
  * file is reported, not an error. Version 1 lines, which did not name their
- * session, count everywhere except the per-session table.
+ * session, count everywhere except the per-session table. A switch whose
+ * command timed out is counted, and left out of the percentiles of the
+ * steps it never finished.
  *
- * The log names sessions: id, title, account label and project path. That
- * is the owner's own data on the owner's machine — but the output of this
- * script gets pasted into issues. `--redact` replaces every one of those
- * with a placeholder (session-1, account-1, ~/project-1) that is stable
- * for a given log, so two runs over the same file can be compared.
+ * The log names sessions: id, title, account label and project path. A
+ * title is the user's `/rename` name or, without one, the summary of the
+ * conversation that Claude Code generated. That is the owner's own data on
+ * the owner's machine — but the output of this script gets pasted into
+ * issues. `--redact` replaces every one of those with a placeholder
+ * (session-1, account-1, ~/project-1) that is stable for a given log, so
+ * two runs over the same file can be compared.
+ *
+ * Everything printed that came from the log or the command line passes
+ * through `safeText` first: a title is free text, and a terminal obeys
+ * escape sequences.
  */
 'use strict';
 
@@ -30,12 +38,28 @@ const path = require('path');
 /** Steps in path order; `total` is what the user waited. */
 const STEPS = ['clickToIpc', 'settings', 'detect', 'build', 'spawn', 'run', 'main', 'total'];
 
+/** Steps that end at the command's exit, which a timed-out switch never reached. */
+const NEEDS_EXIT = new Set(['run', 'main', 'total']);
+
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * One step of one record, or null when it has no measured value. A
+ * timed-out switch has none for the steps that end at the exit — whatever
+ * the line says: a deadline is not a duration.
+ */
+const stepValue = (r, step) => {
+  if (r.timedOut === true && NEEDS_EXIT.has(step)) return null;
+  const v = r.ms ? r.ms[step] : null;
+  return isNum(v) ? v : null;
+};
+
 /**
  * The p-th percentile (0–100) by linear interpolation between the two
  * nearest ranks — the same definition as numpy's default. Null for no data.
  */
 const percentile = (values, p) => {
-  const xs = values.filter((v) => typeof v === 'number' && Number.isFinite(v)).sort((a, b) => a - b);
+  const xs = values.filter(isNum).sort((a, b) => a - b);
   if (xs.length === 0) return null;
   const rank = (Math.min(100, Math.max(0, p)) / 100) * (xs.length - 1);
   const lo = Math.floor(rank);
@@ -45,9 +69,7 @@ const percentile = (values, p) => {
 
 /** Pearson's r over the pairs where both values are numbers; null under 3 pairs or no variance. */
 const pearson = (pairs) => {
-  const ps = pairs.filter(
-    ([x, y]) => typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y),
-  );
+  const ps = pairs.filter(([x, y]) => isNum(x) && isNum(y));
   const n = ps.length;
   if (n < 3) return null;
   const mx = ps.reduce((s, [x]) => s + x, 0) / n;
@@ -81,12 +103,15 @@ const parseLines = (text) => {
   return { records, malformed };
 };
 
+/** `n` is how many records had the step: it can be fewer than the group. */
+const stat = (records, step) => {
+  const xs = records.map((r) => stepValue(r, step)).filter(isNum);
+  return { n: xs.length, p50: percentile(xs, 50), p90: percentile(xs, 90) };
+};
+
 const stepStats = (records) => {
   const out = {};
-  for (const step of STEPS) {
-    const xs = records.map((r) => r.ms[step]).filter((v) => typeof v === 'number' && Number.isFinite(v));
-    out[step] = { n: xs.length, p50: percentile(xs, 50), p90: percentile(xs, 90) };
-  }
+  for (const step of STEPS) out[step] = stat(records, step);
   return out;
 };
 
@@ -103,16 +128,18 @@ const groupBy = (records, keyOf) => {
 };
 
 const UNKNOWN = '(unknown)';
+const NO_ACCOUNT = '(none)';
 
 /** A record that names its session (version 2 on). */
 const namesSession = (r) => typeof r.sessionId === 'string' && r.sessionId !== '';
 
 /**
- * The account a record belongs to. A v2 record with no label is the anchor
- * account (it carries none); a v1 record never said.
+ * The account a record carries. Every account has a label, the anchor
+ * included, so a v2 record without one is a row that had no account (or
+ * named one that no longer exists) — not the anchor. A v1 record never said.
  */
 const accountOf = (r) =>
-  typeof r.account === 'string' && r.account ? r.account : namesSession(r) ? '(anchor)' : UNKNOWN;
+  typeof r.account === 'string' && r.account ? r.account : namesSession(r) ? NO_ACCOUNT : UNKNOWN;
 
 /** `tty×5 cwd×2`: how often each branch found the tab, most frequent first. */
 const branchMix = (records) => {
@@ -141,7 +168,6 @@ const sessionRows = (records, sort = 'n') => {
     if (!groups.has(r.sessionId)) groups.set(r.sessionId, []);
     groups.get(r.sessionId).push(r);
   }
-  const num = (xs) => xs.filter((v) => typeof v === 'number' && Number.isFinite(v));
   const rows = [...groups.entries()].map(([sessionId, rs]) => {
     const last = (key) => {
       for (let i = rs.length - 1; i >= 0; i--) {
@@ -149,8 +175,8 @@ const sessionRows = (records, sort = 'n') => {
       }
       return null;
     };
-    const totals = num(rs.map((r) => r.ms.total));
-    const runs = num(rs.map((r) => r.ms.run));
+    const total = stat(rs, 'total');
+    const run = stat(rs, 'run');
     return {
       sessionId,
       title: last('title'),
@@ -159,10 +185,12 @@ const sessionRows = (records, sort = 'n') => {
       terminals: distinct(rs.map((r) => r.terminal)),
       ttys: distinct(rs.map((r) => r.tty)),
       n: rs.length,
-      totalP50: percentile(totals, 50),
-      totalP90: percentile(totals, 90),
-      runP50: percentile(runs, 50),
-      runP90: percentile(runs, 90),
+      totalN: total.n,
+      totalP50: total.p50,
+      totalP90: total.p90,
+      runN: run.n,
+      runP50: run.p50,
+      runP90: run.p90,
       branches: branchMix(rs),
     };
   });
@@ -208,9 +236,7 @@ const redactRecords = (records) => {
 
 /** 1-minute load per core: comparable across machines. */
 const loadPerCore = (r) =>
-  Array.isArray(r.load) && typeof r.load[0] === 'number' && typeof r.ncpu === 'number' && r.ncpu > 0
-    ? r.load[0] / r.ncpu
-    : null;
+  Array.isArray(r.load) && isNum(r.load[0]) && isNum(r.ncpu) && r.ncpu > 0 ? r.load[0] / r.ncpu : null;
 
 const LOAD_BUCKETS = [
   { label: 'load/core < 0.5', lo: 0, hi: 0.5 },
@@ -220,16 +246,18 @@ const LOAD_BUCKETS = [
 ];
 
 const summarize = (records, opts = {}) => {
-  const total = (r) => r.ms.total;
+  const total = (r) => stepValue(r, 'total');
+  const run = (r) => stepValue(r, 'run');
+  const load1 = (r) => (Array.isArray(r.load) ? r.load[0] : null);
   // Of each switch's total, the part spent inside the external command.
   const runShare = records
-    .filter((r) => typeof r.ms.run === 'number' && typeof r.ms.total === 'number' && r.ms.total > 0)
-    .map((r) => r.ms.run / r.ms.total);
+    .filter((r) => isNum(run(r)) && isNum(total(r)) && total(r) > 0)
+    .map((r) => run(r) / total(r));
   return {
     count: records.length,
     timedOut: records.filter((r) => r.timedOut === true).length,
     failed: records.filter((r) => r.ok === false).length,
-    slow: records.filter((r) => typeof r.ms.total === 'number' && r.ms.total > 1000).length,
+    slow: records.filter((r) => isNum(total(r)) && total(r) > 1000).length,
     all: stepStats(records),
     byKind: groupBy(records, (r) => String(r.kind ?? 'unknown')),
     byTerminal: groupBy(records, (r) => String(r.terminal ?? 'unknown')),
@@ -244,37 +272,117 @@ const summarize = (records, opts = {}) => {
           const l = loadPerCore(r);
           return l !== null && l >= b.lo && l < b.hi;
         });
-        const xs = rs.map(total);
-        return { label: b.label, n: rs.length, p50: percentile(xs, 50), p90: percentile(xs, 90) };
+        // `records` is the bucket's size; `n` (from `stat`) is how many had a total.
+        return { label: b.label, records: rs.length, ...stat(rs, 'total') };
       }),
-      rTotalVsLoad1: pearson(records.map((r) => [Array.isArray(r.load) ? r.load[0] : null, total(r)])),
+      rTotalVsLoad1: pearson(records.map((r) => [load1(r), total(r)])),
       rTotalVsCpuPct: pearson(records.map((r) => [r.cpuPct, total(r)])),
-      rRunVsLoad1: pearson(records.map((r) => [Array.isArray(r.load) ? r.load[0] : null, r.ms.run])),
+      rRunVsLoad1: pearson(records.map((r) => [load1(r), run(r)])),
     },
   };
 };
 
-const fmt = (v) => (v === null || v === undefined ? '—' : v.toFixed(v < 10 ? 1 : 0));
-const pad = (s, w) => String(s).padEnd(w);
-const padL = (s, w) => String(s).padStart(w);
+// --- printing ---
 
-const stepTable = (title, groups) => {
-  const lines = [title];
-  lines.push(`  ${pad('', 16)}${padL('n', 5)}  ${STEPS.map((s) => padL(s, 13)).join('')}`);
-  for (const g of groups) {
-    const cells = STEPS.map((s) => padL(`${fmt(g.steps[s].p50)}/${fmt(g.steps[s].p90)}`, 13)).join('');
-    lines.push(`  ${pad(g.key, 16)}${padL(g.n, 5)}  ${cells}`);
-  }
-  return lines.join('\n');
+// C0 controls, DEL, C1 controls, the two Unicode line separators, and the
+// bidirectional overrides and isolates. ESC and CSI start the sequences a
+// terminal obeys (move the cursor, set the window title, write the
+// clipboard); a line break forges a row; a bidi override reorders one.
+const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+/**
+ * Any value as text that is safe to print: the characters above are
+ * removed. The one way a value from the log or the command line reaches
+ * the terminal — `renderTable` applies it to every cell, and the few lines
+ * printed outside a table use it directly.
+ */
+const safeText = (v) => String(v ?? '').replace(UNSAFE_CHARS, '');
+
+/** Length in code points: what `clip` and the column widths count. */
+const textLength = (s) => Array.from(s).length;
+
+/** At most `w` code points, the last an ellipsis when cut. Never splits a surrogate pair. */
+const clip = (s, w) => {
+  const chars = Array.from(String(s));
+  return chars.length > w ? `${chars.slice(0, Math.max(0, w - 1)).join('')}…` : chars.join('');
 };
+
+/**
+ * Rows of cells as aligned text. Each column is as wide as its widest cell,
+ * so nothing is cut to fit: a cell that must be short is clipped by its
+ * caller, on purpose. `align[i]` is 'r' for a right-aligned column. The last
+ * column is not padded.
+ */
+const renderTable = (headers, rows, align = []) => {
+  const all = [headers, ...rows].map((row) => row.map(safeText));
+  const widths = headers.map((_, i) => Math.max(...all.map((row) => textLength(row[i] ?? ''))));
+  return all
+    .map((row) => {
+      const cells = row.map((cell, i) => {
+        const gap = ' '.repeat(Math.max(0, widths[i] - textLength(cell)));
+        if (align[i] === 'r') return gap + cell;
+        return i === row.length - 1 ? cell : cell + gap;
+      });
+      return `  ${cells.join('  ')}`.replace(/\s+$/, '');
+    })
+    .join('\n');
+};
+
+const fmt = (v) => (v === null || v === undefined ? '—' : v.toFixed(v < 10 ? 1 : 0));
+
+/**
+ * `p50/p90`, followed by `(k)` when only k of the group's n records had the
+ * step — a resume has no `detect`, a timed-out switch no `total` — so a
+ * percentile is never read as covering records it does not.
+ */
+const statCell = (s, groupN) => {
+  if (s.n === 0) return '—';
+  return `${fmt(s.p50)}/${fmt(s.p90)}${s.n !== groupN ? ` (${s.n})` : ''}`;
+};
+
+const stepTable = (title, label, groups) =>
+  [
+    title,
+    renderTable(
+      [label, 'n', ...STEPS],
+      groups.map((g) => [g.key, String(g.n), ...STEPS.map((s) => statCell(g.steps[s], g.n))]),
+      ['l', 'r', ...STEPS.map(() => 'r')],
+    ),
+  ].join('\n');
 
 /** Sessions shown unless `--all`. */
 const SESSION_ROWS_DEFAULT = 20;
+const SESSION_ID_MIN = 8;
+const TITLE_MAX = 40;
 
-const clip = (s, w) => (s.length > w ? `${s.slice(0, w - 1)}…` : s);
+/**
+ * `~/rest` for a path at or under the home directory. Under means past a
+ * separator: `/Users/al-work` is not inside `/Users/al`.
+ */
+const tildePath = (p, home) => {
+  const h = String(home || '').replace(/\/+$/, '');
+  if (!h) return p;
+  if (p === h) return '~';
+  return p.startsWith(`${h}/`) ? `~${p.slice(h.length)}` : p;
+};
+
+/**
+ * A short label per session id: the first 8 characters, or as many more as
+ * it takes for no two of the given ids to share a label. A placeholder from
+ * `--redact` is already short and is its own label — `session-10` and
+ * `session-11` must not be cut to the same thing.
+ */
+const sessionLabels = (ids, redacted) => {
+  if (redacted) return new Map(ids.map((id) => [id, id]));
+  const longest = Math.max(SESSION_ID_MIN, ...ids.map((id) => id.length));
+  for (let len = SESSION_ID_MIN; len <= longest; len++) {
+    const labels = ids.map((id) => id.slice(0, len));
+    if (new Set(labels).size === new Set(ids).size) return new Map(ids.map((id, i) => [id, labels[i]]));
+  }
+  return new Map(ids.map((id) => [id, id]));
+};
 
 const sessionTable = (s, opts) => {
-  const home = os.homedir();
   const shown = opts.all ? s.sessions : s.sessions.slice(0, SESSION_ROWS_DEFAULT);
   const lines = [
     `By session (${shown.length} of ${s.sessions.length}, sorted by ${
@@ -282,24 +390,31 @@ const sessionTable = (s, opts) => {
     }${s.unnamed ? `; ${s.unnamed} older record(s) do not name a session` : ''})`,
   ];
   if (shown.length === 0) return lines.concat('  (no record names its session)').join('\n');
-  lines.push(
-    `  ${pad('session', 10)}${padL('n', 4)}  ${padL('total p50/p90', 14)}  ${padL('run p50/p90', 12)}  ${pad('terminal', 10)}${pad('account', 12)}${pad('branches', 24)}title · project`,
+  // Labels are unique among ALL sessions, so a row means the same with and without --all.
+  const labels = sessionLabels(
+    s.sessions.map((row) => row.sessionId),
+    !!opts.redact,
   );
-  for (const row of shown) {
-    const id = /^session-\d+$/.test(row.sessionId) ? row.sessionId : row.sessionId.slice(0, 8);
-    const project = row.project
-      ? row.project.startsWith(home) ? `~${row.project.slice(home.length)}` : row.project
-      : '—';
-    lines.push(
-      `  ${pad(clip(id, 9), 10)}${padL(row.n, 4)}  ${padL(`${fmt(row.totalP50)}/${fmt(row.totalP90)}`, 14)}  ${padL(
-        `${fmt(row.runP50)}/${fmt(row.runP90)}`,
-        12,
-      )}  ${pad(clip(row.terminals.join(',') || '—', 9), 10)}${pad(clip(row.account, 11), 12)}${pad(
-        clip(row.branches, 23),
-        24,
-      )}${clip(row.title || '(no title)', 40)} · ${project}`,
-    );
-  }
+  const home = opts.home ?? os.homedir();
+  lines.push(
+    renderTable(
+      ['session', 'n', 'total p50/p90', 'run p50/p90', 'terminal', 'account', 'branches', 'title · project'],
+      shown.map((row) => [
+        labels.get(row.sessionId),
+        String(row.n),
+        statCell({ n: row.totalN, p50: row.totalP50, p90: row.totalP90 }, row.n),
+        statCell({ n: row.runN, p50: row.runP50, p90: row.runP90 }, row.n),
+        row.terminals.join(',') || '—',
+        row.account,
+        row.branches,
+        // Cleaned before it is clipped, so the 40 are 40 visible characters.
+        `${clip(safeText(row.title || '(no title)'), TITLE_MAX)} · ${
+          row.project ? tildePath(safeText(row.project), home) : '—'
+        }`,
+      ]),
+      ['l', 'r', 'r', 'r'],
+    ),
+  );
   if (shown.length < s.sessions.length) lines.push('  … --all lists every session');
   return lines.join('\n');
 };
@@ -319,16 +434,19 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
     'Cells are p50/p90 in ms. Steps: clickToIpc (renderer → main), settings, detect',
     '(which terminal), build (script text), spawn (write + start), run (the external',
     'command), main (IPC → done), total (click → done).',
+    'n is the records in the row. A cell ending in (k) is over only k of them: the',
+    'rest have no value for that step (a resume does not detect; a timed-out switch',
+    'has no run, main or total).',
     '',
-    stepTable('All', [{ key: 'all', n: s.count, steps: s.all }]),
+    stepTable('All', '', [{ key: 'all', n: s.count, steps: s.all }]),
     '',
-    stepTable('By kind', s.byKind),
+    stepTable('By kind', 'kind', s.byKind),
     '',
-    stepTable('By terminal', s.byTerminal),
+    stepTable('By terminal', 'terminal', s.byTerminal),
     '',
-    stepTable('By branch', s.byBranch),
+    stepTable('By branch', 'branch', s.byBranch),
     '',
-    stepTable('By account', s.byAccount),
+    stepTable('By account', 'account', s.byAccount),
     '',
     sessionTable(s, opts),
     '',
@@ -337,8 +455,10 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
     }`,
     '',
     'Total vs load (1-minute load average per core)',
-    ...s.load.buckets.map(
-      (b) => `  ${pad(b.label, 18)}${padL(b.n, 5)}  p50 ${padL(fmt(b.p50), 6)}  p90 ${padL(fmt(b.p90), 6)}`,
+    renderTable(
+      ['', 'n', 'total p50/p90'],
+      s.load.buckets.map((b) => [b.label, String(b.records), statCell(b, b.records)]),
+      ['l', 'r', 'r'],
     ),
     `  Pearson r, total vs 1-min load: ${r(s.load.rTotalVsLoad1)}`,
     `  Pearson r, run   vs 1-min load: ${r(s.load.rRunVsLoad1)}`,
@@ -380,7 +500,7 @@ const parseArgs = (argv) => {
 const main = (argv) => {
   const opts = parseArgs(argv);
   if (opts.bad.length > 0) {
-    console.error(`unknown option: ${opts.bad.join(' ')}`);
+    console.error(`unknown option: ${safeText(opts.bad.join(' '))}`);
     console.error('usage: switch-timing-summary.js [--redact] [--all] [--sort=n|p90] [file ...]');
     process.exitCode = 2;
     return;
@@ -389,7 +509,7 @@ const main = (argv) => {
   const files = explicit ? opts.files : defaultFiles();
   const { text, missing } = readFiles(files);
   // The rotated file is optional; only a file the user named is worth a note.
-  if (explicit) for (const f of missing) console.error(`cannot read ${f}`);
+  if (explicit) for (const f of missing) console.error(`cannot read ${safeText(f)}`);
   const { records, malformed } = parseLines(text);
   const shown = opts.redact ? redactRecords(records) : records;
   console.log(formatReport(summarize(shown, opts), malformed, opts));
@@ -405,8 +525,13 @@ module.exports = {
   formatReport,
   stepStats,
   sessionRows,
+  sessionLabels,
   branchMix,
   redactRecords,
   parseArgs,
+  safeText,
+  clip,
+  tildePath,
+  renderTable,
   STEPS,
 };

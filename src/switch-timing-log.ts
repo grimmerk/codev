@@ -4,14 +4,17 @@
  * when the switch is over, sample the machine and append one JSON line to
  * `~/.config/codev/switch-timing.jsonl`, beside the marks and lists stores.
  * The line names the session (id, title, account, project path, pid, tty),
- * so the file is created owner-only; it never holds prompts or transcript
- * text.
+ * so the file and its rotated copy are kept owner-only. A title can be a
+ * summary of the conversation that Claude Code generated; the prompts and
+ * the transcript text themselves are not written.
  *
  * On the switch's path this costs one `os.cpus()` read, one
  * `process.cpuUsage()` and a few clock reads. Everything that spawns or
- * touches the disk — `sysctl` for memory pressure, `ps` for a slow switch,
- * the append itself — runs after the switch has finished, and a failure in
- * any of it is dropped: the switch has already happened.
+ * touches the disk — `sysctl` for memory pressure, a `ps` for the tty when
+ * the last live-sessions report did not have it, another `ps` for the
+ * busiest processes after a slow or timed-out switch, the append itself —
+ * runs after the switch has finished, and a failure in any of it is
+ * dropped: the switch has already happened.
  *
  * No Electron imports, so the whole path runs under vitest.
  */
@@ -81,9 +84,23 @@ export const resetLiveReportNote = (): void => {
 
 // --- append with rotation ---
 
+/** Owner-only, whatever the file was created as. A missing file is fine. */
+const makeOwnerOnly = async (filePath: string): Promise<void> => {
+  try {
+    await fs.promises.chmod(filePath, 0o600);
+  } catch {
+    // Not there, or not ours to change: the append below decides.
+  }
+};
+
 /**
  * Append one line, moving the file to `<file>.1` first when the line would
  * take it past the cap. One old file is kept; the one before it is replaced.
+ *
+ * Both files are set to 0600 on every append, not only when created: the
+ * `mode` of an append applies to a new file only, so a log that an earlier
+ * build (or anything else) left group- or world-readable would stay so, and
+ * rotation would carry that mode over to `.1`.
  */
 export const appendSwitchLogLine = async (
   filePath: string,
@@ -98,9 +115,13 @@ export const appendSwitchLogLine = async (
     // No file yet.
   }
   const data = line.endsWith('\n') ? line : `${line}\n`;
+  // Before the rename, so the rotated file is already owner-only.
+  await makeOwnerOnly(filePath);
   if (shouldRotate(size, Buffer.byteLength(data), maxBytes)) {
     await fs.promises.rename(filePath, `${filePath}.1`);
   }
+  // A `.1` this append did not just create may predate the rule.
+  await makeOwnerOnly(`${filePath}.1`);
   // Owner-only when created, like the marks and lists stores beside it.
   await fs.promises.appendFile(filePath, data, { encoding: 'utf-8', mode: 0o600 });
 };
@@ -133,6 +154,8 @@ export interface SwitchLogDeps {
   /** `ps -o tty= -p <pid>`; empty on failure. */
   psTty?: (pid: number) => Promise<string>;
   maxBytes?: number;
+  /** How long to wait for a command that never reports its exit. For tests. */
+  deadlineMs?: number;
   /** Called after the line is written (or dropped). For tests. */
   onWritten?: (record: Record<string, unknown> | null) => void;
 }
@@ -149,9 +172,12 @@ export const startSwitchTiming = (
   deps: SwitchLogDeps = {},
 ): SwitchTiming | undefined => {
   try {
+    // The clock first: everything below, the CPU snapshots included, is
+    // part of what main spends on a switch and belongs inside `main`.
+    const origin = performance.now();
     const ipc = {
       wallMs: Date.now(),
-      perfEpochMs: performance.timeOrigin + performance.now(),
+      perfEpochMs: performance.timeOrigin + origin,
     };
     const stamp = sanitizeStamp(rawStamp);
     const cpusBefore = os.cpus();
@@ -195,7 +221,7 @@ export const startSwitchTiming = (
         ((p: number) => run('ps', ['-o', 'tty=', '-p', String(p)], 1000));
       const [sysctlOut, psOut, ttyOut] = await Promise.all([
         sysctl().catch(() => ''),
-        isSlowSwitch(ms) ? psTop().catch(() => '') : Promise.resolve(null),
+        isSlowSwitch(ms, snap.timedOut) ? psTop().catch(() => '') : Promise.resolve(null),
         pid !== null && !knownTty ? psTty(pid).catch(() => '') : Promise.resolve(null),
       ]);
       const tty = knownTty ?? parseTty(ttyOut);
@@ -217,7 +243,12 @@ export const startSwitchTiming = (
       deps.onWritten?.(record);
     };
 
-    return createSwitchTiming({ now: () => performance.now(), onFinish });
+    return createSwitchTiming({
+      now: () => performance.now(),
+      origin,
+      onFinish,
+      deadlineMs: deps.deadlineMs,
+    });
   } catch {
     return undefined;
   }

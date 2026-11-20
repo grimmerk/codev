@@ -17,11 +17,14 @@
  * - **A record says which session it was, and nothing a session said.**
  *   It holds the session id, its title, account label, project path, pid
  *   and tty, so that per-session patterns show (one crowded window, one
- *   account, a session that always falls back to cwd). Prompts and
- *   transcript text are never recorded. The log stays on this machine in an
- *   owner-only (0600) file; titles and paths are the owner's, so results
- *   quoted anywhere public should carry placeholders instead (the summary
- *   script's `--redact`).
+ *   account, a session that always falls back to cwd). The title is
+ *   whatever the Sessions tab shows for the row: the name the user gave
+ *   with `/rename`, or else the one Claude Code generated — a model-written
+ *   summary of the conversation in a few words. The prompts and the
+ *   transcript text themselves are not recorded. The log stays on this
+ *   machine in an owner-only (0600) file; titles and paths describe the
+ *   owner's work, so results quoted anywhere public should carry
+ *   placeholders instead (the summary script's `--redact`).
  */
 
 /** Points on the path, in the order a terminal switch passes them. */
@@ -64,8 +67,14 @@ export interface SwitchFacts {
   branch?: SwitchBranch | null;
   /** Which key the script tried first. */
   order?: 'tty-first' | 'title-first';
-  /** Whether the script carried a title block at all (a `/rename`d session). */
+  /** Whether the script carried a title block at all (the row had a title). */
   hasTitle?: boolean;
+  /**
+   * The row's account label once main has checked that an account carries
+   * it — the same value the launch is given. Null: the row had none, or
+   * named an account that does not exist.
+   */
+  account?: string | null;
 }
 
 /** What the renderer stamps on the click that starts a switch. */
@@ -116,6 +125,12 @@ export interface SwitchTiming {
 export interface SwitchTimingDeps {
   /** A monotonic clock in ms. */
   now: () => number;
+  /**
+   * The reading of `now` that is time zero — the IPC's arrival. Given when
+   * the caller read the clock before doing anything else, so that its own
+   * setup is inside the measurement; otherwise the clock is read here.
+   */
+  origin?: number;
   onFinish: (snapshot: SwitchSnapshot) => void;
   /** How long to wait for a command that never reports its exit. */
   deadlineMs?: number;
@@ -145,7 +160,7 @@ export const branchFromSwitchOutput = (
 };
 
 export const createSwitchTiming = (deps: SwitchTimingDeps): SwitchTiming => {
-  const t0 = deps.now();
+  const t0 = typeof deps.origin === 'number' ? deps.origin : deps.now();
   const marks: Partial<Record<SwitchMark, number>> = {};
   let facts: SwitchFacts = {};
   let spawnedAt: number | null = null;
@@ -285,9 +300,12 @@ export interface SwitchStepMs {
   run: number | null;
   /** IPC arrival to `openSession` returning. */
   returned: number | null;
-  /** IPC arrival to the end: the command's exit, else `openSession` returning. */
+  /**
+   * IPC arrival to the end: the command's exit, else `openSession`
+   * returning. Null when the command timed out.
+   */
   main: number | null;
-  /** `clickToIpc + main`: what the user waited. */
+  /** `clickToIpc + main`: what the user waited. Null when the command timed out. */
   total: number | null;
 }
 
@@ -304,9 +322,12 @@ export const stepDurations = (
   const { marks, spawnedAt, exitedAt } = snap;
   const afterSettings = marks.settings ?? 0;
   const beforeScript = marks.detect ?? afterSettings;
-  // A command that timed out never reported an exit; the record's end is
-  // then the deadline, which is not a duration of anything.
-  const end = snap.timedOut ? null : exitedAt ?? marks.returned ?? snap.endedAt;
+  // The end is the command's exit, or `openSession` returning on a path
+  // that runs no command (the collector always marks `returned` before it
+  // closes). A command that timed out never reported an exit: the record
+  // then closed at the deadline, which is not a duration of anything, so
+  // `run`, `main` and `total` stay null and `returned` is what is known.
+  const end = snap.timedOut ? null : exitedAt ?? marks.returned ?? null;
   const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
   const clickToIpc = stamp && finite(stamp.wallMs) ? ipc.wallMs - stamp.wallMs : null;
   const clickToIpcHr =
@@ -337,7 +358,7 @@ export interface SwitchSystemSample {
   /** Running `claude` processes in the last live-sessions report, and its age. */
   claudeProcs?: number | null;
   liveAgeMs?: number | null;
-  /** Only for a slow switch: the busiest processes right after it. */
+  /** Only for a slow or timed-out switch: the busiest processes right after it. */
   top?: { cpu: number; comm: string }[];
   /** The target process's controlling terminal, and where the value came from. */
   tty?: string | null;
@@ -349,20 +370,27 @@ export interface SwitchContext {
   ts: string;
   sessionId: string;
   active: boolean;
-  /** The session's `/rename` title, as the click carried it. */
+  /** The row's title as the click carried it: `/rename`d, or generated. */
   title?: string | null;
-  /** The account label the row carried; none for the anchor account. */
-  accountLabel?: string | null;
   projectPath?: string | null;
   /** The process switched to; none for a resume. */
   pid?: number | null;
 }
 
-/** A title is one line of the user's own text; anything longer is cut. */
+/** A title is a line of text; anything longer is cut. In code points. */
 export const SWITCH_TITLE_MAX = 200;
 
-const textOrNull = (v: unknown, max = 4096): string | null =>
-  typeof v === 'string' && v !== '' ? v.slice(0, max) : null;
+/**
+ * A non-empty string of at most `max` code points, else null. Cut by code
+ * point, not by UTF-16 unit: a cut through the middle of an emoji would
+ * leave half a character at the end of the value.
+ */
+export const textOrNull = (v: unknown, max = 4096): string | null => {
+  if (typeof v !== 'string' || v === '') return null;
+  // `length` counts UTF-16 units, never fewer than the code points.
+  if (v.length <= max) return v;
+  return Array.from(v).slice(0, max).join('');
+};
 
 /** A usable pid, else null: the value crossed an IPC boundary. */
 export const pidOrNull = (v: unknown): number | null =>
@@ -405,8 +433,13 @@ export const SWITCH_RECORD_VERSION = 2;
 /** A switch slower than this also records the busiest processes. */
 export const SLOW_SWITCH_MS = 1000;
 
-export const isSlowSwitch = (ms: SwitchStepMs): boolean =>
-  typeof ms.total === 'number' && ms.total > SLOW_SWITCH_MS;
+/**
+ * Slow enough to also ask what the machine was busy with. A switch whose
+ * command never reported back has no total to compare — and is the slowest
+ * kind there is, so it always counts.
+ */
+export const isSlowSwitch = (ms: SwitchStepMs, timedOut = false): boolean =>
+  timedOut || (typeof ms.total === 'number' && ms.total > SLOW_SWITCH_MS);
 
 export const buildSwitchRecord = (
   ctx: SwitchContext,
@@ -419,7 +452,7 @@ export const buildSwitchRecord = (
   ts: ctx.ts,
   sessionId: textOrNull(ctx.sessionId, 128),
   title: textOrNull(ctx.title, SWITCH_TITLE_MAX),
-  account: textOrNull(ctx.accountLabel, 128),
+  account: textOrNull(snap.facts.account, 128),
   project: textOrNull(ctx.projectPath),
   pid: pidOrNull(ctx.pid),
   tty: sys.tty ?? null,

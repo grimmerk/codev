@@ -15,6 +15,7 @@ import {
   shouldRotate,
   stepDurations,
   SwitchSnapshot,
+  textOrNull,
 } from './switch-timing';
 import {
   appendSwitchLogLine,
@@ -113,6 +114,22 @@ describe('createSwitchTiming', () => {
     h.timing.settle(true);
     expect(h.finished).toHaveLength(1);
     expect(h.finished[0].ok).toBe(false);
+  });
+
+  it('measures from the origin it is given, not from its own creation', () => {
+    // The caller read the clock at 90, then spent 10 ms setting up.
+    let now = 100;
+    const finished: SwitchSnapshot[] = [];
+    const timing = createSwitchTiming({
+      now: () => now,
+      origin: 90,
+      onFinish: (s) => finished.push(s),
+    });
+    now = 103;
+    timing.mark('settings');
+    now = 120;
+    timing.settle(true);
+    expect(finished[0].marks).toEqual({ settings: 13, returned: 30 });
   });
 
   it('never throws into the switch, even when the sink does', () => {
@@ -235,13 +252,31 @@ describe('stepDurations', () => {
       undefined,
       ipc,
     );
+    // The 15 s deadline is when the record closed, not how long anything took.
     expect(timedOut.total).toBeNull();
+    expect(timedOut.main).toBeNull();
     expect(timedOut.run).toBeNull();
+    // What was measured stays: main got its answer back after 5 ms.
+    expect(timedOut.returned).toBe(5);
+    expect(timedOut.spawn).toBe(4);
     expect(timedOut.clickToIpc).toBeNull();
-    expect(isSlowSwitch(timedOut)).toBe(false);
     // Without a stamp the total is main's own span, not a guess.
     const noStamp = stepDurations(snap({ marks: { returned: 5 }, endedAt: 5 }), undefined, ipc);
     expect(noStamp.total).toBe(5);
+  });
+
+  it('counts a timed-out switch as slow although it has no total', () => {
+    const fast = stepDurations(snap({ marks: { returned: 5 }, endedAt: 5 }), undefined, ipc);
+    expect(isSlowSwitch(fast)).toBe(false);
+    expect(isSlowSwitch(fast, true)).toBe(true);
+    const slow = stepDurations(
+      snap({ marks: { returned: 5 }, spawnedAt: 5, exitedAt: 1001 }),
+      undefined,
+      ipc,
+    );
+    expect(slow.total).toBe(1001);
+    expect(isSlowSwitch(slow)).toBe(true);
+    expect(isSlowSwitch({ ...slow, total: 1000 })).toBe(false);
   });
 
   it('does not let a renderer clock that runs ahead shorten the total', () => {
@@ -335,7 +370,6 @@ describe('the log file', () => {
     sessionId: '0f1e2d3c-aaaa-bbbb-cccc-123456789abc',
     active: true,
     title: 'an example title',
-    accountLabel: 'second',
     projectPath: '/Users/someone/code/example',
     pid: 4242,
   };
@@ -346,8 +380,11 @@ describe('the log file', () => {
       sysctl?: () => Promise<string>;
       psTop?: () => Promise<string>;
       psTty?: (pid: number) => Promise<string>;
+      deadlineMs?: number;
     } = {},
     session: Parameters<typeof startSwitchTiming>[0] = SESSION,
+    // What main does once it has validated the row's label; `never` hangs the command.
+    { account = 'second' as string | null, exits = true } = {},
   ) =>
     new Promise<Record<string, unknown> | null>((resolve) => {
       const timing = startSwitchTiming(
@@ -365,10 +402,11 @@ describe('the log file', () => {
       );
       timing.set({ configured: 'iterm2', terminal: 'ghostty', order: 'tty-first' });
       timing.mark('settings');
+      timing.set({ account });
       timing.mark('script');
       timing.spawned();
       timing.settle(true);
-      timing.exited('found-by-title\n');
+      if (exits) timing.exited('found-by-title\n');
     });
 
   it('writes one line per switch, naming the session it was', async () => {
@@ -434,6 +472,57 @@ describe('the log file', () => {
     ]);
   });
 
+  it('samples the busiest processes for a command that never reports back', async () => {
+    // The hung command is the case the sample exists for, and it has no total.
+    let psCalls = 0;
+    const record = await runSwitch(
+      { wallMs: Date.now(), perfEpochMs: performance.timeOrigin + performance.now(), via: 'click', rows: 1 },
+      {
+        deadlineMs: 20,
+        psTop: async () => {
+          psCalls++;
+          return ' 97.5 /usr/libexec/stuckd\n';
+        },
+      },
+      SESSION,
+      { exits: false },
+    );
+    expect(psCalls).toBe(1);
+    expect(record).toMatchObject({
+      timedOut: true,
+      branch: null,
+      top: [{ cpu: 97.5, comm: 'stuckd' }],
+    });
+    const ms = record.ms as Record<string, number | null>;
+    expect(ms.run).toBeNull();
+    expect(ms.main).toBeNull();
+    expect(ms.total).toBeNull();
+    expect(ms.returned).toBeGreaterThanOrEqual(0);
+    expect(ms.returned).toBeLessThan(20); // measured, not the deadline
+  });
+
+  it('makes an existing log and its rotated copy owner-only, not just a new one', async () => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'old line\n', { mode: 0o644 });
+    fs.writeFileSync(`${file}.1`, 'older line\n', { mode: 0o644 });
+    fs.chmodSync(file, 0o644); // past the umask
+    fs.chmodSync(`${file}.1`, 0o644);
+    const mode = (f: string) => fs.statSync(f).mode & 0o777;
+
+    // An append that does not rotate fixes both files.
+    await appendSwitchLogLine(file, 'new line', 1000);
+    expect(mode(file)).toBe(0o600);
+    expect(mode(`${file}.1`)).toBe(0o600);
+    expect(fs.readFileSync(file, 'utf-8')).toBe('old line\nnew line\n');
+
+    // A rotation carries no loose mode over to `.1`.
+    fs.chmodSync(file, 0o644);
+    await appendSwitchLogLine(file, 'x'.repeat(40), 30);
+    expect(fs.readFileSync(`${file}.1`, 'utf-8')).toBe('old line\nnew line\n');
+    expect(mode(`${file}.1`)).toBe(0o600);
+    expect(mode(file)).toBe(0o600);
+  });
+
   it('takes the tty from the last live-sessions report instead of spawning ps', async () => {
     noteLiveReport({
       live: [
@@ -466,6 +555,7 @@ describe('the log file', () => {
         },
       },
       { sessionId: 'abc', active: false, pid: null },
+      { account: null },
     );
     expect(record).toMatchObject({
       v: 2,
@@ -520,7 +610,40 @@ describe('parseTty', () => {
   });
 });
 
+describe('textOrNull', () => {
+  it('cuts by code point, so a cut never leaves half a character', () => {
+    const emoji = '\u{1F600}'; // two UTF-16 units
+    const cut = textOrNull(`${'a'.repeat(199)}${emoji}${emoji}`, 200);
+    expect(Array.from(cut)).toHaveLength(200);
+    expect(cut.endsWith(emoji)).toBe(true);
+    // Every character whole: no lone surrogate at the cut.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(cut)).toBe(false);
+    // 150 emoji are 300 units but only 150 code points: under the cap, kept whole.
+    expect(textOrNull(emoji.repeat(150), 200)).toBe(emoji.repeat(150));
+    expect(textOrNull('', 200)).toBeNull();
+    expect(textOrNull(7, 200)).toBeNull();
+  });
+});
+
 describe('buildSwitchRecord', () => {
+  it('records the account main validated, from the facts', () => {
+    const snap: SwitchSnapshot = {
+      marks: { returned: 1 },
+      spawnedAt: null,
+      exitedAt: null,
+      endedAt: 1,
+      facts: { account: 'second' },
+      ok: true,
+      timedOut: false,
+    };
+    const ms = stepDurations(snap, undefined, { wallMs: 0, perfEpochMs: 0 });
+    const ctx = { ts: '2026-01-02T03:04:05.000Z', sessionId: 'id-1', active: true };
+    expect(buildSwitchRecord(ctx, undefined, snap, ms, {}).account).toBe('second');
+    // A label main dropped (no such account) is null, never the raw string.
+    const dropped = { ...snap, facts: { account: null } };
+    expect(buildSwitchRecord(ctx, undefined, dropped, ms, {}).account).toBeNull();
+  });
+
   it('drops values of the wrong shape and cuts an overlong title', () => {
     const snap: SwitchSnapshot = {
       marks: {},
@@ -538,12 +661,11 @@ describe('buildSwitchRecord', () => {
         sessionId: 'id-1',
         active: true,
         title: 't'.repeat(500),
-        accountLabel: 42 as unknown as string,
         projectPath: '',
         pid: 12.5,
       },
       undefined,
-      snap,
+      { ...snap, facts: { account: 42 as unknown as string } },
       ms,
       // A source without a tty is not a source.
       { tty: null, ttySrc: 'ps' },
@@ -687,12 +809,13 @@ describe('scripts/switch-timing-summary.js', () => {
       runP50: 180,
       branches: 'tty×2 cwd×1',
     });
-    expect(s.sessions[1]).toMatchObject({ sessionId: 'bbbb2222-0000', title: null, account: '(anchor)', n: 1 });
-    // The v1 line has no account: unknown, which is not the anchor.
+    expect(s.sessions[1]).toMatchObject({ sessionId: 'bbbb2222-0000', title: null, account: '(none)', n: 1 });
+    // A v2 line without a label had no account; the v1 line never said.
+    // Neither is "the anchor", which has a label like every account.
     expect(s.byAccount.map((g: { key: string; n: number }) => [g.key, g.n])).toEqual([
       ['second', 3],
       ['(unknown)', 1],
-      ['(anchor)', 1],
+      ['(none)', 1],
     ]);
     expect(s.byTerminal.find((g: { key: string }) => g.key === 'ghostty').n).toBe(1);
     const report = summary.formatReport(s);
@@ -751,6 +874,131 @@ describe('scripts/switch-timing-summary.js', () => {
     expect(report).toContain('~/project-2');
     // Same grouping as the unredacted log: redaction renames, it does not merge.
     expect(summary.summarize(once).sessions.map((r: { n: number }) => r.n)).toEqual([3, 1]);
+  });
+
+  it('keeps every redacted placeholder distinct past session-9', () => {
+    // `session-10` … `session-12` used to be clipped to one label.
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      v: 2,
+      sessionId: `real-id-${i}`,
+      title: `private ${i}`,
+      account: `acct-${i}`,
+      project: `/home/u/code/p${i}`,
+      terminal: 'iterm2',
+      branch: 'tty',
+      ms: { total: 100 + i, run: 90 },
+    }));
+    const report: string = summary.formatReport(
+      summary.summarize(summary.redactRecords(many)),
+      0,
+      { redact: true, all: true },
+    );
+    const rows = report.split('\n').filter((l) => /^ {2}session-\d+ /.test(l));
+    const labels = rows.map((l) => l.trim().split(/\s+/)[0]);
+    expect(labels).toHaveLength(12);
+    expect(new Set(labels).size).toBe(12);
+    expect(labels).toContain('session-10');
+    expect(labels).toContain('session-12');
+    for (const n of [10, 11, 12]) {
+      expect(report).toContain(`account-${n}`);
+      expect(report).toContain(`~/project-${n}`);
+    }
+    expect(report).not.toContain('…');
+  });
+
+  it('lengthens real id labels until no two sessions share one', () => {
+    const labels = summary.sessionLabels(['abcdefgh-1111', 'abcdefgh-1222', 'zzzzzzzz-9999'], false);
+    expect([...labels.values()]).toEqual(['abcdefgh-11', 'abcdefgh-12', 'zzzzzzzz-99']);
+    expect([...summary.sessionLabels(['abcdefgh-1111', 'zzzzzzzz-9999'], false).values()]).toEqual([
+      'abcdefgh',
+      'zzzzzzzz',
+    ]);
+  });
+
+  it('strips control characters from every field it prints', () => {
+    const ESC = '\u001b';
+    const hostile = {
+      v: 2,
+      sessionId: `id${ESC}[2J-0001`,
+      // An OSC title-set, a forged row via newline, a C1 CSI, a bidi override.
+      title: `ok${ESC}]0;pwned\u0007\n  forged-row  99\u009b31m\u202e`,
+      account: `acc\rount`,
+      project: `/home/u/co\u0000de${ESC}[31m`,
+      terminal: `iterm2${ESC}[1m`,
+      branch: `tty\n  fake`,
+      kind: `switch\u007f`,
+      ms: { total: 100, run: 90 },
+    };
+    const clean = { ...hostile, sessionId: 'id-0002', title: 'fine', branch: 'tty', kind: 'switch' };
+    const report: string = summary.formatReport(summary.summarize([hostile, clean]), 0, { all: true });
+    // eslint-disable-next-line no-control-regex
+    expect(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(report)).toBe(false);
+    // The newline in the title did not become a line of its own.
+    expect(report.split('\n').filter((l) => l.includes('forged-row'))).toHaveLength(1);
+    expect(report.split('\n').some((l) => /^\s*forged-row/.test(l))).toBe(false);
+    expect(report.split('\n').some((l) => /^\s*fake/.test(l))).toBe(false);
+    expect(summary.safeText(`a${ESC}[31mb\u009b\u007fc\n`)).toBe('a[31mbc');
+    expect(summary.safeText(null)).toBe('');
+    // Same for --redact, whose placeholders are safe but whose other fields are the log's.
+    const redacted: string = summary.formatReport(
+      summary.summarize(summary.redactRecords([hostile, clean])),
+      0,
+      { redact: true },
+    );
+    // eslint-disable-next-line no-control-regex
+    expect(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/.test(redacted)).toBe(false);
+  });
+
+  it('clips by code point and never through a character', () => {
+    const emoji = '\u{1F600}';
+    expect(summary.clip(emoji.repeat(5), 5)).toBe(emoji.repeat(5));
+    expect(summary.clip(emoji.repeat(6), 5)).toBe(`${emoji.repeat(4)}…`);
+    expect(summary.clip('abcdef', 4)).toBe('abc…');
+  });
+
+  it('abbreviates the home directory only at a path boundary', () => {
+    expect(summary.tildePath('/Users/al/code/x', '/Users/al')).toBe('~/code/x');
+    expect(summary.tildePath('/Users/al', '/Users/al')).toBe('~');
+    expect(summary.tildePath('/Users/al-work/code/x', '/Users/al')).toBe('/Users/al-work/code/x');
+    expect(summary.tildePath('/Users/al/code/x', '/Users/al/')).toBe('~/code/x');
+    expect(summary.tildePath('/srv/x', '')).toBe('/srv/x');
+  });
+
+  it('says how many records a percentile covers when it is not all of them', () => {
+    const rec = (kind: string, ms: Record<string, number>, timedOut = false) => ({
+      v: 2,
+      sessionId: 'one',
+      kind,
+      terminal: 'iterm2',
+      branch: 'tty',
+      timedOut,
+      ms,
+    });
+    const records = [
+      rec('switch', { detect: 20, run: 100, total: 130 }),
+      rec('switch', { detect: 40, run: 300, total: 350 }),
+      rec('resume', { run: 500, total: 520 }),
+      // A hung command: only what main measured. A stray total must not count.
+      rec('switch', { detect: 30, returned: 35, total: 15000 }, true),
+    ];
+    const s = summary.summarize(records);
+    expect(s.timedOut).toBe(1);
+    expect(s.slow).toBe(0);
+    expect(s.all.total).toEqual({ n: 3, p50: 350, p90: 486 });
+    expect(s.all.detect.n).toBe(3);
+    expect(s.sessions[0]).toMatchObject({ n: 4, totalN: 3, runN: 3, totalP50: 350 });
+    const report: string = summary.formatReport(s, 0, {});
+    const all = report.split('\n').find((l) => /^ {2}all\s/.test(l));
+    // n is 4; detect and total each cover 3 and say so.
+    expect(all).toMatch(/^ {2}all\s+4\s/);
+    expect(all).toContain('30/38 (3)');
+    expect(all).toContain('350/486 (3)');
+    // The resume group's one record has every step it could: no marker, and no detect at all.
+    const resume = report.split('\n').find((l) => /^ {2}resume\s/.test(l));
+    expect(resume).not.toContain('(');
+    expect(resume).toContain('520/520');
+    const session = report.split('\n').find((l) => /^ {2}one\s/.test(l));
+    expect(session).toContain('350/486 (3)');
   });
 
   it('parses flags apart from files and rejects an unknown one', () => {
