@@ -240,6 +240,29 @@ describe('transcript location', () => {
     ).toEqual({ path: own, accountDir: account, outsideProjectSlug: false });
   });
 
+  it('never returns an indexed transcript that has since been deleted', () => {
+    const account = path.join(tmp, 'acct');
+    const project = path.join(tmp, 'acme-app');
+    const first = writeTranscript(account, path.join(tmp, 'aaa'), ID_A, ['{}']);
+    const second = writeTranscript(account, path.join(tmp, 'bbb'), ID_A, ['{}']);
+    const index = createTranscriptIndex();
+    const before = locateTranscript([account], project, ID_A, {
+      scanAllSlugs: index,
+    })?.path;
+    expect([first, second]).toContain(before);
+    // The one it chose goes away; the same (now stale) index must move on to
+    // the other, and to nothing once that is gone too.
+    fs.rmSync(before as string);
+    const other = before === first ? second : first;
+    expect(
+      locateTranscript([account], project, ID_A, { scanAllSlugs: index })?.path,
+    ).toBe(other);
+    fs.rmSync(other);
+    expect(
+      locateTranscript([account], project, ID_A, { scanAllSlugs: index }),
+    ).toBeNull();
+  });
+
   it('tries the account dirs in the order given', () => {
     const first = path.join(tmp, 'first');
     const second = path.join(tmp, 'second');

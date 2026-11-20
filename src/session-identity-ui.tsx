@@ -123,6 +123,8 @@ const SessionDetail: FC<{
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  // Where the pointer last was, to tell a real move from a scroll under it.
+  const pointer = useRef({ x: -1, y: -1 });
   return (
     <div>
       {detailRows(identity).map((row, i) => {
@@ -164,7 +166,20 @@ const SessionDetail: FC<{
             // A click copies without moving focus: inline, it stays in the
             // search box; in the overlay, on the row the keyboard is on.
             onMouseDown={(e) => e.preventDefault()}
-            onMouseEnter={() => onActiveIndex?.(i)}
+            // Overlay only (it passes onActiveIndex): the pointer moves keyboard
+            // focus, so the highlighted row IS the focused one and Enter
+            // copies what is highlighted. Real movement only — a row that
+            // scrolls under a resting pointer must not take focus back from
+            // the arrow keys. Inline, hovering never touches focus.
+            onMouseMove={(e) => {
+              if (!onActiveIndex || empty) return;
+              const { clientX: x, clientY: y } = e;
+              const moved = pointer.current.x !== x || pointer.current.y !== y;
+              pointer.current = { x, y };
+              if (moved && document.activeElement !== e.currentTarget) {
+                e.currentTarget.focus({ preventScroll: true });
+              }
+            }}
             onClick={(e) => {
               e.stopPropagation();
               activate();
@@ -309,7 +324,18 @@ const SessionDetailOverlay: FC<{
           }
           // Enter / Space are handled by the focused row itself.
         }}
-        style={{ ...PANEL_STYLE, marginTop: '90px', width: 'min(640px, calc(100vw - 40px))', padding: '8px' }}
+        style={{
+          ...PANEL_STYLE,
+          marginTop: '90px',
+          width: 'min(640px, calc(100vw - 40px))',
+          padding: '8px',
+          // Long paths wrap; in a short window the rows must scroll inside
+          // the dialog instead of running off the bottom. Moving focus with
+          // the keyboard scrolls the focused row into view.
+          maxHeight: 'calc(100vh - 110px)',
+          overflowY: 'auto',
+          boxSizing: 'border-box',
+        }}
       >
         <div style={{ fontSize: '11px', color: DIM, padding: '2px 8px 6px' }}>
           Session details — click a line to copy (↑↓ or Tab · Enter copies · Esc)
@@ -465,6 +491,12 @@ export const useSessionIdentityUi = (opts: {
   const [inline, setInline] = useState<{ rowKey: string; identity: SessionIdentity } | null>(null); // HOST C
   const inlineRef = useRef(inline);
   inlineRef.current = inline;
+  // The menu and the overlay take their own keys while they hold focus. They
+  // can lose it without closing — the window is hidden and shown again, and
+  // the app puts focus back in the search box — so the search box's handler
+  // has to know they are open (see handleKey).
+  const layerOpenRef = useRef({ menu: false, overlay: false });
+  layerOpenRef.current = { menu: !!menu, overlay: !!overlay };
   // HOST C: is the expanded row actually on screen in THIS render? `inlineFor`
   // sets it while the rows are built. A panel whose row is gone — filtered
   // out by a search, folded, dropped by a refresh, another tab — must not
@@ -566,6 +598,22 @@ export const useSessionIdentityUi = (opts: {
       },
       target: IdentityTarget | null,
     ): boolean => {
+      // A menu or overlay that is open but no longer focused: Esc reaching
+      // the search box closes it (topmost first) instead of falling through
+      // to the app's own Esc, which would hide the window with the layer
+      // still open behind it.
+      if (e.key === 'Escape' && !e.metaKey) {
+        if (layerOpenRef.current.menu) {
+          e.preventDefault();
+          closeMenu();
+          return true;
+        }
+        if (layerOpenRef.current.overlay) { // HOST B
+          e.preventDefault();
+          closeOverlay();
+          return true;
+        }
+      }
       // HOST C: an open inline panel takes Esc and ⌘↑ before anything else.
       if (inlineRef.current && inlineShownRef.current) {
         const closing =
@@ -602,7 +650,7 @@ export const useSessionIdentityUi = (opts: {
       }
       return true;
     },
-    [copy, fetchIdentity, notify, openInline, openOverlay],
+    [closeMenu, closeOverlay, copy, fetchIdentity, notify, openInline, openOverlay],
   );
 
   /** HOST C: place right after a row; renders only under the expanded one. */

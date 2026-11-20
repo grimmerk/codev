@@ -301,11 +301,11 @@ export const locateTranscript = (
   for (const accountDir of dirs) {
     for (const slug of index.slugsFor(accountDir, sessionId)) {
       if (slugs.includes(slug)) continue;
-      return {
-        path: path.join(accountDir, 'projects', slug, file),
-        accountDir,
-        outsideProjectSlug: true,
-      };
+      // The index is a snapshot and may be kept for a while: a file it lists
+      // can have been deleted or moved since. Never return one that is gone.
+      const p = path.join(accountDir, 'projects', slug, file);
+      if (!fs.existsSync(p)) continue;
+      return { path: p, accountDir, outsideProjectSlug: true };
     }
   }
   return null;

@@ -372,6 +372,43 @@ describe('options', () => {
     expect(run('show', '--', '--no-such-title').code).toBe(1);
   });
 
+  it('a value option followed by another option is a missing value, not that option as the value', () => {
+    for (const args of [
+      ['list', '--path', '--pretty'],
+      ['list', '--account', '--all'],
+      ['list', '--limit', '-1'],
+      ['view', ID_A, '--last', '--pretty'],
+    ]) {
+      const r = run(...args);
+      expect([r.code, r.out]).toEqual([2, []]);
+      expect(r.stderr).toContain('needs a value');
+      expect(r.stderr).toContain('Usage:');
+    }
+    // The = form still carries a value that starts with a dash.
+    const dashed = run('list', '--path=--pretty');
+    expect(dashed.code).toBe(0);
+    expect(JSON.parse(dashed.stdout)).toEqual({ total: 0, sessions: [] });
+  });
+
+  it('reports a failure inside a command the same way as any other: JSON on stderr, nothing on stdout', () => {
+    // A transcript that is found but cannot be read: a directory in its place.
+    const id = '7777cccc-0000-4000-8000-000000000007';
+    addSession(main, id, app, { at: 7000, transcript: false });
+    fs.mkdirSync(
+      path.join(main.dir, 'projects', transcriptSlug(app), `${id}.jsonl`),
+      { recursive: true },
+    );
+    const r = run('view', id);
+    expect([r.code, r.out]).toEqual([1, []]);
+    expect(r.err).toHaveLength(1);
+    expect(JSON.parse(r.stderr).error).toMatch(/^view: /);
+    // --pretty gets plain text, still on stderr only.
+    const p = run('view', id, '--pretty');
+    expect([p.code, p.out]).toEqual([1, []]);
+    expect(p.stderr).toMatch(/^view: /);
+    expect(() => JSON.parse(p.stderr)).toThrow();
+  });
+
   it('does not take a property of Object.prototype for a command', () => {
     for (const name of ['toString', 'constructor', 'hasOwnProperty', '__proto__']) {
       const r = run(name);
