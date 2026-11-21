@@ -100,8 +100,8 @@ has never been given a prompt (a fresh /branch copy) is there too. One that is
 neither — never prompted, or started from VS Code or Claude Desktop, and no
 longer running — is not. self reads the running process's own registration.
 
-Fields: live (with pid and status busy/idle) = the session's process is
-running now. lastActive = its last prompt (history.jsonl); lastActivity = the
+Fields (list, show and self; view has none of them): live (with pid and
+status busy/idle) = the session's process is running now. lastActive = its last prompt (history.jsonl); lastActivity = the
 later of that and the last timestamped record in its transcript, so it moves
 while the session works on one prompt. null when unknown. In --pretty lists,
 ✗ means the transcript is gone and the session cannot be resumed — it says
@@ -855,6 +855,8 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
         emit(
           {
             ...id,
+            // Running by definition — the same marker list and show carry.
+            live: true,
             lastActive: isoOrNull(session.lastTimestamp),
             lastActivity: isoOrNull(session.lastActivityMs),
             promptCount: session.promptCount,

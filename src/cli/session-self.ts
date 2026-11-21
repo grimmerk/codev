@@ -309,18 +309,18 @@ export const readProcesses = (pids: number[]): Map<number, ProcessInfo> => {
  * Is the process this registration describes still running? Pure.
  *
  * The pid being alive is not enough: pids are reused, and a leftover file of
- * a dead session would then pass for a running one. A registration with a
- * `procStart` must match the process's start exactly; an older one without
- * it is accepted only when the process is a `claude` executable — weaker, and
- * the best that file allows.
+ * a dead session would then pass for a running one. The registration's
+ * `procStart` must match the process's start exactly. An older file without
+ * one is NOT counted: the process being a `claude` executable proves nothing
+ * when another session may hold the reused pid — the same rule as `proofFor`,
+ * which `self` can still satisfy through the environment.
  */
 export const isLive = (
   reg: Registration,
   proc: ProcessInfo | undefined,
 ): boolean => {
   if (!proc || proc.pid !== reg.pid) return false;
-  if (reg.procStart) return squash(reg.procStart) === squash(proc.startUtc);
-  return /(^|\/)claude$/.test(proc.command);
+  return !!reg.procStart && squash(reg.procStart) === squash(proc.startUtc);
 };
 
 /** The registrations whose process is running now. */

@@ -171,9 +171,9 @@ describe('which registrations are running', () => {
     expect(isLive(reg(), proc({ startUtc: 'Mon Nov 2 09:00:00 2026' }))).toBe(false);
     expect(isLive(reg(), undefined)).toBe(false);
     expect(isLive(reg(), proc({ pid: 801 }))).toBe(false);
-    // An older file with no start time: only a claude executable will do.
-    expect(isLive(reg({ procStart: '' }), proc())).toBe(true);
-    expect(isLive(reg({ procStart: '' }), proc({ command: '/bin/zsh' }))).toBe(false);
+    // An older file with no start time cannot be tied to the process now
+    // holding the pid — even a claude one, which may be another session.
+    expect(isLive(reg({ procStart: '' }), proc())).toBe(false);
   });
 
   it('registrationFrom: a file that names no session is not one', () => {
@@ -198,7 +198,8 @@ describe('which registrations are running', () => {
     expect(found.has(process.pid)).toBe(true);
     // A pid macOS cannot have makes `ps` fail the whole call; the running
     // process must still be found.
-    expect(readProcesses([process.pid, 99999999]).has(process.pid)).toBe(true);
+    const odd = readProcesses([process.pid, 99999999]);
+    expect([...odd.keys()]).toEqual([process.pid]);
     expect(found.get(process.pid)?.startUtc).toMatch(/^\w{3} \w{3} \d{1,2} [\d:]{8} \d{4}$/);
     expect(readProcesses([]).size).toBe(0);
   });

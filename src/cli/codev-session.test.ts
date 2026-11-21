@@ -426,6 +426,7 @@ describe('codev session self', () => {
       proof: 'process-start',
       environmentAgrees: true,
       // What `self --pretty` prints as "Last prompt … · N prompts" is in the JSON too.
+      live: true,
       lastActive: new Date(2000).toISOString(),
       promptCount: 1,
       // No timestamped record in its transcript: the last prompt.
