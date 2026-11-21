@@ -9,7 +9,8 @@
  * The detail view is ONE component (`SessionDetail`) in TWO hosts, kept so
  * the owner can try both and delete one:
  *   - HOST B `SessionDetailOverlay` — a modal over the list (⌘I)
- *   - HOST C `SessionDetailInline`  — expands under the row (⌘↓, ⌘↑ closes)
+ *   - HOST C `SessionDetailInline`  — expands under the row (⌘→, ⌘← closes;
+ *     ⌘↓ / ⌘↑ do the same)
  * Removing a host = deleting its component, its state and the lines tagged
  * with its name in the hook below.
  *
@@ -249,7 +250,7 @@ const SessionDetailInline: FC<{
   >
     <SessionDetail identity={identity} onCopy={onCopy} />
     <div style={{ color: '#666', fontSize: '10px', padding: '2px 8px 0' }}>
-      click a line to copy · ⌘↑ or Esc closes · ⌘I for keyboard access
+      click a line to copy · ⌘← or Esc closes · ⌘I for keyboard access
     </div>
   </div>
   );
@@ -588,7 +589,8 @@ export const useSessionIdentityUi = (opts: {
    * null when no row is explicitly selected.
    *   ⌘⇧C  copy the reference (title + full id)
    *   ⌘I   details overlay (HOST B)
-   *   ⌘↓   details under the row (HOST C); ⌘↑ / Esc closes
+   *   ⌘→   details under the row (HOST C); ⌘← / Esc closes. ⌘↓ / ⌘↑ are
+   *        the same keys under their first name (⌘↓ on the open row closes)
    */
   const handleKey = useCallback(
     (
@@ -599,6 +601,8 @@ export const useSessionIdentityUi = (opts: {
         ctrlKey: boolean;
         altKey: boolean;
         preventDefault: () => void;
+        /** The element the key went to — the search box, for ⌘→'s caret rule. */
+        target?: unknown;
       },
       target: IdentityTarget | null,
     ): boolean => {
@@ -618,11 +622,12 @@ export const useSessionIdentityUi = (opts: {
           return true;
         }
       }
-      // HOST C: an open inline panel takes Esc and ⌘↑ before anything else.
+      // HOST C: an open inline panel takes Esc, ⌘← and ⌘↑ before anything else.
       if (inlineRef.current && inlineShownRef.current) {
+        const plainCmd = e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey;
         const closing =
           (e.key === 'Escape' && !e.metaKey) ||
-          (e.key === 'ArrowUp' && e.metaKey && !e.shiftKey && !e.ctrlKey && !e.altKey);
+          (plainCmd && (e.key === 'ArrowLeft' || e.key === 'ArrowUp'));
         if (closing) {
           e.preventDefault();
           setInline(null);
@@ -631,10 +636,27 @@ export const useSessionIdentityUi = (opts: {
       }
       if (!e.metaKey || e.ctrlKey || e.altKey) return false;
       const key = e.key.toLowerCase();
+      // ⌘→ is also "caret to the end" in the search box: while the caret is
+      // not at the end yet (or text is selected), the box keeps the key — so
+      // ⌘→ first finishes the caret move, then opens the panel.
+      if (!e.shiftKey && e.key === 'ArrowRight') {
+        const box = e.target as HTMLInputElement | null;
+        if (
+          box &&
+          typeof box.value === 'string' &&
+          typeof box.selectionStart === 'number' &&
+          (box.selectionStart !== box.value.length ||
+            box.selectionEnd !== box.value.length)
+        ) {
+          return false;
+        }
+        // No row to open: an ordinary caret key.
+        if (!target) return false;
+      }
       const ours =
         (e.shiftKey && key === 'c') ||
         (!e.shiftKey && key === 'i') ||
-        (!e.shiftKey && e.key === 'ArrowDown');
+        (!e.shiftKey && (e.key === 'ArrowDown' || e.key === 'ArrowRight'));
       if (!ours) return false;
       e.preventDefault();
       if (!target) {
@@ -648,7 +670,9 @@ export const useSessionIdentityUi = (opts: {
       } else if (key === 'i') {
         openOverlay(target); // HOST B
       } else if (inlineRef.current?.rowKey === target.rowKey) {
-        setInline(null); // HOST C: ⌘↓ again on the open row closes it
+        // HOST C: ⌘↓ again on the open row closes it; ⌘→ on an open row
+        // leaves it open, as → does on an expanded Finder folder.
+        if (e.key === 'ArrowDown') setInline(null);
       } else {
         openInline(target); // HOST C
       }
@@ -694,7 +718,7 @@ export const useSessionIdentityUi = (opts: {
       {
         kind: 'action',
         label: 'Show details under the row', // HOST C
-        hint: '⌘↓',
+        hint: '⌘→',
         run: () => {
           setInline({ rowKey: target.rowKey, identity });
           closeMenu();

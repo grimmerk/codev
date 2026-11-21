@@ -44,6 +44,12 @@ export interface Registration {
   /** The session's name as Claude Code itself holds it; '' when unnamed. */
   name: string;
   status: string;
+  /** `interactive`, …; '' when the file has none. */
+  kind: string;
+  /** Epoch ms; 0 when the file has none. */
+  startedAt: number;
+  /** Epoch ms of the registration's last write; 0 when the file has none. */
+  updatedAt: number;
   accountLabel: string;
   accountDir: string;
 }
@@ -175,34 +181,154 @@ export const readAncestors = (fromPid = process.ppid): ProcessInfo[] => {
   return out;
 };
 
-/** `sessions/<pid>.json` of every account that has one for this pid. */
-export const readRegistrations = (
-  accounts: IdentityAccount[],
+/** One parsed `sessions/<pid>.json`, or null when it is not a session's. Pure. */
+export const registrationFrom = (
+  raw: unknown,
   pid: number,
-): Registration[] => {
-  const out: Registration[] = [];
-  for (const account of accounts) {
-    try {
-      const raw = JSON.parse(
+  account: IdentityAccount,
+): Registration | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  // A file that names no session (only a peer token, seen on 2.1.329) or
+  // another pid than its own file name is not a registration.
+  if (r.pid !== pid || !isSessionId(r.sessionId)) return null;
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  const num = (v: unknown) =>
+    typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  return {
+    pid,
+    sessionId: r.sessionId,
+    cwd: str(r.cwd),
+    procStart: str(r.procStart),
+    name: str(r.name),
+    status: str(r.status),
+    kind: str(r.kind),
+    startedAt: num(r.startedAt),
+    updatedAt: num(r.updatedAt),
+    accountLabel: account.label,
+    accountDir: account.dir,
+  };
+};
+
+const readRegistrationFile = (
+  account: IdentityAccount,
+  pid: number,
+): Registration | null => {
+  try {
+    return registrationFrom(
+      JSON.parse(
         fs.readFileSync(
           path.join(account.dir, 'sessions', `${pid}.json`),
           'utf-8',
         ),
-      );
-      if (!raw || raw.pid !== pid || !isSessionId(raw.sessionId)) continue;
-      out.push({
-        pid,
-        sessionId: raw.sessionId,
-        cwd: typeof raw.cwd === 'string' ? raw.cwd : '',
-        procStart: typeof raw.procStart === 'string' ? raw.procStart : '',
-        name: typeof raw.name === 'string' ? raw.name : '',
-        status: typeof raw.status === 'string' ? raw.status : '',
-        accountLabel: account.label,
-        accountDir: account.dir,
-      });
+      ),
+      pid,
+      account,
+    );
+  } catch {
+    return null; // no file for this pid under this account, or not JSON
+  }
+};
+
+/** `sessions/<pid>.json` of every account that has one for this pid. */
+export const readRegistrations = (
+  accounts: IdentityAccount[],
+  pid: number,
+): Registration[] =>
+  accounts
+    .map((account) => readRegistrationFile(account, pid))
+    .filter((r): r is Registration => r !== null);
+
+/**
+ * Every `sessions/<pid>.json` of every account — running or not: Claude Code
+ * leaves the file of a process that died without cleaning up. `isLive` says
+ * which are running.
+ */
+export const readAllRegistrations = (
+  accounts: IdentityAccount[],
+): Registration[] => {
+  const out: Registration[] = [];
+  for (const account of accounts) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(path.join(account.dir, 'sessions'));
     } catch {
-      // No file for this pid under this account, or not JSON.
+      continue; // an account that never ran a session has no directory
+    }
+    for (const name of names) {
+      const m = name.match(/^(\d+)\.json$/);
+      if (!m) continue;
+      const reg = readRegistrationFile(account, Number(m[1]));
+      if (reg) out.push(reg);
     }
   }
   return out;
+};
+
+/**
+ * The given processes as `ps` sees them now, keyed by pid; a pid that is not
+ * running is absent. One `ps` call for all of them.
+ */
+export const readProcesses = (pids: number[]): Map<number, ProcessInfo> => {
+  const found = new Map<number, ProcessInfo>();
+  if (pids.length === 0) return found;
+  const ps = (list: number[]): { text: string; failed: boolean } => {
+    try {
+      return {
+        text: execFileSync(
+          'ps',
+          ['-o', 'pid=,ppid=,lstart=,comm=', '-p', list.join(',')],
+          {
+            encoding: 'utf-8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' },
+          },
+        ),
+        failed: false,
+      };
+    } catch (e) {
+      // `ps` exits 1 when a pid is not running, and still prints the others.
+      return { text: String((e as { stdout?: unknown }).stdout ?? ''), failed: true };
+    }
+  };
+  let { text, failed } = ps(pids);
+  // A pid macOS cannot have (`process id too large`) fails the WHOLE call
+  // with nothing printed: ask one pid at a time rather than report every
+  // session as stopped because of one odd file name.
+  if (failed && !text.trim() && pids.length > 1) {
+    text = pids.map((pid) => ps([pid]).text).join('\n');
+  }
+  for (const line of text.split('\n')) {
+    const info = parsePsLine(line);
+    if (info) found.set(info.pid, info);
+  }
+  return found;
+};
+
+/**
+ * Is the process this registration describes still running? Pure.
+ *
+ * The pid being alive is not enough: pids are reused, and a leftover file of
+ * a dead session would then pass for a running one. The registration's
+ * `procStart` must match the process's start exactly. An older file without
+ * one is NOT counted: the process being a `claude` executable proves nothing
+ * when another session may hold the reused pid — the same rule as `proofFor`,
+ * which `self` can still satisfy through the environment.
+ */
+export const isLive = (
+  reg: Registration,
+  proc: ProcessInfo | undefined,
+): boolean => {
+  if (!proc || proc.pid !== reg.pid) return false;
+  return !!reg.procStart && squash(reg.procStart) === squash(proc.startUtc);
+};
+
+/** The registrations whose process is running now. */
+export const liveRegistrations = (
+  accounts: IdentityAccount[],
+  processes: (pids: number[]) => Map<number, ProcessInfo> = readProcesses,
+): Registration[] => {
+  const all = readAllRegistrations(accounts);
+  const procs = processes([...new Set(all.map((r) => r.pid))]);
+  return all.filter((r) => isLive(r, procs.get(r.pid)));
 };

@@ -31,11 +31,15 @@ import * as path from 'path';
 
 import * as manager from './account-manager';
 import {
+  liveRegistrations,
+  ProcessInfo,
   readAncestors,
+  readProcesses,
   readRegistrations,
+  Registration,
   resolveSelf,
 } from './session-self';
-import { readLastMessages } from './session-transcript';
+import { readLastActivity, readLastMessages } from './session-transcript';
 import {
   createTranscriptIndex,
   HistorySession,
@@ -56,11 +60,14 @@ import {
 export const USAGE = `codev session — find, describe, read and resume Claude Code sessions (all accounts)
 
 Usage:
-  codev session list [--path <dir>] [--account <label>] [--all | --limit N]
-                                     Sessions, newest first. Without --path: the
-                                     newest 30, unless --all or --limit N. With
-                                     --path: every one, unless --limit N.
+  codev session list [--path <dir>] [--account <label>] [--live | --not-live]
+                     [--all | --limit N]
+                                     Sessions, newest first. Without --path or
+                                     --live: the newest 30, unless --all or
+                                     --limit N. With either: every one, unless
+                                     --limit N.
                                      --path . = sessions whose project is this directory
+                                     --live = only running sessions; --not-live = the rest
   codev session show <title | id>    Title, full id, account, project path, transcript
                                      path and resume command of EVERY matching session
   codev session view <title | id> [--last N]
@@ -87,9 +94,18 @@ function then runs — so it takes no --pretty.
   (generated), unknown (captured earlier — it could be either), none (no title).
 
 Which sessions: list, show, view and resume know the sessions in each account's
-history.jsonl — one that has never been given a prompt (a fresh /branch copy)
-or that was started from VS Code or Claude Desktop is not there. self does not
-depend on history: it reads the running process's own registration.
+history.jsonl, plus every session running now — those come from the process's
+own registration (<config dir>/sessions/<pid>.json), so a running session that
+has never been given a prompt (a fresh /branch copy) is there too. One that is
+neither — never prompted, or started from VS Code or Claude Desktop, and no
+longer running — is not. self reads the running process's own registration.
+
+Fields (list, show and self; view has none of them): live (with pid and
+status busy/idle) = the session's process is running now. lastActive = its last prompt (history.jsonl); lastActivity = the
+later of that and the last timestamped record in its transcript, so it moves
+while the session works on one prompt. null when unknown. In --pretty lists,
+✗ means the transcript is gone and the session cannot be resumed — it says
+nothing about running.
 
 Options: a value that starts with a dash is written --option=<value>.
 
@@ -107,6 +123,8 @@ export interface CliDeps extends CliIo {
   /** `self`: this process's ancestors, nearest first, and its environment. */
   ancestors?: () => ReturnType<typeof readAncestors>;
   env?: () => { CLAUDE_CODE_SESSION_ID?: string };
+  /** The given pids as `ps` sees them now; a pid not running is absent. */
+  processes?: (pids: number[]) => Map<number, ProcessInfo>;
 }
 
 /** A history session with what the transcript adds. */
@@ -115,6 +133,10 @@ interface CliSession extends HistorySession {
   titleKind: SessionTitle['kind'];
   /** Under the project's own slug, or — failing that — wherever the id's file is. */
   transcriptPath: string | null;
+  /** The registration of the process running this session now; null when none is. */
+  live: Registration | null;
+  /** Epoch ms of the transcript's last timestamped record; 0 until read, or unknown. */
+  lastActivityMs: number;
 }
 
 const tildify = (p: string): string => {
@@ -181,7 +203,7 @@ const COMMANDS: Record<
 > = {
   list: {
     value: ['--path', '--account', '--limit'],
-    bool: ['--all'],
+    bool: ['--all', '--live', '--not-live'],
     positional: false,
     pretty: true,
   },
@@ -254,20 +276,58 @@ const accountDirsFor = (
 ): string[] => [s.accountDir, ...accounts.map((a) => a.dir)];
 
 /**
- * Every session in every account's history, newest first, with its transcript
- * located — and no title yet: reading titles opens every transcript, so
+ * A session history does not know, as its registration describes it: the
+ * running session that has never been given a prompt. Its project is the
+ * registration's cwd — where it is now, which is where it started unless it
+ * has moved.
+ */
+const sessionFromRegistration = (
+  reg: Registration,
+  accounts: IdentityAccount[],
+): HistorySession => {
+  const account = accounts.find((a) => a.label === reg.accountLabel);
+  return {
+    sessionId: reg.sessionId,
+    project: reg.cwd,
+    firstDisplay: '',
+    lastDisplay: '',
+    firstTimestamp: 0,
+    lastTimestamp: 0,
+    promptCount: 0,
+    accountLabel: reg.accountLabel,
+    accountDir: reg.accountDir,
+    accountConfigDirEnv: account?.configDirEnv ?? null,
+    accountIsAnchor: !!account?.isAnchor,
+  };
+};
+
+/** What a list is ordered by: the last prompt, or — for a session with none — when its registration last changed. */
+const sortTime = (s: CliSession): number =>
+  s.lastTimestamp || s.live?.updatedAt || s.live?.startedAt || 0;
+
+/**
+ * Every session in every account's history, plus every running one history
+ * does not have, newest first, with its transcript located and whether it is
+ * running — and no title yet: reading titles opens every transcript, so
  * `attachTitles` is called on as few as will do.
  */
 const loadSessions = (
   accounts: IdentityAccount[],
   err: (line: string) => void,
   index: TranscriptIndex,
+  running: Registration[],
 ): CliSession[] => {
   const scan = scanHistories(accounts, (label, e) =>
     err(`codev session: could not read the history of "${label}": ${(e as Error).message}`),
   );
-  return [...scan.sessions.values()]
-    .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
+  const liveById = new Map<string, Registration>();
+  for (const reg of running) {
+    if (!liveById.has(reg.sessionId)) liveById.set(reg.sessionId, reg);
+  }
+  const unprompted = [...liveById.values()]
+    .filter((reg) => !scan.sessions.has(reg.sessionId))
+    .map((reg) => sessionFromRegistration(reg, accounts));
+  return [...scan.sessions.values(), ...unprompted]
     .map((s) => ({
       ...s,
       title: '',
@@ -279,7 +339,26 @@ const loadSessions = (
         locateTranscript(accountDirsFor(s, accounts), s.project, s.sessionId, {
           scanAllSlugs: index,
         })?.path ?? null,
-    }));
+      live: liveById.get(s.sessionId) ?? null,
+      lastActivityMs: 0,
+    }))
+    .sort((a, b) => sortTime(b) - sortTime(a));
+};
+
+/**
+ * When each session last did anything — read only for the sessions that will
+ * be shown. The later of the transcript's last timestamped record and the
+ * last prompt: a prompt can reach history.jsonl and never the transcript
+ * (seen 2026-11-21: one 16 hours after the transcript's last record), and a
+ * session whose transcript is gone still has its prompts.
+ */
+const attachActivity = (sessions: CliSession[]): void => {
+  for (const s of sessions) {
+    s.lastActivityMs = Math.max(
+      s.transcriptPath ? readLastActivity(s.transcriptPath) : 0,
+      s.lastTimestamp,
+    );
+  }
 };
 
 const attachTitles = (sessions: CliSession[]): void => {
@@ -330,12 +409,12 @@ const printIdentity = (
   s: CliSession,
   out: (line: string) => void,
 ): void => {
-  out(`Title:        ${describeTitle(id)}`);
-  out(`Session ID:   ${id.sessionId}`);
-  out(`Account:      ${id.account}`);
-  out(`Project:      ${id.projectPath || '(unknown)'}`);
+  out(`Title:          ${describeTitle(id)}`);
+  out(`Session ID:     ${id.sessionId}`);
+  out(`Account:        ${id.account}`);
+  out(`Project:        ${id.projectPath || '(unknown)'}`);
   out(
-    `Transcript:   ${
+    `Transcript:     ${
       id.transcriptPath
         ? id.transcriptPath +
           (id.transcriptOutsideProjectSlug
@@ -344,11 +423,21 @@ const printIdentity = (
         : '(not found — Claude Code has removed it, or it never had one)'
     }`,
   );
-  out(`Resume:       ${id.resumeCommand || '(not available)'}`);
-  out(`Reference:    ${id.reference}`);
+  out(`Resume:         ${id.resumeCommand || '(not available)'}`);
+  out(`Reference:      ${id.reference}`);
   out(
-    `Last active:  ${localTime(s.lastTimestamp)} · ${s.promptCount} prompt${s.promptCount === 1 ? '' : 's'}`,
+    `Running:        ${
+      s.live ? `yes — pid ${s.live.pid} · ${s.live.status || 'status unknown'}` : 'no'
+    }`,
   );
+  out(
+    `Last prompt:    ${
+      s.promptCount > 0
+        ? `${localTime(s.lastTimestamp)} · ${s.promptCount} prompt${s.promptCount === 1 ? '' : 's'}`
+        : '(none in history)'
+    }`,
+  );
+  out(`Last activity:  ${localTime(s.lastActivityMs)}`);
 };
 
 const listRow = (s: CliSession, accountPad: number, fullId: boolean): string => {
@@ -360,7 +449,9 @@ const listRow = (s: CliSession, accountPad: number, fullId: boolean): string => 
   return [
     fullId ? s.sessionId : s.sessionId.slice(0, 8),
     s.accountLabel.padEnd(accountPad),
-    localTime(s.lastTimestamp),
+    (s.live ? s.live.status || 'live' : '').padEnd(4),
+    localTime(s.lastTimestamp).padEnd(16),
+    localTime(s.lastActivityMs).padEnd(16),
     s.transcriptPath ? ' ' : '✗',
     `${clip(tildify(s.project), 44).padEnd(44)}`,
     clip(what, 70),
@@ -382,7 +473,9 @@ const printRows = (
     [
       'ID'.padEnd(fullId ? 36 : 8),
       'ACCOUNT'.padEnd(pad),
-      'LAST ACTIVE     ',
+      'LIVE',
+      'LAST PROMPT     ',
+      'LAST ACTIVITY   ',
       ' ',
       'PROJECT'.padEnd(44),
       'TITLE / “FIRST PROMPT”',
@@ -394,6 +487,13 @@ const printRows = (
 const isoOrNull = (ms: number): string | null =>
   ms ? new Date(ms).toISOString() : null;
 
+/** Whether the session is running now, as every JSON answer says it. */
+const liveFields = (s: CliSession) => ({
+  live: s.live !== null,
+  pid: s.live?.pid ?? null,
+  status: s.live ? s.live.status || null : null,
+});
+
 /** The compact row used by `list` and by an "ambiguous" error. */
 const summaryOf = (s: CliSession) => ({
   sessionId: s.sessionId,
@@ -403,6 +503,8 @@ const summaryOf = (s: CliSession) => ({
   projectPath: s.project,
   transcriptPath: s.transcriptPath,
   lastActive: isoOrNull(s.lastTimestamp),
+  lastActivity: isoOrNull(s.lastActivityMs),
+  ...liveFields(s),
   promptCount: s.promptCount,
   firstPrompt: s.firstDisplay,
 });
@@ -425,6 +527,10 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
   const pretty = rest.includes('--pretty') || cmd === 'resume';
   // One index for the whole run: every lookup below shares it.
   const index = createTranscriptIndex();
+  // Which sessions are running: read once, on first need.
+  let runningCache: Registration[] | null = null;
+  const running = (accounts: IdentityAccount[]): Registration[] =>
+    (runningCache ??= liveRegistrations(accounts, deps.processes ?? readProcesses));
   const emit = (value: unknown, text: () => void): void => {
     if (pretty) text();
     else out(JSON.stringify(value));
@@ -464,7 +570,7 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
   const find = (query: string, accounts: IdentityAccount[]): CliSession[] => {
     // A full id cannot be a title match, so only that one transcript is
     // read; anything else needs every title.
-    const sessions = loadSessions(accounts, warn, index);
+    const sessions = loadSessions(accounts, warn, index, running(accounts));
     attachTitles(
       isFullSessionId(query)
         ? sessions.filter(
@@ -472,7 +578,9 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
           )
         : sessions,
     );
-    return matchSessions(query, sessions);
+    const matches = matchSessions(query, sessions);
+    attachActivity(matches);
+    return matches;
   };
 
   if (cmd === 'help' || cmd === '--help' || cmd === '-h' || cmd === undefined) {
@@ -523,9 +631,17 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
             `list: no account "${wantAccount}" (have: ${accounts.map((a) => a.label).join(', ')})`,
           );
         }
+        const onlyLive = flags.has('--live');
+        const onlyNotLive = flags.has('--not-live');
+        if (onlyLive && onlyNotLive) {
+          return fail(2, 'list: --live and --not-live exclude each other');
+        }
         const limit = flags.has('--all')
           ? Infinity
-          : positiveInt('--limit', typeof wantPath === 'string' ? Infinity : 30);
+          : positiveInt(
+              '--limit',
+              typeof wantPath === 'string' || onlyLive ? Infinity : 30,
+            );
         if (limit === null) {
           return fail(2, 'list: --limit needs a positive whole number');
         }
@@ -543,21 +659,26 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
           }
           return r === target;
         };
-        const all = loadSessions(accounts, warn, index).filter(
+        const all = loadSessions(accounts, warn, index, running(accounts)).filter(
           (s) =>
             (target === null || sameDir(s.project)) &&
-            (typeof wantAccount !== 'string' || s.accountLabel === wantAccount),
+            (typeof wantAccount !== 'string' || s.accountLabel === wantAccount) &&
+            (!onlyLive || s.live !== null) &&
+            (!onlyNotLive || s.live === null),
         );
-        // Only the rows that will be printed pay for a title.
+        // Only the rows that will be printed pay for a title and an activity time.
         const rows = all.slice(0, limit);
         attachTitles(rows);
+        attachActivity(rows);
         // An empty list is an answer, not an error: exit 0 with no sessions.
         emit({ total: all.length, sessions: rows.map(summaryOf) }, () => {
           if (rows.length === 0) {
             out(
               target !== null
-                ? `No sessions with project path ${tildify(target)}`
-                : 'No sessions found',
+                ? `No ${onlyLive ? 'running ' : ''}sessions with project path ${tildify(target)}`
+                : onlyLive
+                  ? 'No running sessions found'
+                  : 'No sessions found',
             );
             return;
           }
@@ -566,10 +687,15 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
           out(
             `${rows.length} session${rows.length === 1 ? '' : 's'}` +
               (more > 0 ? ` shown, ${more} older not shown (--all)` : '') +
-              (rows.some((s) => !s.transcriptPath)
-                ? ' · ✗ = transcript gone, cannot be resumed'
-                : '') +
+              ` · ${rows.filter((s) => s.live).length} running` +
               ' · details: codev session show <id>',
+          );
+          // Always, not only when a row has one: ✗ reads as "not running"
+          // otherwise.
+          out(
+            'LIVE = running now (busy / idle) · LAST PROMPT = last user prompt · ' +
+              'LAST ACTIVITY = last transcript record or prompt, whichever is later · ' +
+              '✗ = transcript gone, cannot be resumed (not about running)',
           );
         });
         return 0;
@@ -599,6 +725,8 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
               sessions: ids.map((id, i) => ({
                 ...id,
                 lastActive: isoOrNull(matches[i].lastTimestamp),
+                lastActivity: isoOrNull(matches[i].lastActivityMs),
+                ...liveFields(matches[i]),
                 promptCount: matches[i].promptCount,
               })),
             },
@@ -701,36 +829,37 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
         const reg = found.registration;
         // History knows the directory the session STARTED in, which is where its
         // transcript is filed; the registration's cwd follows the session around.
-        const known = loadSessions(accounts, warn, index).find(
+        // No process lookup here: this session is running by definition, and
+        // the registration found above is the proof.
+        const known = loadSessions(accounts, warn, index, []).find(
           (s) => s.sessionId === reg.sessionId,
         );
         const session: CliSession = known ?? {
-          sessionId: reg.sessionId,
-          project: reg.cwd,
-          firstDisplay: '',
-          lastDisplay: '',
-          firstTimestamp: 0,
-          lastTimestamp: 0,
-          promptCount: 0,
-          accountLabel: reg.accountLabel,
-          accountDir: reg.accountDir,
-          accountConfigDirEnv:
-            accounts.find((a) => a.label === reg.accountLabel)?.configDirEnv ??
-            null,
-          accountIsAnchor: !!accounts.find((a) => a.label === reg.accountLabel)
-            ?.isAnchor,
+          ...sessionFromRegistration(reg, accounts),
           title: '',
           titleKind: 'none',
           transcriptPath: null,
+          live: null,
+          lastActivityMs: 0,
         };
         // The account is the one whose config dir holds the registration.
         session.accountLabel = reg.accountLabel;
         session.accountDir = reg.accountDir;
+        session.live = reg;
         attachTitles([session]);
         const id = identityOf(session, accounts, deps.anchorDir(), index);
+        // The identity locates the transcript even for a session history
+        // does not have.
+        session.transcriptPath ??= id.transcriptPath;
+        attachActivity([session]);
         emit(
           {
             ...id,
+            // Running by definition — the same marker list and show carry.
+            live: true,
+            lastActive: isoOrNull(session.lastTimestamp),
+            lastActivity: isoOrNull(session.lastActivityMs),
+            promptCount: session.promptCount,
             pid: reg.pid,
             // What Claude Code itself calls the session right now.
             name: reg.name,
@@ -741,9 +870,8 @@ export const runSessionCli = (argv: string[], deps: CliDeps): number => {
           },
           () => {
             printIdentity(id, session, out);
-            out(`Process:      pid ${reg.pid} · ${reg.status || 'status unknown'}`);
             out(
-              `Known by:     its sessions/<pid>.json registration (${found.proof})` +
+              `Known by:       its sessions/<pid>.json registration (${found.proof})` +
                 (found.environmentAgrees === false
                   ? ' — CLAUDE_CODE_SESSION_ID names a different session'
                   : ''),
