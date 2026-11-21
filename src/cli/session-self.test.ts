@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  isLive,
   parsePsLine,
   ProcessInfo,
   proofFor,
+  readProcesses,
   Registration,
+  registrationFrom,
   resolveSelf,
 } from './session-self';
 
@@ -27,6 +30,9 @@ const reg = (over: Partial<Registration> = {}): Registration => ({
   procStart: START,
   name: 'billing fix',
   status: 'busy',
+  kind: 'interactive',
+  startedAt: 1793527200000,
+  updatedAt: 1793527500000,
   accountLabel: 'main',
   accountDir: '/Users/dev/.claude',
   ...over,
@@ -153,5 +159,47 @@ describe('resolveSelf', () => {
     expect(
       resolveSelf([proc()], table, '99999999-9999-4999-8999-999999999999'),
     ).toMatchObject({ ok: false, reason: 'ambiguous' });
+  });
+});
+
+describe('which registrations are running', () => {
+  it('isLive: the pid must be running AND have started when the file says', () => {
+    expect(isLive(reg(), proc())).toBe(true);
+    // Padding differs between ps and the file; the time does not.
+    expect(isLive(reg({ procStart: 'Sun Nov 1 10:00:00 2026' }), proc())).toBe(true);
+    // A reused pid: alive, but a different process.
+    expect(isLive(reg(), proc({ startUtc: 'Mon Nov 2 09:00:00 2026' }))).toBe(false);
+    expect(isLive(reg(), undefined)).toBe(false);
+    expect(isLive(reg(), proc({ pid: 801 }))).toBe(false);
+    // An older file with no start time: only a claude executable will do.
+    expect(isLive(reg({ procStart: '' }), proc())).toBe(true);
+    expect(isLive(reg({ procStart: '' }), proc({ command: '/bin/zsh' }))).toBe(false);
+  });
+
+  it('registrationFrom: a file that names no session is not one', () => {
+    const account = { label: 'main', dir: '/Users/dev/.claude', configDirEnv: null, isAnchor: true };
+    // Shape of a real peer-token-only file (2.1.329); values invented.
+    expect(
+      registrationFrom({ peerToken: 'abc', procStart: START, pidDomain: 'darwin' }, 800, account),
+    ).toBeNull();
+    expect(registrationFrom({ pid: 801, sessionId: ID_A }, 800, account)).toBeNull();
+    expect(
+      registrationFrom(
+        { pid: 800, sessionId: ID_A, cwd: '/x', startedAt: 5, updatedAt: 'soon', status: 'idle' },
+        800,
+        account,
+      ),
+    ).toMatchObject({ pid: 800, sessionId: ID_A, status: 'idle', startedAt: 5, updatedAt: 0, kind: '' });
+  });
+
+  it('readProcesses: one real ps call, and a pid that is not running is simply absent', () => {
+    // Real `ps`. 99998 is a valid pid that is almost never running.
+    const found = readProcesses([process.pid, 99998]);
+    expect(found.has(process.pid)).toBe(true);
+    // A pid macOS cannot have makes `ps` fail the whole call; the running
+    // process must still be found.
+    expect(readProcesses([process.pid, 99999999]).has(process.pid)).toBe(true);
+    expect(found.get(process.pid)?.startUtc).toMatch(/^\w{3} \w{3} \d{1,2} [\d:]{8} \d{4}$/);
+    expect(readProcesses([]).size).toBe(0);
   });
 });

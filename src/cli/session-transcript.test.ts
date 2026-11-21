@@ -7,7 +7,9 @@ import {
   lastMessages,
   messageFromLine,
   messageFromRecord,
+  readLastActivity,
   readLastMessages,
+  timestampOfLine,
 } from './session-transcript';
 
 // Shapes follow real transcript records read on 2026-11-20 (key order
@@ -187,5 +189,65 @@ describe('last N', () => {
       fs.writeFileSync(file, '');
       expect(readLastMessages(file, 5)).toEqual([]);
     });
+  });
+});
+
+describe('last activity', () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-act-'));
+  });
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  // Shapes follow real records (2.1.329, key order included); values invented.
+  const lines = [
+    JSON.stringify(user('hello')),
+    JSON.stringify({
+      parentUuid: 'x',
+      isSidechain: false,
+      type: 'system',
+      subtype: 'turn_duration',
+      durationMs: 1200,
+      messageCount: 4,
+      timestamp: '2026-11-01T12:00:00.000Z',
+      uuid: '00000000-0000-4000-8000-00000000beef',
+      isMeta: false,
+      sessionId: SID,
+    }),
+    // Bookkeeping with no timestamp of its own — one nested inside does not count.
+    JSON.stringify({ type: 'custom-title', customTitle: 'x', sessionId: SID }),
+    JSON.stringify({
+      type: 'cost-state',
+      sessionId: SID,
+      totalCostUSD: 1.5,
+      modelUsage: { m: { timestamp: '2030-01-01T00:00:00.000Z' } },
+    }),
+    JSON.stringify({ type: 'bridge-session', sessionId: SID, bridgeSessionId: 'b', lastSequenceNum: 3 }),
+  ];
+
+  it('timestampOfLine reads only the record\'s own timestamp', () => {
+    expect(timestampOfLine(lines[1])).toBe(Date.parse('2026-11-01T12:00:00.000Z'));
+    expect(timestampOfLine(lines[3])).toBe(0);
+    expect(timestampOfLine('{"timestamp":"not a date"}')).toBe(0);
+    expect(timestampOfLine('{"timestamp":')).toBe(0);
+  });
+
+  it('skips the bookkeeping records a transcript ends in, for any chunk size', () => {
+    const file = path.join(tmp, 't.jsonl');
+    fs.writeFileSync(file, lines.join('\n') + '\n');
+    for (const chunk of [1, 7, 100, 1 << 20]) {
+      expect(readLastActivity(file, chunk)).toBe(Date.parse('2026-11-01T12:00:00.000Z'));
+    }
+  });
+
+  it('is 0 for a file with no timestamp, an empty file and a missing one', () => {
+    const file = path.join(tmp, 't.jsonl');
+    fs.writeFileSync(file, lines.slice(2).join('\n'));
+    expect(readLastActivity(file)).toBe(0);
+    fs.writeFileSync(file, '');
+    expect(readLastActivity(file)).toBe(0);
+    expect(readLastActivity(path.join(tmp, 'missing.jsonl'))).toBe(0);
   });
 });

@@ -58,7 +58,7 @@ const addSession = (
   fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), lines.join('\n') + '\n');
 };
 
-let selfDeps: Pick<CliDeps, 'ancestors' | 'env'> = {};
+let selfDeps: Pick<CliDeps, 'ancestors' | 'env' | 'processes'> = {};
 
 const run = (...argv: string[]) => {
   const out: string[] = [];
@@ -71,6 +71,8 @@ const run = (...argv: string[]) => {
     cwd: () => app,
     ancestors: () => [],
     env: () => ({}),
+    // Never the real `ps`: a fixture pid could be a real process here.
+    processes: () => new Map(),
     ...selfDeps,
   });
   return { code, out, err, stdout: out.join('\n'), stderr: err.join('\n') };
@@ -310,9 +312,9 @@ describe('codev session show', () => {
 
   it('--pretty prints every field as text, and says when the transcript is gone', () => {
     const text = run('show', ID_D.slice(0, 8), '--pretty').stdout;
-    expect(text).toContain(`Session ID:   ${ID_D}`);
-    expect(text).toContain('Title:        (none)');
-    expect(text).toContain('Transcript:   (not found');
+    expect(text).toContain(`Session ID:     ${ID_D}`);
+    expect(text).toContain('Title:          (none)');
+    expect(text).toContain('Transcript:     (not found');
   });
 
   it('keeps stdout empty on failure and puts a JSON error on stderr', () => {
@@ -423,6 +425,11 @@ describe('codev session self', () => {
       name: 'api cleanup',
       proof: 'process-start',
       environmentAgrees: true,
+      // What `self --pretty` prints as "Last prompt … · N prompts" is in the JSON too.
+      lastActive: new Date(2000).toISOString(),
+      promptCount: 1,
+      // No timestamped record in its transcript: the last prompt.
+      lastActivity: new Date(2000).toISOString(),
     });
   });
 
@@ -437,6 +444,149 @@ describe('codev session self', () => {
   it('fails outside a session', () => {
     const r = run('self');
     expect([r.code, r.out]).toEqual([1, []]);
+  });
+});
+
+describe('live sessions and last activity', () => {
+  const ID_E = '44440000-eeee-4eee-8eee-000000000005';
+  const START = 'Sun Nov  1 10:00:00 2026';
+  // Key order of a real sessions/<pid>.json (2.1.329); values invented.
+  const register = (
+    account: IdentityAccount,
+    pid: number,
+    sessionId: string,
+    over: Record<string, unknown> = {},
+  ): void => {
+    fs.mkdirSync(path.join(account.dir, 'sessions'), { recursive: true });
+    fs.writeFileSync(
+      path.join(account.dir, 'sessions', `${pid}.json`),
+      JSON.stringify({
+        pid,
+        sessionId,
+        cwd: app,
+        startedAt: 1793527200000,
+        procStart: START,
+        version: '2.1.329',
+        peerProtocol: 1,
+        kind: 'interactive',
+        entrypoint: 'cli',
+        name: 'billing fix',
+        updatedAt: 1793527500000,
+        status: 'busy',
+        ...over,
+      }),
+    );
+  };
+  const ps = (pid: number, startUtc = 'Sun Nov 1 10:00:00 2026') =>
+    [pid, { pid, ppid: 1, startUtc, command: 'claude' }] as const;
+  const live = (...procs: ReturnType<typeof ps>[]) => {
+    selfDeps = { processes: () => new Map(procs) };
+  };
+  // A turn_duration record, then bookkeeping with no timestamp of its own —
+  // how a real transcript usually ends.
+  const tail = (at: string, sessionId: string) => [
+    JSON.stringify({
+      parentUuid: 'x',
+      isSidechain: false,
+      type: 'system',
+      subtype: 'turn_duration',
+      durationMs: 1200,
+      messageCount: 4,
+      timestamp: at,
+      uuid: '00000000-0000-4000-8000-00000000beef',
+      isMeta: false,
+      cwd: app,
+      sessionId,
+    }),
+    JSON.stringify({
+      type: 'cost-state',
+      sessionId,
+      totalCostUSD: 1.5,
+      startTime: 1793527200000,
+      modelUsage: { m: { timestamp: '2030-01-01T00:00:00.000Z' } },
+    }),
+  ];
+  const idsOf = (stdout: string): string[] =>
+    JSON.parse(stdout).sessions.map((s: { sessionId: string }) => s.sessionId);
+  const listed = (...argv: string[]) =>
+    JSON.parse(run('list', ...argv).stdout).sessions as Record<string, unknown>[];
+
+  it('marks running sessions, and not a leftover file whose pid now belongs to another process', () => {
+    register(main, 700, ID_A);
+    // Same pid alive, different start: the pid was reused — not ID_C running.
+    register(work, 702, ID_C, { cwd: api, status: 'idle' });
+    live(ps(700), ps(702, 'Mon Nov 2 09:00:00 2026'));
+    const rows = listed();
+    const byId = new Map(rows.map((r) => [r.sessionId, r]));
+    expect(byId.get(ID_A)).toMatchObject({ live: true, pid: 700, status: 'busy' });
+    expect(byId.get(ID_C)).toMatchObject({ live: false, pid: null, status: null });
+    expect(byId.get(ID_B)).toMatchObject({ live: false });
+    // A registration whose process is gone is not running either.
+    live();
+    expect(listed().every((r) => r.live === false)).toBe(true);
+  });
+
+  it('--live / --not-live filter on it, and --live lists a running session history has never seen', () => {
+    register(main, 700, ID_A);
+    // ID_E: running, never prompted — in no history.jsonl. Its transcript
+    // already carries the title.
+    register(work, 703, ID_E, { cwd: api, name: 'fresh branch', updatedAt: 5000, status: 'idle' });
+    const dir = path.join(work.dir, 'projects', transcriptSlug(api));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, `${ID_E}.jsonl`),
+      JSON.stringify({ type: 'custom-title', customTitle: 'fresh branch', sessionId: ID_E }) + '\n',
+    );
+    live(ps(700), ps(703));
+    expect(idsOf(run('list', '--live').stdout)).toEqual([ID_E, ID_A]);
+    const e = listed('--live')[0];
+    expect(e).toMatchObject({
+      title: 'fresh branch',
+      account: 'work',
+      projectPath: api,
+      live: true,
+      status: 'idle',
+      lastActive: null,
+      promptCount: 0,
+    });
+    expect(idsOf(run('list', '--not-live').stdout)).toEqual([ID_B, ID_C, ID_D]);
+    // …and show finds it by its title.
+    expect(JSON.parse(run('show', 'fresh branch').stdout).sessions[0].sessionId).toBe(ID_E);
+    expect(run('list', '--live', '--not-live').code).toBe(2);
+  });
+
+  it('lastActivity is the last timestamped transcript record; lastActive stays the last prompt', () => {
+    fs.rmSync(path.join(main.dir, 'projects'), { recursive: true });
+    addSession(main, ID_A, app, {
+      title: 'billing fix',
+      at: 4000,
+      extra: tail('2026-11-01T12:34:56.000Z', ID_A),
+    });
+    const a = listed().find((r) => r.sessionId === ID_A);
+    expect(a).toMatchObject({
+      lastActive: new Date(4000).toISOString(),
+      lastActivity: '2026-11-01T12:34:56.000Z',
+    });
+    const shown = JSON.parse(run('show', ID_A).stdout).sessions[0];
+    expect(shown.lastActivity).toBe('2026-11-01T12:34:56.000Z');
+    expect(shown.live).toBe(false);
+    // Never earlier than the last prompt: a prompt that never reached the
+    // transcript, or a transcript that is gone, leaves the prompt time.
+    addSession(main, ID_A, app, { at: Date.parse('2026-11-02T08:00:00.000Z'), transcript: false });
+    expect(listed().find((r) => r.sessionId === ID_A)?.lastActivity).toBe('2026-11-02T08:00:00.000Z');
+    expect(listed().find((r) => r.sessionId === ID_D)?.lastActivity).toBe(new Date(1000).toISOString());
+  });
+
+  it('--pretty has a LIVE column and always explains ✗', () => {
+    register(main, 700, ID_A);
+    live(ps(700));
+    const r = run('list', '--path', '.', '--pretty');
+    expect(r.out[0]).toContain('LIVE');
+    expect(r.out.find((l) => l.startsWith(ID_A.slice(0, 8)))).toContain('busy');
+    // No row here has ✗, and the legend still says what it means.
+    expect(r.out.some((l) => l.startsWith(ID_D.slice(0, 8)))).toBe(false);
+    expect(r.stdout).toContain('✗ = transcript gone, cannot be resumed (not about running)');
+    expect(run('show', ID_A, '--pretty').stdout).toContain('Running:        yes — pid 700 · busy');
   });
 });
 

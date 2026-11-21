@@ -93,18 +93,17 @@ export const lastMessages = (lines: string[], n: number): TranscriptMessage[] =>
 const TAIL_CHUNK = 1024 * 1024;
 
 /**
- * The last `n` messages of a transcript, oldest first, read BACK from the end
- * of the file in chunks — a transcript can be hundreds of MB and the answer is
- * almost always in its last one. Lines are cut on the newline byte, so a
- * multi-byte character split by a chunk boundary is never decoded in halves.
+ * Hand a file's lines to `visit` from the LAST one back, reading the file
+ * backwards in chunks, until `visit` returns true or the file is done. A
+ * transcript can be hundreds of MB and what is wanted is almost always in
+ * its last chunk. Lines are cut on the newline byte, so a multi-byte
+ * character split by a chunk boundary is never decoded in halves.
  */
-export const readLastMessages = (
+export const scanLinesBackward = (
   file: string,
-  n: number,
+  visit: (line: string) => boolean,
   chunkBytes = TAIL_CHUNK,
-): TranscriptMessage[] => {
-  const out: TranscriptMessage[] = [];
-  if (n <= 0) return out;
+): void => {
   const fd = fs.openSync(file, 'r');
   try {
     let end = fs.fstatSync(fd).size;
@@ -114,7 +113,7 @@ export const readLastMessages = (
     // 200 MB line two hundred times.
     let pending: Buffer[] = [];
     const cast = (parts: Buffer[]) => parts as unknown as Uint8Array[];
-    while (end > 0 && out.length < n) {
+    while (end > 0) {
       const start = Math.max(0, end - chunkBytes);
       const chunk = Buffer.alloc(end - start);
       // Casts: this repo's @types/node and TS lib disagree on Buffer vs Uint8Array.
@@ -130,13 +129,79 @@ export const readLastMessages = (
       const whole = Buffer.concat(cast([chunk.subarray(nl + 1), ...pending]));
       pending = start > 0 ? [chunk.subarray(0, nl)] : [];
       const lines = whole.toString('utf-8').split('\n');
-      for (let i = lines.length - 1; i >= 0 && out.length < n; i--) {
-        const m = messageFromLine(lines[i]);
-        if (m) out.unshift(m);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (visit(lines[i])) return;
       }
     }
-    return out;
   } finally {
     fs.closeSync(fd);
   }
+};
+
+/** The last `n` messages of a transcript, oldest first. */
+export const readLastMessages = (
+  file: string,
+  n: number,
+  chunkBytes = TAIL_CHUNK,
+): TranscriptMessage[] => {
+  const out: TranscriptMessage[] = [];
+  if (n <= 0) return out;
+  scanLinesBackward(
+    file,
+    (line) => {
+      const m = messageFromLine(line);
+      if (m) out.unshift(m);
+      return out.length >= n;
+    },
+    chunkBytes,
+  );
+  return out;
+};
+
+/** A line's own top-level `timestamp` in epoch ms, or 0. Pure. */
+export const timestampOfLine = (line: string): number => {
+  // Cheap reject first: lines without the key are most bookkeeping records.
+  if (!line.includes('"timestamp"')) return 0;
+  try {
+    const r = JSON.parse(line);
+    // Top level only: a tool result can quote another record's timestamp.
+    const t =
+      r && typeof r === 'object' && typeof r.timestamp === 'string'
+        ? Date.parse(r.timestamp)
+        : NaN;
+    return Number.isFinite(t) ? t : 0;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * When the session last DID something: the timestamp of the transcript's last
+ * record that carries one, in epoch ms; 0 when none does or the file cannot
+ * be read.
+ *
+ * Not the last line: a transcript usually ends in bookkeeping records with no
+ * timestamp — the last line of 21 of 40 real transcripts on 2026-11-21 was a
+ * `cost-state`, `bridge-session` or `artifact-comment-monitor` record, and
+ * `custom-title` / `agent-name` records sit there too. Every user,
+ * assistant and system record has one, so the scan stops within a few lines.
+ */
+export const readLastActivity = (
+  file: string,
+  chunkBytes = TAIL_CHUNK,
+): number => {
+  let found = 0;
+  try {
+    scanLinesBackward(
+      file,
+      (line) => {
+        found = timestampOfLine(line);
+        return found > 0;
+      },
+      chunkBytes,
+    );
+  } catch {
+    return 0;
+  }
+  return found;
 };
