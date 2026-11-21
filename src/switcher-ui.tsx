@@ -952,7 +952,7 @@ function SwitcherApp() {
   const [quickSwitcherShortcut, setQuickSwitcherShortcut] = useState('');
   const [settingsOpenToTab, setSettingsOpenToTab] = useState<'general' | 'sessions' | 'shortcuts' | null>(null);
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Session identity: right-click copy menu, ⌘⇧C, detail view (⌘I / ⌘↓).
+  // Session identity: right-click copy menu, ⌘⇧C, detail view (⌘I / ⌘→).
   const flashBanner = useCallback((msg: string) => {
     if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current);
     setModeBanner(msg);

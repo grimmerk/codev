@@ -1550,6 +1550,20 @@ const PopupDefaultExample = ({
               ))}
             </div>
             <div style={{ borderTop: '1px solid #333', marginTop: '6px', paddingTop: '6px' }}>
+              <span style={{ fontSize: '11px', color: '#666' }}>Selected Session <span style={{ color: '#555' }}>(in Sessions)</span></span>
+              {[
+                { keys: '\u2318+\u2192 / \u2190', label: 'Details Under Row / Close' },
+                { keys: '\u2318+I', label: 'Details Overlay' },
+                { keys: '\u2318+\u21E7+C', label: 'Copy Reference (title + id)' },
+                { keys: 'Right-click', label: 'Copy Menu' },
+              ].map((row) => (
+                <div key={row.keys} style={{ display: 'flex', justifyContent: 'space-between', padding: '1px 0' }}>
+                  <span style={{ fontSize: '11px', color: '#888', fontFamily: 'monospace' }}>{row.keys}</span>
+                  <span style={{ fontSize: '11px', color: '#888' }}>{row.label}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ borderTop: '1px solid #333', marginTop: '6px', paddingTop: '6px' }}>
               <span style={{ fontSize: '11px', color: '#666' }}>Claude Session Launch <span style={{ color: '#555' }}>(in Projects)</span></span>
               {[
                 { keys: '\u2318+Enter', label: 'New Claude Session' },
