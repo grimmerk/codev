@@ -789,6 +789,29 @@ describe('buildSwitchRecord', () => {
     expect(buildSwitchRecord(ctx, undefined, dropped, ms, {}).account).toBeNull();
   });
 
+  it('says how the terminal was decided, and `none` when nothing was detected', () => {
+    const snap = (facts: SwitchSnapshot['facts']): SwitchSnapshot => ({
+      marks: { returned: 1 },
+      spawnedAt: null,
+      exitedAt: null,
+      endedAt: 1,
+      facts,
+      ok: true,
+      timedOut: false,
+    });
+    const ctx = { ts: '2026-01-02T03:04:05.000Z', sessionId: 'id-1', active: true };
+    const build = (facts: SwitchSnapshot['facts']) => {
+      const s = snap(facts);
+      return buildSwitchRecord(ctx, undefined, s, stepDurations(s, undefined, { wallMs: 0, perfEpochMs: 0 }), {});
+    };
+    expect(build({ detectSrc: 'cache' }).detectSrc).toBe('cache');
+    expect(build({ detectSrc: 'ps' }).detectSrc).toBe('ps');
+    // A resume, or a switch without a pid, detects nothing.
+    expect(build({}).detectSrc).toBe('none');
+    // The version is not bumped for one added field.
+    expect(build({ detectSrc: 'cache' }).v).toBe(2);
+  });
+
   it('drops values of the wrong shape and cuts an overlong title', () => {
     const snap: SwitchSnapshot = {
       marks: {},
@@ -904,6 +927,46 @@ describe('scripts/switch-timing-summary.js', () => {
     const report = summary.formatReport(s, malformed);
     expect(report).toContain('3 switches');
     expect(report).toContain('3 malformed line(s) skipped');
+  });
+
+  it('groups running-session switches by how the terminal was decided, old lines included', () => {
+    const rec = (kind: string, detectSrc: unknown, detect: number | null, total: number) => ({
+      v: 2,
+      kind,
+      terminal: 'ghostty',
+      ...(detectSrc === undefined ? {} : { detectSrc }),
+      ms: { detect, run: total - 20, total },
+    });
+    const lines = [
+      rec('switch', undefined, 2003, 5000), // written before the field existed
+      rec('switch', undefined, 90, 700),
+      rec('switch', 'cache', 0.4, 600),
+      rec('switch', 'cache', 0.6, 800),
+      rec('switch', 'ps', 70, 900),
+      rec('switch', 'none', null, 500),
+      rec('resume', 'none', null, 1500), // a resume is not in this table
+      rec('resume', undefined, null, 1400),
+    ].map((r) => JSON.stringify(r));
+    const { records, malformed } = summary.parseLines(lines.join('\n'));
+    expect(malformed).toBe(0);
+    const s = summary.summarize(records);
+    const groups = Object.fromEntries(
+      s.byDetectSrc.map((g: { key: string; n: number; steps: { detect: unknown } }) => [
+        g.key,
+        [g.n, g.steps.detect],
+      ]),
+    );
+    expect(groups).toEqual({
+      '(not recorded)': [2, { n: 2, p50: 1046.5, p90: 1811.7 }],
+      cache: [2, { n: 2, p50: 0.5, p90: 0.58 }],
+      ps: [1, { n: 1, p50: 70, p90: 70 }],
+      none: [1, { n: 0, p50: null, p90: null }],
+    });
+    const report = summary.formatReport(s);
+    expect(report).toContain('by how the terminal was decided');
+    expect(report).toMatch(/\(not recorded\)\s+2\b/);
+    // A value that is not text makes the line malformed, like every text field.
+    expect(summary.parseLines(JSON.stringify(rec('switch', 7, 1, 100))).malformed).toBe(1);
   });
 
   // Two v2 sessions and one v1 line, as a log that spans the version change.

@@ -2066,8 +2066,8 @@ function SwitcherApp() {
     // history.jsonl. Refresh it with EVERY session refetch, not only in the
     // live scope: rows resolve their running pid from the report (it beats
     // the cached detection map), so a report older than the map would hand a
-    // click a dead pid. One `ps` per popup open — `detectTerminalApps` on the
-    // same trigger spawns a few hundred.
+    // click a dead pid. One `ps` per popup open — as `detectTerminalApps` on
+    // the same trigger now is (it used to spawn a few hundred).
     refreshLiveReport();
   };
 
@@ -2262,6 +2262,11 @@ function SwitcherApp() {
       setModeBanner(msg);
       bannerTimeoutRef.current = setTimeout(() => setModeBanner(null), durationMs);
     };
+
+    // A switch whose terminal script was killed by its timeout: say so.
+    window.electronAPI.onSwitchNotice((_event: any, message: string) => {
+      if (typeof message === 'string' && message) showBanner(message, 8000);
+    });
 
     // Listen for app mode changes to enable/disable drag
     let shortcutDisplay = ''; // will be set by getShortcuts

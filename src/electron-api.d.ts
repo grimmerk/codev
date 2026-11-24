@@ -324,6 +324,8 @@ interface IElectronAPI {
   onWorkingFolderIterated: (callback: IpcCallback) => void;
   onFocusWindow: (callback: IpcCallback) => void;
   onSwitchToTerminal: (callback: IpcCallback) => void;
+  /** A switch was cut short (its terminal script hit the 5 s timeout): text for the banner. */
+  onSwitchNotice: (callback: IpcCallback) => void;
   /** Quick Switcher was shown: if the window sits on Term, go to the default tab. */
   onQuickSwitcherLeaveTerminal: (callback: IpcCallback) => void;
   onCheckTerminalAndHide: (callback: IpcCallback) => void;

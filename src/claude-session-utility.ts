@@ -60,7 +60,9 @@ import {
   switchOrderFor,
 } from './terminal-switch';
 import { pickSessionByTabTitle } from './cross-ref-title';
+import { noteSwitchKilled } from './switch-notice';
 import type { SwitchTiming } from './switch-timing';
+import { detectTerminals, resolveSwitchTerminal } from './terminal-detect';
 
 export interface ClaudeSession {
   sessionId: string;
@@ -344,42 +346,6 @@ export const getSessionsByIds = (ids: string[]): ClaudeSession[] => {
  *    session for that project from history.jsonl
  */
 /**
- * Detect which terminal app a process is running in by walking parent process tree.
- * Returns 'iterm2', 'cmux', 'ghostty', 'terminal', or 'unknown'.
- */
-export const detectTerminalApp = async (pid: number): Promise<string> => {
-  const { exec } = require('child_process');
-  const execPromise = (cmd: string): Promise<string> =>
-    new Promise((resolve) => {
-      exec(cmd, { encoding: 'utf-8', timeout: 2000 }, (_e: any, out: string) => resolve(out || ''));
-    });
-
-  let currentPid = pid;
-  for (let i = 0; i < 20; i++) {
-    const comm = (await execPromise(`ps -o comm= -p ${currentPid} 2>/dev/null`)).trim();
-    if (!comm) break;
-
-    const commLower = comm.toLowerCase();
-    // CodeV's embedded terminal (node-pty runs under Electron)
-    if (commLower.includes('codev')) return 'codev';
-    // Check if this Electron process is CodeV by inspecting command line
-    if (commLower.includes('electron')) {
-      const cmdline = (await execPromise(`ps -o command= -p ${currentPid} 2>/dev/null`)).trim();
-      if (cmdline.toLowerCase().includes('codev')) return 'codev';
-    }
-    if (commLower.includes('iterm') || commLower.includes('iterm2')) return 'iterm2';
-    if (commLower.includes('cmux')) return 'cmux';
-    if (commLower.includes('ghostty')) return 'ghostty';
-    if (commLower.includes('terminal.app') || (commLower === 'terminal')) return 'terminal';
-
-    const ppid = parseInt((await execPromise(`ps -o ppid= -p ${currentPid} 2>/dev/null`)).trim(), 10);
-    if (!ppid || ppid <= 1) break;
-    currentPid = ppid;
-  }
-  return 'unknown';
-};
-
-/**
  * iTerm2 cross-reference: refine PID-session mapping using terminal TTY + tab name.
  * For processes that were mapped via cwd fallback (no UUID/title in args),
  * check if iTerm2 tab name contains a custom title that can identify the session.
@@ -602,9 +568,10 @@ const crossRefDisambiguate = async (
 ): Promise<void> => {
   // Detect terminal for each PID in parallel, then group
   const byTerminal: Record<string, { pid: number; cwd: string; candidates: ClaudeSession[] }[]> = {};
-  const terminals = await Promise.all(needsCrossRef.map(item => detectTerminalApp(item.pid)));
+  // One process listing answers for every pid.
+  const terminals = await detectTerminals(needsCrossRef.map(item => item.pid));
   for (let i = 0; i < needsCrossRef.length; i++) {
-    const terminal = terminals[i];
+    const terminal = terminals.get(needsCrossRef[i].pid) ?? 'unknown';
     if (!byTerminal[terminal]) byTerminal[terminal] = [];
     byTerminal[terminal].push(needsCrossRef[i]);
   }
@@ -1449,8 +1416,11 @@ export const openSession = async (
 
   // For active sessions, auto-detect which terminal they're running in
   if (isActive && activePid) {
-    const detected = await detectTerminalApp(activePid);
+    // A terminal the app already worked out for this very process is
+    // reused; otherwise one process listing decides (terminal-detect.ts).
+    const { terminal: detected, src } = await resolveSwitchTerminal(activePid);
     timing?.mark('detect');
+    timing?.set({ detectSrc: src });
     if (detected !== 'unknown') {
       effectiveTerminal = detected;
       console.log(`[openSession] auto-detected terminal: ${detected} for pid ${activePid}`);
@@ -1648,6 +1618,7 @@ export const runCommandInTerminal = (
         { encoding: 'utf-8', timeout: 5000 },
         (error: any) => {
           timing?.exited(undefined, !!error?.killed);
+          noteSwitchKilled(error, label);
           try {
             fs.unlinkSync(tmpScript);
           } catch {}
@@ -2779,6 +2750,7 @@ export const openSessionInGhostty = async (
     timing?.spawned();
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
       timing?.exited(stdout, !!error?.killed);
+      noteSwitchKilled(error, 'Ghostty');
       const result = (stdout || '').trim();
       console.log('[ghostty] switch result:', result, error?.message || '');
       if (result === 'not found') {
@@ -2827,6 +2799,7 @@ export const openSessionInTerminalApp = async (
     timing?.spawned();
     exec(`osascript ${tmpScript}`, { encoding: 'utf-8', timeout: 5000 }, (error: any, stdout: string) => {
       timing?.exited(stdout, !!error?.killed);
+      noteSwitchKilled(error, 'Terminal.app');
       console.log(`[Terminal.app] switch result: ${(stdout || '').trim()}`, error?.message || '');
       try { fs.unlinkSync(tmpScript); } catch {}
     });

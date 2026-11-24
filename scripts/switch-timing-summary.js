@@ -8,7 +8,8 @@
  * file, if any) and then ~/.config/codev/switch-timing.jsonl.
  *
  * Prints p50 / p90 per step and for the total, for all switches and grouped
- * by kind, terminal, branch and account; a per-session table (the 20 with
+ * by kind, terminal, branch, account and (for switches to a running
+ * session) how the terminal was decided; a per-session table (the 20 with
  * the most switches; `--all` for every one, `--sort=p90` for the slowest
  * first); then the total against machine load. Plain Node, no dependencies.
  * A line that is not a record is counted and skipped; a missing or empty
@@ -120,6 +121,7 @@ const TEXT_FIELDS = [
   'project',
   'tty',
   'ttySrc',
+  'detectSrc',
 ];
 
 /** Status flags: compared with `=== true` / `=== false`, so they must be booleans. */
@@ -185,6 +187,9 @@ const groupBy = (records, keyOf) => {
 
 const UNKNOWN = '(unknown)';
 const NO_ACCOUNT = '(none)';
+
+/** Lines written before 1.0.100 have no `detectSrc`: they always walked the process tree. */
+const NO_DETECT_SRC = '(not recorded)';
 
 /** A record that names its session (version 2 on). */
 const namesSession = (r) => typeof r.sessionId === 'string' && r.sessionId !== '';
@@ -327,6 +332,11 @@ const summarize = (records, opts = {}) => {
     byTerminal: groupBy(records, (r) => String(r.terminal ?? 'unknown')),
     byBranch: groupBy(records, (r) => String(r.branch ?? 'unknown')),
     byAccount: groupBy(records, accountOf),
+    // Running sessions only: a resume detects nothing.
+    byDetectSrc: groupBy(
+      records.filter((r) => r.kind === 'switch'),
+      (r) => (typeof r.detectSrc === 'string' && r.detectSrc ? r.detectSrc : NO_DETECT_SRC),
+    ),
     sessions: sessionRows(records, opts.sort),
     unnamed: records.filter((r) => !namesSession(r)).length,
     runShareP50: percentile(runShare, 50),
@@ -525,6 +535,12 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
     stepTable('By branch', 'branch', s.byBranch),
     '',
     stepTable('By account', 'account', s.byAccount),
+    '',
+    stepTable(
+      'Switches to a running session, by how the terminal was decided (cache: a known answer reused; ps: one process listing; not recorded: before 1.0.100, a ps per level)',
+      'detectSrc',
+      s.byDetectSrc,
+    ),
     '',
     sessionTable(s, opts),
     '',
