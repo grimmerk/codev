@@ -70,6 +70,15 @@ const run = (args: string[]): Promise<string> =>
  * older Claude Code writes no `procStart`, and a leftover file of an
  * earlier process under the same pid (in another account) would disagree:
  * both give null, and the caller detects instead of trusting the cache.
+ *
+ * Known limit: the registration is Claude Code's record, not the process
+ * table. If a process dies without its file being removed (a crash, a
+ * `kill -9`) and the pid is then reused by a process that does not
+ * register over it, the stale start still matches and the cache answers
+ * for the dead session. The app would list that session as running either
+ * way (it treats "file exists and pid is alive" as running), and a switch
+ * to it goes wrong with or without the cache; proving the pid's owner here
+ * would put a `ps` back on every switch, which is what this module removes.
  */
 export const readRegisteredStart = (
   pid: number,
