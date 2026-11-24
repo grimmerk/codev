@@ -2263,7 +2263,7 @@ function SwitcherApp() {
       bannerTimeoutRef.current = setTimeout(() => setModeBanner(null), durationMs);
     };
 
-    // A switch whose terminal script was killed by its timeout: say so.
+    // A switch or launch whose terminal script was killed by its timeout: say so.
     window.electronAPI.onSwitchNotice((_event: any, message: string) => {
       if (typeof message === 'string' && message) showBanner(message, 8000);
     });

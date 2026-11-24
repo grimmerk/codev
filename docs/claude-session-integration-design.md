@@ -569,6 +569,7 @@ For active sessions, CodeV walks the parent process tree to detect which termina
 ```
  badges (window opens)      detectTerminals(pids)
  cross-reference       ──►    ① ONE  ps -axo pid=,ppid=,lstart=,comm=   (TZ=UTC LC_ALL=C, 2 s timeout)
+                                 (+ one ps -o pid=,command= only for an Electron ancestor, see below)
                               ② parse into a table; walk each pid's parents in memory
                               ③ remember every terminal found:  pid + start time → terminal
                                         │
@@ -582,7 +583,14 @@ For active sessions, CodeV walks the parent process tree to detect which termina
 - **`unknown` is never stored**, so one slow moment cannot pin a session to the wrong terminal. A listing that fails or times out gives `unknown` and the switch falls back to the terminal in Settings, as before; for the badges, a failed listing still answers from the stored entries that pass the check above.
 - **Not reused: the tty.** The stored answer is only which terminal *app* to talk to. Which tab is chosen is decided by the switch script, live, exactly as before.
 
-**When a switch gets no answer.** The Ghostty and Terminal.app switch scripts, and the scripts that open a new tab for a resume, run with a 5 s timeout. When it fires the command is killed and nothing happened on screen. The main process now sends a line to the switcher window's banner (`src/switch-notice.ts`): "Ghostty did not answer within 5 s, so the switch was cancelled. The machine may be busy — try again." In Menu Bar mode the window hid when the row was clicked, so the line is held and shown the next time the window opens, and dropped if that is more than two minutes later. There is no automatic retry: one that lands 5–10 s later would take the focus from whatever the user moved on to. The iTerm2 switch runs without a timeout and is unchanged.
+**When a terminal script is stopped by its timeout.** Two kinds of script run with a 5 s timeout: the Ghostty and Terminal.app *switch* scripts, and the *launch* scripts of iTerm2, Ghostty and Terminal.app (a resume in a new tab or window, a new session, the members of a saved list). When the timeout fires the script is killed before it finished, and until 1.0.100 CodeV gave no feedback. The main process now sends a line to the switcher window's banner (`src/switch-notice.ts`), one of two:
+
+| Killed script | Banner | Why this wording |
+|---|---|---|
+| switch | "Ghostty did not answer within 5 s; the switch may not have completed. The machine may be busy." | A killed script did not finish, but it may have done part of its work: AppleScript runs step by step, so the terminal may already have been activated. The line does not say "cancelled". |
+| launch | "Ghostty took more than 5 s to answer. The session may still be opening — check before trying again." | Several launch scripts submit the command before their last step: Ghostty's `new window with configuration` (the command is the surface's initial input) is followed by `activate`; Terminal.app's `do script` and iTerm2's `write text` are followed by `activate` when a new window is opened in a running terminal. A kill during that last step leaves a session that is starting, and a blind retry would open it twice. |
+
+Paths that do **not** report: the iTerm2 switch, which runs without a timeout (a hang there ends as `timedOut` in the timing log, with no banner), and the cmux switch and launch, which do not hand over their kill. In Menu Bar mode the window hid when the row was chosen, so the line is held and shown the next time the window opens, and dropped if that is more than two minutes later. There is no automatic retry: one that lands 5–10 s later would take the focus from whatever the user moved on to.
 
 ### cmux Integration Details
 
@@ -766,7 +774,7 @@ Any failure in the timing code is swallowed and the switch runs as before.
 | `via` | `enter` or `click`. |
 | `kind` | `switch` (the session was running) or `resume` (it was not; a new tab runs `claude --resume`). |
 | `terminal`, `configured` | Where the switch went after auto-detection, and the terminal named in Settings. |
-| `detectSrc` | How step ④ decided the terminal this time (since 1.0.100; see "Auto-Detection of Terminal App"): `cache` — an earlier detection of the same process was reused, so `ms.detect` is one small file read; `ps` — one process listing was run (also when it named no terminal and the switch fell back to `configured`); `none` — nothing was detected (a resume, or a switch without a pid). A line without the field was written before 1.0.100, when every switch to a running session spawned two `ps` per level. `ms.detect` means the same in all cases: the time spent deciding the terminal. |
+| `detectSrc` | How step ④ decided the terminal this time (since 1.0.100; see "Auto-Detection of Terminal App"): `cache` — an earlier detection of the same process was reused, so `ms.detect` is one small file read; `ps` — one process listing was run, plus a command-line lookup in the Electron case described there (also when it named no terminal and the switch fell back to `configured`); `none` — nothing was detected (a resume, or a switch without a pid). A line without the field was written before 1.0.100, when every switch to a running session spawned two `ps` per level. `ms.detect` means the same in all cases: the time spent deciding the terminal. |
 | `tool` | What ran the switch: `osascript`, `cmux-cli`, `open` (VS Code, Claude Desktop) or `pty` (the embedded terminal). |
 | `untimed` | True when no command was started and awaited, so there is no exit to time to: `ms.run`, `ms.main` and `ms.total` are `null`; `ms.returned` and the earlier steps are kept. That is the whole rule. In practice it is mostly the paths with tool `open` or `pty`, which hand the switch over and return at once (VS Code, for one, then waits 500 ms before its own command). It is also a terminal launch that failed before its command started, for example when the script file could not be written; such a record is `untimed` with tool `osascript` and `ok` false. The log exists to measure terminal switching; these records are there to be counted, not timed. |
 | `branch` | Which key found the tab: `tty`, `title`, `cwd`, `project-name` (cmux), `none` (the script ran and matched nothing); for a resume `new-tab`, `new-window` or `new-workspace`; `deep-link`, `embedded`. `null` means unknown, for example a script that failed. |

@@ -3,7 +3,9 @@
  *
  * - `detectTerminals(pids)` — ONE `ps` listing for any number of pids
  *   (process-tree.ts parses and walks it), where the walk used to spawn two
- *   `ps` per level per pid. Every answer it finds is remembered.
+ *   `ps` per level per pid. Every answer it finds is remembered. One more
+ *   `ps` (a command-line lookup) runs only when an ancestor is an Electron
+ *   process whose path does not already identify CodeV.
  * - `resolveSwitchTerminal(pid)` — what a switch calls: the remembered
  *   answer when it can be proved to belong to the process holding the pid
  *   now, otherwise a detection as above.

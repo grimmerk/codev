@@ -1,12 +1,19 @@
 /**
- * Telling the user that a switch was cut short. The terminal scripts run
- * with a 5 s timeout; when it fires, the command is killed and, until now,
- * nothing happened on screen. This module carries that one fact from the
- * `osascript` callback to whoever shows it (main.ts sends it to the
- * switcher window's banner).
+ * Telling the user that a terminal script was cut short. The Ghostty and
+ * Terminal.app switch scripts, and the scripts that launch a session in
+ * iTerm2, Ghostty or Terminal.app, run with a 5 s timeout; when it fires,
+ * the command is killed and, until now, CodeV gave no feedback. (The iTerm2
+ * switch runs without a timeout, so it never reports here.) This module
+ * carries that one fact from the `osascript` callback to whoever shows it
+ * (main.ts sends it to the switcher window's banner).
  *
- * There is no retry: one that lands 5–10 s later would take the focus away
- * from whatever the user has moved on to.
+ * A killed script did not finish, which is not the same as having done
+ * nothing: AppleScript runs step by step, so the terminal may already have
+ * been activated, or a launch command already submitted, when the kill
+ * lands. The messages therefore say what is known and no more.
+ *
+ * There is no automatic retry: one that lands 5–10 s later would take the
+ * focus away from whatever the user has moved on to.
  *
  * No Electron imports, and nothing here throws into the switch path.
  */
@@ -20,10 +27,29 @@ const DISPLAY_NAMES: Record<string, string> = {
   'terminal.app': 'Terminal.app',
 };
 
-/** The banner text. `terminal` is a fixed label from the code, never user text. */
-export const switchKilledMessage = (terminal?: string): string => {
+/**
+ * What the killed script was doing: `switch` — focusing the tab of a
+ * running session; `launch` — opening a tab or window and typing a command
+ * into it (a resume, a new session, a saved list's members).
+ */
+export type SwitchNoticeKind = 'switch' | 'launch';
+
+/**
+ * The banner text. `terminal` is a fixed label from the code, never user text.
+ *
+ * A launch gets its own wording because several launch scripts submit the
+ * command BEFORE their last step (`new window with configuration` or
+ * `do script`, then `activate`): the session may be starting although the
+ * script was killed, and "try again" would open it twice.
+ */
+export const switchKilledMessage = (
+  terminal?: string,
+  kind: SwitchNoticeKind = 'switch',
+): string => {
   const name = terminal ? DISPLAY_NAMES[terminal.toLowerCase()] ?? terminal : 'The terminal';
-  return `${name} did not answer within ${SWITCH_SCRIPT_TIMEOUT_S} s, so the switch was cancelled. The machine may be busy — try again.`;
+  return kind === 'launch'
+    ? `${name} took more than ${SWITCH_SCRIPT_TIMEOUT_S} s to answer. The session may still be opening — check before trying again.`
+    : `${name} did not answer within ${SWITCH_SCRIPT_TIMEOUT_S} s; the switch may not have completed. The machine may be busy.`;
 };
 
 let listener: ((message: string) => void) | null = null;
@@ -38,10 +64,14 @@ export const setSwitchKilledListener = (fn: ((message: string) => void) | null):
  * command was stopped by its timeout (`error.killed`); any other failure is
  * the caller's to handle, as before.
  */
-export const noteSwitchKilled = (error: unknown, terminal?: string): void => {
+export const noteSwitchKilled = (
+  error: unknown,
+  terminal?: string,
+  kind: SwitchNoticeKind = 'switch',
+): void => {
   try {
     if (!error || (error as { killed?: unknown }).killed !== true) return;
-    listener?.(switchKilledMessage(terminal));
+    listener?.(switchKilledMessage(terminal, kind));
   } catch {
     // A notice that cannot be shown must not disturb the switch path.
   }
@@ -58,7 +88,7 @@ export interface PendingNotice {
 }
 
 /**
- * In Menu Bar mode the window hides as a row is clicked, so there is no
+ * In Menu Bar mode the window hides as a row is chosen, so there is no
  * banner to show the notice in when the kill arrives 5 s later. It is held
  * here and shown the next time the window opens.
  */

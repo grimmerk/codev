@@ -806,8 +806,23 @@ describe('buildSwitchRecord', () => {
     };
     expect(build({ detectSrc: 'cache' }).detectSrc).toBe('cache');
     expect(build({ detectSrc: 'ps' }).detectSrc).toBe('ps');
-    // A resume, or a switch without a pid, detects nothing.
-    expect(build({}).detectSrc).toBe('none');
+    // A switch without a pid detects nothing.
+    const noPid = build({});
+    expect([noPid.kind, noPid.detectSrc]).toEqual(['switch', 'none']);
+    // Neither does a resume: `openSession` detects for running sessions only.
+    const resumed = snap({ tool: 'osascript', branch: 'new-tab' });
+    const resume = buildSwitchRecord(
+      { ...ctx, active: false },
+      undefined,
+      resumed,
+      stepDurations(resumed, undefined, { wallMs: 0, perfEpochMs: 0 }),
+      {},
+    );
+    expect([resume.kind, resume.detectSrc, resume.ms]).toEqual([
+      'resume',
+      'none',
+      expect.objectContaining({ detect: null }),
+    ]);
     // The version is not bumped for one added field.
     expect(build({ detectSrc: 'cache' }).v).toBe(2);
   });

@@ -431,10 +431,10 @@ const onBlur = (event: any) => {
   hideSwitcherWindow();
 };
 
-// A terminal script killed by its 5 s timeout (switch-notice.ts). Shown in
-// the window's banner at once when the window is on screen; in Menu Bar
-// mode it hid when the row was clicked, so the notice waits for the next
-// time it opens (and is dropped if that is minutes away).
+// A switch or launch script killed by its 5 s timeout (switch-notice.ts).
+// Shown in the window's banner at once when the window is on screen; in
+// Menu Bar mode it hid when the row was chosen, so the notice waits for the
+// next time it opens (and is dropped if that is minutes away).
 const pendingSwitchNotice = createPendingNotice();
 setSwitchKilledListener((message) => {
   const window = getSwitcherWindow();
@@ -450,7 +450,7 @@ const onFocus = (event: any) => {
   const window = getSwitcherWindow();
   if (window) {
     window.webContents.send('window-focus');
-    // A switch was cut short while the window was hidden: say so now.
+    // A script was killed while the window was hidden: say so now.
     const held = pendingSwitchNotice.take();
     if (held) window.webContents.send('switch-notice', held);
   }

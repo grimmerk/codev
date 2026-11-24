@@ -11,11 +11,28 @@ import {
 describe('switchKilledMessage', () => {
   it('names the terminal and the timeout', () => {
     expect(switchKilledMessage('Ghostty')).toBe(
-      'Ghostty did not answer within 5 s, so the switch was cancelled. The machine may be busy — try again.',
+      'Ghostty did not answer within 5 s; the switch may not have completed. The machine may be busy.',
     );
+    expect(switchKilledMessage('Ghostty', 'switch')).toBe(switchKilledMessage('Ghostty'));
     expect(switchKilledMessage('ghostty')).toMatch(/^Ghostty did not answer/);
     expect(switchKilledMessage('Terminal.app')).toMatch(/^Terminal\.app did not answer/);
     expect(switchKilledMessage()).toMatch(/^The terminal did not answer within 5 s/);
+  });
+
+  it('does not claim a killed switch did nothing, or invite a retry', () => {
+    // The script may have activated the terminal before it was killed.
+    expect(switchKilledMessage('Ghostty')).not.toMatch(/cancel|try again/i);
+  });
+
+  it('says a killed launch may still be opening, under the labels the launch path passes', () => {
+    expect(switchKilledMessage('ghostty', 'launch')).toBe(
+      'Ghostty took more than 5 s to answer. The session may still be opening — check before trying again.',
+    );
+    expect(switchKilledMessage('Terminal.app', 'launch')).toMatch(/^Terminal\.app took more than 5 s/);
+    expect(switchKilledMessage('iTerm2', 'launch')).toMatch(/^iTerm2 took more than 5 s/);
+    expect(switchKilledMessage(undefined, 'launch')).toMatch(/^The terminal took more than 5 s/);
+    // Several launch scripts submit the command before their last step.
+    expect(switchKilledMessage('ghostty', 'launch')).not.toMatch(/cancel|did not answer|not have completed/i);
   });
 });
 
@@ -32,6 +49,18 @@ describe('noteSwitchKilled', () => {
     const got = collect();
     noteSwitchKilled(Object.assign(new Error('killed'), { killed: true }), 'Ghostty');
     expect(got).toEqual([switchKilledMessage('Ghostty')]);
+  });
+
+  it('reports a killed launch with the launch wording', () => {
+    const got = collect();
+    const killed = Object.assign(new Error('killed'), { killed: true });
+    noteSwitchKilled(killed, 'ghostty', 'launch');
+    noteSwitchKilled(killed, 'ghostty', 'switch');
+    expect(got).toEqual([
+      switchKilledMessage('ghostty', 'launch'),
+      switchKilledMessage('ghostty', 'switch'),
+    ]);
+    expect(got[0]).not.toBe(got[1]);
   });
 
   it('says nothing for a command that finished, or failed some other way', () => {

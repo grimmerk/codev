@@ -537,7 +537,7 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
     stepTable('By account', 'account', s.byAccount),
     '',
     stepTable(
-      'Switches to a running session, by how the terminal was decided (cache: a known answer reused; ps: one process listing; not recorded: before 1.0.100, a ps per level)',
+      'Switches to a running session, by how the terminal was decided (cache: a known answer reused; ps: one process listing; none: no detection, the switch had no pid; not recorded: before 1.0.100, two ps per level)',
       'detectSrc',
       s.byDetectSrc,
     ),

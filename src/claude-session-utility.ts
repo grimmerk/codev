@@ -1618,7 +1618,7 @@ export const runCommandInTerminal = (
         { encoding: 'utf-8', timeout: 5000 },
         (error: any) => {
           timing?.exited(undefined, !!error?.killed);
-          noteSwitchKilled(error, label);
+          noteSwitchKilled(error, label, 'launch');
           try {
             fs.unlinkSync(tmpScript);
           } catch {}
