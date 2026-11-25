@@ -80,10 +80,15 @@ const TTY_LOOKUP = (pid: number): string =>
  * Where one item sits below `every window` in an app's object model, and
  * how to bring it forward once found. `bind` turns the indexes the bulk
  * read gave (`cvW` window, `cvT` tab, `cvK` the item in the tab) into the
- * variable `item`; each app answers that `get` with an id-based reference
- * (`terminal id "…"`, `session id "…" of tab 2 of window id 8572`,
- * `tab 2 of window id 8733`), so the second read and the focus act on the
- * same object even if the windows are reordered in between.
+ * variable `item`. Each app answers that `get` with a reference that no
+ * longer depends on the window order: Ghostty `terminal id "…"`, iTerm2
+ * `session id "…" of tab 2 of window id 8572`, Terminal.app
+ * `tab 2 of window id 8733`. The tab part of the last two is still an index
+ * inside that window (Terminal.app tabs have no id; iTerm2's `select t`
+ * uses the index too), so a tab reordered or closed in that one window
+ * between the second read and the focus could still move it — the same
+ * gap the per-item loop has between its read and its focus, two
+ * consecutive Apple events apart.
  */
 interface AppShape {
   /** `terminal of every tab of every window` */

@@ -127,6 +127,12 @@ const TEXT_FIELDS = [
   'scan',
 ];
 
+/** `scan`, when it is text, is one of these: anything else would open a group of its own. */
+const SCAN_VALUES = ['bulk', 'loop'];
+
+/** Branches of a launch: a "switch" row with no pid opens a tab instead of finding one. */
+const LAUNCH_BRANCHES = ['new-tab', 'new-window', 'new-workspace'];
+
 /** Status flags: compared with `=== true` / `=== false`, so they must be booleans. */
 const FLAG_FIELDS = ['ok', 'timedOut', 'killed', 'untimed'];
 
@@ -166,6 +172,7 @@ const isRecord = (r) =>
   isPlainObject(r.ms) &&
   TEXT_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'string') &&
   FLAG_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'boolean') &&
+  (r.scan === undefined || r.scan === null || SCAN_VALUES.includes(r.scan)) &&
   isListings(r.listings);
 
 /** Records from JSONL text. A line that is not a record (see `isRecord`) is skipped and counted. */
@@ -216,7 +223,7 @@ const NO_ACCOUNT = '(none)';
 const NO_DETECT_SRC = '(not recorded)';
 
 /**
- * `scan` (since 1.0.101): `bulk` or `loop`. A line without the field was
+ * `scan` (since 1.0.102): `bulk` or `loop`. A line without the field was
  * written before, when every switch script asked item by item; `null` is a
  * script whose result could not be read (killed, failed).
  */
@@ -397,9 +404,13 @@ const summarize = (records, opts = {}) => {
       records.filter((r) => r.kind === 'switch'),
       (r) => (typeof r.detectSrc === 'string' && r.detectSrc ? r.detectSrc : NO_DETECT_SRC),
     ),
-    // Switch scripts only: the field describes how an AppleScript looked the tab up.
+    // Switch scripts only: the field describes how an AppleScript looked the tab
+    // up. A running row without a pid is opened with a launch script in iTerm2
+    // and Terminal.app (`kind` switch, branch `new-tab` / `new-window`): left out.
     byScan: groupBy(
-      records.filter((r) => r.kind === 'switch' && r.tool === 'osascript'),
+      records.filter(
+        (r) => r.kind === 'switch' && r.tool === 'osascript' && !LAUNCH_BRANCHES.includes(r.branch),
+      ),
       scanOf,
     ),
     listings: lastWrittenListings(records),
@@ -623,7 +634,7 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
     ...(s.listings ? [listingsLine(s.listings)] : []),
     '',
     stepTable(
-      'Switch scripts (osascript, running session), by how the tab was looked up (bulk: one read of every tab per step; loop: a step fell back to asking tab by tab; not recorded: before 1.0.101, always tab by tab; (unknown): the result was not read, e.g. killed)',
+      'Switch scripts (osascript, running session), by how the tab was looked up (bulk: one read of every tab per step; loop: a step fell back to asking tab by tab; not recorded: before 1.0.102, always tab by tab; (unknown): the result was not read, e.g. killed)',
       'scan',
       s.byScan,
     ),

@@ -158,9 +158,12 @@ describe('switch script: bulk read first, per-item loop only as fallback', () =>
         const check = script.indexOf(`if ${v} then`);
         expect(check).toBeGreaterThan(-1);
         const after = script.slice(check);
-        // the focus comes before the step's `error "moved"` (the re-check failed)
+        // the focus is inside the re-check's branch: before that branch's
+        // `end if`, which comes before the step's `error "moved"`
+        const endIf = after.indexOf('end if');
         expect(after.indexOf(focus)).toBeGreaterThan(-1);
-        expect(after.indexOf(focus)).toBeLessThan(after.indexOf('error "moved"'));
+        expect(after.indexOf(focus)).toBeLessThan(endIf);
+        expect(endIf).toBeLessThan(after.indexOf('error "moved"'));
       }
     });
 

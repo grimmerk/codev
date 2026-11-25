@@ -1110,6 +1110,8 @@ describe('scripts/switch-timing-summary.js', () => {
       rec('osascript', null, 5000), // killed: no result to read
       rec('cmux-cli', null, 100), // not a switch script
       rec('osascript', null, 400, 'resume'), // a launch, not a switch
+      // A running row with no pid: iTerm2 / Terminal.app open a tab instead.
+      { ...rec('osascript', null, 600), branch: 'new-tab' },
     ].map((r) => JSON.stringify(r));
     const { records, malformed } = summary.parseLines(lines.join('\n'));
     expect(malformed).toBe(0);
@@ -1120,6 +1122,8 @@ describe('scripts/switch-timing-summary.js', () => {
     expect(groups).toEqual({ '(not recorded)': 1, bulk: 2, loop: 1, '(unknown)': 1 });
     expect(summary.formatReport(s)).toContain('by how the tab was looked up');
     expect(summary.parseLines(JSON.stringify(rec('osascript', 7, 1))).malformed).toBe(1);
+    // Only the two values the writer produces.
+    expect(summary.parseLines(JSON.stringify(rec('osascript', 'fast', 1))).malformed).toBe(1);
   });
 
   describe('process-listing counters', () => {
