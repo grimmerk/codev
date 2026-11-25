@@ -35,6 +35,7 @@ export const HOOK_SCRIPT = `#!/bin/bash
 # a machine short of memory each process start can take hundreds of ms.
 # Written for /bin/bash 3.2 (macOS): no $EPOCHSECONDS, no printf %(%s)T.
 IFS= read -r -d '' INPUT
+NOW=''  # set once, below; never taken from the environment
 
 # The first "name":"value" in the input, as \`grep -o … | head -1\` found it.
 field() {
@@ -55,7 +56,6 @@ if [ -z "$SESSION_ID" ]; then exit 0; fi
 
 STATUS_DIR="$HOME/.claude/codev-status"
 [ -d "$STATUS_DIR" ] || mkdir -p "$STATUS_DIR"
-NOW=$(date +%s)
 json_escape "$CWD"; SAFE_CWD=$VALUE
 
 # Track VS Code sessions in index file (for CodeV to discover closed sessions)
@@ -63,6 +63,7 @@ if [ "$CLAUDE_CODE_ENTRYPOINT" = "claude-vscode" ]; then
   VS_MARKER="$STATUS_DIR/.vs-$SESSION_ID"
   if [ ! -f "$VS_MARKER" ]; then
     : > "$VS_MARKER"
+    NOW=$(date +%s)
     echo "{\\"sessionId\\":\\"$SESSION_ID\\",\\"cwd\\":\\"$SAFE_CWD\\",\\"timestamp\\":$NOW}" >> "$STATUS_DIR/vscode-sessions.jsonl"
   fi
 fi
@@ -77,7 +78,8 @@ case "$EVENT" in
   *)                             STATUS="unknown" ;;
 esac
 
-# Atomic write via temp file + mv
+# Atomic write via temp file + mv (the VS Code branch may have read the time)
+[ -n "$NOW" ] || NOW=$(date +%s)
 TMPFILE="$STATUS_DIR/.$SESSION_ID.tmp"
 echo "{\\"status\\":\\"$STATUS\\",\\"timestamp\\":$NOW,\\"cwd\\":\\"$SAFE_CWD\\"}" > "$TMPFILE"
 mv -f "$TMPFILE" "$STATUS_DIR/$SESSION_ID.json"
