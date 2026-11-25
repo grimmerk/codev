@@ -25,26 +25,45 @@ const HOOK_EVENTS = [
 
 const VSCODE_INDEX_PATH = path.join(STATUS_DIR, 'vscode-sessions.jsonl');
 
-const HOOK_SCRIPT = `#!/bin/bash
+export const HOOK_SCRIPT = `#!/bin/bash
 # CodeV session status hook — writes status for CodeV to watch
 # Auto-managed by CodeV. Do not edit manually.
-INPUT=$(cat)
-SESSION_ID=$(echo "$INPUT" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-EVENT=$(echo "$INPUT" | grep -o '"hook_event_name":"[^"]*"' | head -1 | cut -d'"' -f4)
-CWD=$(echo "$INPUT" | grep -o '"cwd":"[^"]*"' | head -1 | cut -d'"' -f4)
+#
+# Claude Code waits for this hook before it goes on (before it sends the
+# prompt, for UserPromptSubmit) and drops it after its 5 s timeout. So it
+# parses with bash builtins and starts only two processes, date and mv: on
+# a machine short of memory each process start can take hundreds of ms.
+# Written for /bin/bash 3.2 (macOS): no $EPOCHSECONDS, no printf %(%s)T.
+IFS= read -r -d '' INPUT
+
+# The first "name":"value" in the input, as \`grep -o … | head -1\` found it.
+field() {
+  local re="\\"$1\\":\\"([^\\"]*)\\""
+  if [[ $INPUT =~ $re ]]; then VALUE=\${BASH_REMATCH[1]}; else VALUE=''; fi
+}
+# Escape for a JSON string: backslashes, then double quotes.
+json_escape() {
+  local s=\${1//\\\\/\\\\\\\\}
+  VALUE=\${s//\\"/\\\\\\"}
+}
+
+field session_id; SESSION_ID=$VALUE
+field hook_event_name; EVENT=$VALUE
+field cwd; CWD=$VALUE
 
 if [ -z "$SESSION_ID" ]; then exit 0; fi
 
 STATUS_DIR="$HOME/.claude/codev-status"
-mkdir -p "$STATUS_DIR"
+[ -d "$STATUS_DIR" ] || mkdir -p "$STATUS_DIR"
+NOW=$(date +%s)
+json_escape "$CWD"; SAFE_CWD=$VALUE
 
 # Track VS Code sessions in index file (for CodeV to discover closed sessions)
 if [ "$CLAUDE_CODE_ENTRYPOINT" = "claude-vscode" ]; then
   VS_MARKER="$STATUS_DIR/.vs-$SESSION_ID"
   if [ ! -f "$VS_MARKER" ]; then
-    touch "$VS_MARKER"
-    SAFE_CWD_VS=$(echo "$CWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-    echo "{\\"sessionId\\":\\"$SESSION_ID\\",\\"cwd\\":\\"$SAFE_CWD_VS\\",\\"timestamp\\":$(date +%s)}" >> "$STATUS_DIR/vscode-sessions.jsonl"
+    : > "$VS_MARKER"
+    echo "{\\"sessionId\\":\\"$SESSION_ID\\",\\"cwd\\":\\"$SAFE_CWD\\",\\"timestamp\\":$NOW}" >> "$STATUS_DIR/vscode-sessions.jsonl"
   fi
 fi
 
@@ -53,17 +72,14 @@ case "$EVENT" in
   Stop)                          STATUS="idle" ;;
   PermissionRequest)             STATUS="needs-attention" ;;
   SessionEnd)
-    rm -f "$STATUS_DIR/$SESSION_ID.json"
-    rm -f "$STATUS_DIR/.vs-$SESSION_ID"
+    rm -f "$STATUS_DIR/$SESSION_ID.json" "$STATUS_DIR/.vs-$SESSION_ID"
     exit 0 ;;
   *)                             STATUS="unknown" ;;
 esac
 
-# Escape CWD for JSON (handle backslashes and double quotes)
-SAFE_CWD=$(echo "$CWD" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
 # Atomic write via temp file + mv
 TMPFILE="$STATUS_DIR/.$SESSION_ID.tmp"
-echo "{\\"status\\":\\"$STATUS\\",\\"timestamp\\":$(date +%s),\\"cwd\\":\\"$SAFE_CWD\\"}" > "$TMPFILE"
+echo "{\\"status\\":\\"$STATUS\\",\\"timestamp\\":$NOW,\\"cwd\\":\\"$SAFE_CWD\\"}" > "$TMPFILE"
 mv -f "$TMPFILE" "$STATUS_DIR/$SESSION_ID.json"
 `;
 
