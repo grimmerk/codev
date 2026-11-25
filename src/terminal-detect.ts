@@ -111,7 +111,9 @@ const textOf = (ran: PsRun): string =>
  *   the shape of a FALSE timeout (see `BACKGROUND_LISTING_TIMEOUT_MS`), which
  *   shows as a run far longer than the timeout it was given;
  * - `error <code or signal>` — `ps` could not be started (`EAGAIN` when no
- *   process can be spawned), exited non-zero, or died on a signal;
+ *   process can be spawned), exited non-zero, or died on a signal; the
+ *   code when there is one, else the signal;
+ * - `error unknown` — an error that states neither a code nor a signal;
  * - `empty` — no error, and not one process line in the output.
  */
 export const classifyListing = (error: PsRun['error'], rows: number): string | null => {

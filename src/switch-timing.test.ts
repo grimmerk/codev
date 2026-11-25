@@ -1051,16 +1051,19 @@ describe('scripts/switch-timing-summary.js', () => {
     const parse = (...rs: unknown[]) =>
       summary.parseLines(rs.map((r) => JSON.stringify(r)).join('\n'));
 
-    it('prints one line from the newest record that has them', () => {
+    it('prints one line from the last record written that has them, whatever its ts', () => {
+      // Two overlapping switches. The one that started LATER finished first,
+      // so its record was built and written first, with the older counters;
+      // the one that started earlier was written after it. `ts` is the start.
       const { records, malformed } = parse(
         rec('2026-01-01T10:00:00.000Z'), // written before the field existed
+        rec('2026-01-03T10:00:05.000Z', { n: 39, failed: 2, last: { reason: 'empty', ms: 4, path: 'switch' } }),
         rec('2026-01-03T10:00:00.000Z', {
           n: 40,
           failed: 3,
           last: { reason: 'timeout', ms: 10012.4, path: 'badge' },
         }),
-        rec('2026-01-02T10:00:00.000Z', { n: 7, failed: 0, last: null }),
-        rec('2026-01-04T10:00:00.000Z'), // newest of all, but without the field
+        rec('2026-01-04T10:00:00.000Z'), // written last of all, but without the field
       );
       expect(malformed).toBe(0);
       expect(records).toHaveLength(4);
@@ -1090,6 +1093,32 @@ describe('scripts/switch-timing-summary.js', () => {
       expect(summary.summarize(records).listings).toMatchObject({ n: 2 });
     });
 
+    it('reads the rotated file before the live one, and named files in the order named', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-listings-'));
+      try {
+        const rotated = path.join(dir, 'switch-timing.jsonl.1');
+        const live = path.join(dir, 'switch-timing.jsonl');
+        // The rotated file's records carry LATER times than the live file's
+        // here, so only the order of the files can give the right answer.
+        fs.writeFileSync(
+          rotated,
+          `${JSON.stringify(rec('2026-01-09T10:00:00.000Z', { n: 5, failed: 0, last: null }))}\n`,
+        );
+        fs.writeFileSync(
+          live,
+          `${JSON.stringify(rec('2026-01-02T10:00:00.000Z', { n: 9, failed: 1, last: { reason: 'error unknown', ms: 2, path: 'crossref' } }))}\n`,
+        );
+        const listingsOf = (files: string[]) =>
+          summary.summarize(summary.parseLines(summary.readFiles(files).text).records).listings;
+        // The default order: `.1`, then the live file.
+        expect(listingsOf([rotated, live])).toMatchObject({ n: 9, last: { reason: 'error unknown' } });
+        // Named the other way round, the file named last decides.
+        expect(listingsOf([live, rotated])).toMatchObject({ n: 5, last: null });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('prints nothing for a log written before the field existed, and still reads it', () => {
       const { records, malformed } = parse(
         rec('2026-01-01T10:00:00.000Z'),
@@ -1110,6 +1139,10 @@ describe('scripts/switch-timing-summary.js', () => {
         [],
         { n: '40', failed: 3, last: null },
         { n: 40, last: null },
+        // Every writer includes `last`: without it the object is not a record's.
+        { n: 40, failed: 3 },
+        { n: 40, failed: 3, last: undefined },
+        { n: 40, failed: 3, last: [] },
         { n: 40, failed: 3, last: 'timeout' },
         { n: 40, failed: 3, last: { reason: 7, ms: 1, path: 'badge' } },
         { n: 40, failed: 3, last: { reason: 'timeout', ms: '1', path: 'badge' } },

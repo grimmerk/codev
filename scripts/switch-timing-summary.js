@@ -10,7 +10,7 @@
  * Prints p50 / p90 per step and for the total, for all switches and grouped
  * by kind, terminal, branch, account and (for switches to a running
  * session) how the terminal was decided, with one line of process-listing
- * counters from the newest record that has them; a per-session table (the 20 with
+ * counters from the last record written that has them; a per-session table (the 20 with
  * the most switches; `--all` for every one, `--sort=p90` for the slowest
  * first); then the total against machine load. Plain Node, no dependencies.
  * A line that is not a record is counted and skipped; a missing or empty
@@ -134,7 +134,9 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
  * `listings` (since 1.0.100): absent or null on a line that did not record
  * it, else `{ n, failed, last }` where `last` is null or
  * `{ reason, ms, path }`. It is printed, so it is held to its shape like
- * the text fields.
+ * the text fields. All three keys are required: the writer always writes
+ * `last` (null when nothing has failed), so an object without it is not
+ * one the writer produced.
  */
 const isListings = (v) =>
   v === undefined ||
@@ -142,8 +144,7 @@ const isListings = (v) =>
   (isPlainObject(v) &&
     isNum(v.n) &&
     isNum(v.failed) &&
-    (v.last === undefined ||
-      v.last === null ||
+    (v.last === null ||
       (isPlainObject(v.last) &&
         typeof v.last.reason === 'string' &&
         isNum(v.last.ms) &&
@@ -213,18 +214,31 @@ const NO_ACCOUNT = '(none)';
 const NO_DETECT_SRC = '(not recorded)';
 
 /**
- * The process-listing counters of the newest record that has them (by
- * `ts`; a later line wins a tie). They count since the app started, so the
- * newest record holds the latest state of the run that wrote it. Null when
- * no record has the field.
+ * The process-listing counters of the LAST record, in write order, that
+ * has them. They count since the app started, so the record written last
+ * holds the latest state of the run that wrote it. Null when no record has
+ * the field.
+ *
+ * Write order, not `ts`: `ts` is when the switch STARTED, while the
+ * counters are read when its record is BUILT, after the switch. Of two
+ * overlapping switches the one that started later can be written first,
+ * with the older counters. A record's line is appended right after it is
+ * built, one append at a time, so the order of the lines is the order the
+ * counters were read in.
+ *
+ * What "write order" is for `records`, which holds the inputs' lines in the
+ * order the inputs were read:
+ * - with no file argument: the rotated file (`.jsonl.1`) first, then the
+ *   live file. Rotation renames the live file to `.1`, so every line of
+ *   `.1` was written before every line of the live file;
+ * - with file arguments: the order they were named in. The script cannot
+ *   tell which file is older, so name the older one first, as the default
+ *   does; the last file named that has such a record decides.
  */
-const newestListings = (records) => {
-  let best = null;
-  for (const r of records) {
-    if (!isPlainObject(r.listings)) continue;
-    if (!best || String(r.ts ?? '') >= String(best.ts ?? '')) best = r;
-  }
-  return best ? best.listings : null;
+const lastWrittenListings = (records) => {
+  let last = null;
+  for (const r of records) if (isPlainObject(r.listings)) last = r.listings;
+  return last;
 };
 
 /** A record that names its session (version 2 on). */
@@ -373,7 +387,7 @@ const summarize = (records, opts = {}) => {
       records.filter((r) => r.kind === 'switch'),
       (r) => (typeof r.detectSrc === 'string' && r.detectSrc ? r.detectSrc : NO_DETECT_SRC),
     ),
-    listings: newestListings(records),
+    listings: lastWrittenListings(records),
     sessions: sessionRows(records, opts.sort),
     unnamed: records.filter((r) => !namesSession(r)).length,
     runShareP50: percentile(runShare, 50),
@@ -542,10 +556,11 @@ const sessionTable = (s, opts) => {
 };
 
 /**
- * One line from the newest record that carries the counters: how many
- * process listings terminal detection ran since the app started, how many
- * failed, and why the last one did (timeout, error <code>, empty), how long
- * it ran and for whom (badge, switch, crossref).
+ * One line from the last record written that carries the counters: how
+ * many process listings terminal detection ran since the app started, how
+ * many failed, and why the last one did (timeout, error <code or signal>,
+ * error unknown, empty), how long it ran and for whom (badge, switch,
+ * crossref).
  */
 const listingsLine = (l) =>
   `Process listings since the app started: ${l.n}, failed ${l.failed}` +
