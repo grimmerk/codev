@@ -99,31 +99,16 @@ CodeV merges hook entries into the user's existing `~/.claude/settings.json`, ne
 
 ### Hook script (`~/.claude/codev-status-hook.sh`)
 
-Receives JSON via stdin with `session_id`, `hook_event_name`, `cwd`, etc.
+Receives JSON via stdin with `session_id`, `hook_event_name`, `cwd`, etc. The script is `HOOK_SCRIPT` in `src/session-status-hooks.ts`, written to `~/.claude/codev-status-hook.sh` on every app start (so a new CodeV version replaces it at its first launch). What it does:
 
-```bash
-#!/bin/bash
-# CodeV session status hook — writes status for CodeV to watch
-INPUT=$(cat)
-SESSION_ID=$(echo "$INPUT" | grep -o '"session_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-EVENT=$(echo "$INPUT" | grep -o '"hook_event_name":"[^"]*"' | head -1 | cut -d'"' -f4)
-CWD=$(echo "$INPUT" | grep -o '"cwd":"[^"]*"' | head -1 | cut -d'"' -f4)
+1. Reads `session_id`, `hook_event_name` and `cwd` from the input — the first `"name":"value"` of each — and exits if there is no session id.
+2. For a VS Code session (`CLAUDE_CODE_ENTRYPOINT=claude-vscode`), appends the session to `vscode-sessions.jsonl` once.
+3. Maps the event to a status: `UserPromptSubmit` / `SubagentStart` → `working`, `Stop` → `idle`, `PermissionRequest` → `needs-attention`, anything else → `unknown`; `SessionEnd` deletes the status file instead.
+4. Writes `{"status":…,"timestamp":<epoch seconds>,"cwd":…}` to a temp file and renames it to `<session_id>.json`, so CodeV never reads a half-written file.
 
-if [ -z "$SESSION_ID" ]; then exit 0; fi
+**It starts as few processes as it can, because Claude Code waits for it.** A command hook runs before Claude Code goes on — for `UserPromptSubmit`, before the prompt is sent — and is dropped after its `timeout` (5 s here). Until 1.0.101 the script started about 20 processes per event (`cat`, then `echo | grep | head | cut` for each of the three fields, `sed` for the cwd, `mkdir`, `date`, `mv`). On a machine short of memory each process start can take hundreds of ms: measured at a 1-minute load of 12 on 10 cores, the old script took 726 ms at the median per event (p90 904 ms), and on a heavily loaded day it passed the 5 s timeout, so Claude Code printed `UserPromptSubmit hook … timed out after 5s` and the status may not have been written. It now reads the input with bash's own `read`, matches the fields with `[[ =~ ]]`, escapes the cwd with parameter expansion, and starts only `date` and `mv` for a status write (plus `mkdir` the first time; `SessionEnd` starts only `rm`): 109 ms at the median (p90 154 ms) under the same load. It is written for macOS's `/bin/bash` 3.2, which has no `$EPOCHSECONDS`, hence `date`. Its output is the same as before for the same input; `src/session-status-hooks.test.ts` runs a status write, in a terminal and in VS Code, with only `date` and `mv` on the `PATH`, and `SessionEnd` with only `rm`.
 
-STATUS_DIR="$HOME/.claude/codev-status"
-mkdir -p "$STATUS_DIR"
-
-case "$EVENT" in
-  UserPromptSubmit|SubagentStart) STATUS="working" ;;
-  Stop)                          STATUS="idle" ;;
-  PermissionRequest)             STATUS="needs-attention" ;;
-  SessionEnd)                    rm -f "$STATUS_DIR/$SESSION_ID.json"; exit 0 ;;
-  *)                             STATUS="unknown" ;;
-esac
-
-echo "{\"status\":\"$STATUS\",\"timestamp\":$(date +%s),\"cwd\":\"$CWD\"}" > "$STATUS_DIR/$SESSION_ID.json"
-```
+The hook stays synchronous on purpose. With `"async": true` Claude Code would not wait, but the `working` write of one prompt and the `idle` write at its end could then land in the wrong order on a busy machine and leave a finished session showing as working.
 
 ### Merge strategy (preserving user's existing hooks)
 
@@ -169,7 +154,7 @@ Status hooks are an **additional layer** on top of the existing detection system
 
 | Operation | Cost | Frequency |
 |---|---|---|
-| Hook script execution | ~5ms (bash + write file) | Per Claude Code turn (~1-5/min) |
+| Hook script execution | ~110 ms at the median on a loaded machine (1-minute load 12 on 10 cores; was ~730 ms before 1.0.101, see "Hook script") — mostly bash, `date` and `mv` starting | Per Claude Code turn (~1-5/min) |
 | fs.watch notification | ~0ms (OS-level, no polling) | Per status file change |
 | Status file read | ~1ms | Per fs.watch event |
 | Startup JSONL scan | ~1ms per session (tail 100 lines) | Once on CodeV launch |
