@@ -29,6 +29,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { parseMemoryPressure } from './live-sessions';
+import { getListingStats } from './terminal-detect';
 import {
   buildSwitchRecord,
   cpuPercentBetween,
@@ -170,6 +171,8 @@ export interface SwitchLogDeps {
   psTop?: () => Promise<string>;
   /** `ps -o tty= -p <pid>`; empty on failure. */
   psTty?: (pid: number) => Promise<string>;
+  /** The process-listing counters of terminal detection. For tests. */
+  listings?: () => SwitchSystemSample['listings'];
   maxBytes?: number;
   /** How long to wait for a command that never reports its exit. For tests. */
   deadlineMs?: number;
@@ -250,11 +253,19 @@ export const startSwitchTiming = (
         pid !== null && !knownTty ? psTty(pid).catch(() => '') : Promise.resolve(null),
       ]);
       const tty = knownTty ?? parseTty(ttyOut);
+      // In-memory counters, read as the record is built: no spawn, no disk.
+      let listings: SwitchSystemSample['listings'] = null;
+      try {
+        listings = (deps.listings ?? getListingStats)() ?? null;
+      } catch {
+        // A record without them is still a record.
+      }
       const full: SwitchSystemSample = {
         ...sys,
         tty,
         ttySrc: tty ? (knownTty ? 'live-report' : 'ps') : null,
         memory: parseMemoryPressure(sysctlOut),
+        listings,
         ...(psOut !== null ? { top: parseTopCpu(psOut) } : {}),
       };
       const record = buildSwitchRecord(ctx, stamp, snap, ms, full);

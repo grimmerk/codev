@@ -19,7 +19,6 @@ import {
   readClaudeSessions,
   searchClaudeSessions,
   detectActiveSessions,
-  detectTerminalApp,
   openSession,
   copyResumeCommand,
   invalidateSessionCache,
@@ -58,6 +57,8 @@ import {
   withRenamedList,
 } from './session-lists';
 import { collectLiveSessions } from './live-sessions';
+import { createPendingNotice, setSwitchKilledListener } from './switch-notice';
+import { detectTerminals } from './terminal-detect';
 import {
   asUserPrompt,
   legacyModeFor,
@@ -430,11 +431,28 @@ const onBlur = (event: any) => {
   hideSwitcherWindow();
 };
 
+// A switch or launch script killed by its 5 s timeout (switch-notice.ts).
+// Shown in the window's banner at once when the window is on screen; in
+// Menu Bar mode it hid when the row was chosen, so the notice waits for the
+// next time it opens (and is dropped if that is minutes away).
+const pendingSwitchNotice = createPendingNotice();
+setSwitchKilledListener((message) => {
+  const window = getSwitcherWindow();
+  if (window && window.isVisible() && !window.isMinimized()) {
+    window.webContents.send('switch-notice', message);
+  } else {
+    pendingSwitchNotice.hold(message);
+  }
+});
+
 const onFocus = (event: any) => {
   // Don't invalidate session cache on every focus - cache has 5s TTL
   const window = getSwitcherWindow();
   if (window) {
     window.webContents.send('window-focus');
+    // A script was killed while the window was hidden: say so now.
+    const held = pendingSwitchNotice.take();
+    if (held) window.webContents.send('switch-notice', held);
   }
 };
 
@@ -2840,19 +2858,26 @@ ipcMain.handle('detect-active-sessions', async () => {
 
 ipcMain.handle('detect-terminal-apps', async (_event, pidMap: Record<string, number>, entrypointMap: Record<string, string>) => {
   const results: Record<string, string> = {};
-  await Promise.all(Object.entries(pidMap).map(async ([sessionId, pid]) => {
+  const toWalk: [string, number][] = [];
+  for (const [sessionId, pid] of Object.entries(pidMap || {})) {
     // VS Code sessions: return 'vscode' directly without process tree walk
     if (entrypointMap && entrypointMap[sessionId] === 'claude-vscode') {
       results[sessionId] = 'vscode';
-      return;
+      continue;
     }
     // Claude Desktop's Code tab: its process tree holds no terminal
     if (entrypointMap && entrypointMap[sessionId] === 'claude-desktop') {
       results[sessionId] = 'desktop';
-      return;
+      continue;
     }
-    results[sessionId] = await detectTerminalApp(pid);
-  }));
+    toWalk.push([sessionId, pid]);
+  }
+  // One process listing for every badge; each answer found is remembered
+  // for the switch to that session (terminal-detect.ts).
+  const terminals = await detectTerminals(toWalk.map(([, pid]) => pid), 'badge');
+  for (const [sessionId, pid] of toWalk) {
+    results[sessionId] = terminals.get(pid) ?? 'unknown';
+  }
   return results;
 });
 

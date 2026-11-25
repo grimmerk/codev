@@ -8,7 +8,9 @@
  * file, if any) and then ~/.config/codev/switch-timing.jsonl.
  *
  * Prints p50 / p90 per step and for the total, for all switches and grouped
- * by kind, terminal, branch and account; a per-session table (the 20 with
+ * by kind, terminal, branch, account and (for switches to a running
+ * session) how the terminal was decided, with one line of process-listing
+ * counters from the last record written that has them; a per-session table (the 20 with
  * the most switches; `--all` for every one, `--sort=p90` for the slowest
  * first); then the total against machine load. Plain Node, no dependencies.
  * A line that is not a record is counted and skipped; a missing or empty
@@ -120,12 +122,33 @@ const TEXT_FIELDS = [
   'project',
   'tty',
   'ttySrc',
+  'detectSrc',
 ];
 
 /** Status flags: compared with `=== true` / `=== false`, so they must be booleans. */
 const FLAG_FIELDS = ['ok', 'timedOut', 'killed', 'untimed'];
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * `listings` (since 1.0.100): absent or null on a line that did not record
+ * it, else `{ n, failed, last }` where `last` is null or
+ * `{ reason, ms, path }`. It is printed, so it is held to its shape like
+ * the text fields. All three keys are required: the writer always writes
+ * `last` (null when nothing has failed), so an object without it is not
+ * one the writer produced.
+ */
+const isListings = (v) =>
+  v === undefined ||
+  v === null ||
+  (isPlainObject(v) &&
+    isNum(v.n) &&
+    isNum(v.failed) &&
+    (v.last === null ||
+      (isPlainObject(v.last) &&
+        typeof v.last.reason === 'string' &&
+        isNum(v.last.ms) &&
+        typeof v.last.path === 'string')));
 
 /**
  * A line this script can summarize: an object whose `ms` is an object,
@@ -140,7 +163,8 @@ const isRecord = (r) =>
   isPlainObject(r) &&
   isPlainObject(r.ms) &&
   TEXT_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'string') &&
-  FLAG_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'boolean');
+  FLAG_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'boolean') &&
+  isListings(r.listings);
 
 /** Records from JSONL text. A line that is not a record (see `isRecord`) is skipped and counted. */
 const parseLines = (text) => {
@@ -185,6 +209,37 @@ const groupBy = (records, keyOf) => {
 
 const UNKNOWN = '(unknown)';
 const NO_ACCOUNT = '(none)';
+
+/** Lines written before 1.0.100 have no `detectSrc`: they always walked the process tree. */
+const NO_DETECT_SRC = '(not recorded)';
+
+/**
+ * The process-listing counters of the LAST record, in write order, that
+ * has them. They count since the app started, so the record written last
+ * holds the latest state of the run that wrote it. Null when no record has
+ * the field.
+ *
+ * Write order, not `ts`: `ts` is when the switch STARTED, while the
+ * counters are read when its record is BUILT, after the switch. Of two
+ * overlapping switches the one that started later can be written first,
+ * with the older counters. A record's line is appended right after it is
+ * built, one append at a time, so the order of the lines is the order the
+ * counters were read in.
+ *
+ * What "write order" is for `records`, which holds the inputs' lines in the
+ * order the inputs were read:
+ * - with no file argument: the rotated file (`.jsonl.1`) first, then the
+ *   live file. Rotation renames the live file to `.1`, so every line of
+ *   `.1` was written before every line of the live file;
+ * - with file arguments: the order they were named in. The script cannot
+ *   tell which file is older, so name the older one first, as the default
+ *   does; the last file named that has such a record decides.
+ */
+const lastWrittenListings = (records) => {
+  let last = null;
+  for (const r of records) if (isPlainObject(r.listings)) last = r.listings;
+  return last;
+};
 
 /** A record that names its session (version 2 on). */
 const namesSession = (r) => typeof r.sessionId === 'string' && r.sessionId !== '';
@@ -327,6 +382,12 @@ const summarize = (records, opts = {}) => {
     byTerminal: groupBy(records, (r) => String(r.terminal ?? 'unknown')),
     byBranch: groupBy(records, (r) => String(r.branch ?? 'unknown')),
     byAccount: groupBy(records, accountOf),
+    // Running sessions only: a resume detects nothing.
+    byDetectSrc: groupBy(
+      records.filter((r) => r.kind === 'switch'),
+      (r) => (typeof r.detectSrc === 'string' && r.detectSrc ? r.detectSrc : NO_DETECT_SRC),
+    ),
+    listings: lastWrittenListings(records),
     sessions: sessionRows(records, opts.sort),
     unnamed: records.filter((r) => !namesSession(r)).length,
     runShareP50: percentile(runShare, 50),
@@ -494,6 +555,19 @@ const sessionTable = (s, opts) => {
   return lines.join('\n');
 };
 
+/**
+ * One line from the last record written that carries the counters: how
+ * many process listings terminal detection ran since the app started, how
+ * many failed, and why the last one did (timeout, error <code or signal>,
+ * error unknown, empty), how long it ran and for whom (badge, switch,
+ * crossref).
+ */
+const listingsLine = (l) =>
+  `Process listings since the app started: ${l.n}, failed ${l.failed}` +
+  (l.last
+    ? ` (last: ${safeText(l.last.reason)}, ${Math.round(l.last.ms)} ms, ${safeText(l.last.path)})`
+    : '');
+
 const formatReport = (summary, malformed = 0, opts = {}) => {
   if (summary.count === 0) {
     return `No switch records${malformed ? ` (${malformed} malformed line(s) skipped)` : ''}.`;
@@ -525,6 +599,13 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
     stepTable('By branch', 'branch', s.byBranch),
     '',
     stepTable('By account', 'account', s.byAccount),
+    '',
+    stepTable(
+      'Switches to a running session, by how the terminal was decided (cache: a known answer reused; ps: one process listing; none: no detection, the switch had no pid; not recorded: before 1.0.100, two ps per level)',
+      'detectSrc',
+      s.byDetectSrc,
+    ),
+    ...(s.listings ? [listingsLine(s.listings)] : []),
     '',
     sessionTable(s, opts),
     '',

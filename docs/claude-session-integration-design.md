@@ -256,7 +256,7 @@ flowchart TB
 ```mermaid
 flowchart TB
   CLICK["click on a running row"]
-  OS["openSession(isActive, activePid)<br/>detectTerminalApp(pid): walk the parent processes<br/>the terminal the process lives in wins over the setting"]
+  OS["openSession(isActive, activePid)<br/>resolveSwitchTerminal(pid): a known answer, else walk the parent processes<br/>the terminal the process lives in wins over the setting"]
   PROV{"isGuessedPid(pid)?"}
   TTY1["registered, exact<br/>tty → title → activate only"]
   TITLE1["cwd / tab-title guess<br/>title → tty → activate only"]
@@ -277,7 +277,7 @@ flowchart TB
   OS --> CV
 ```
 
-- `detectTerminalApp` walks the parent processes (up to 20 levels), so a session running in cmux is switched with cmux's logic even when the setting says iTerm2; the setting only decides where a *new* session opens.
+- The terminal is found by walking the session's parent processes (see "Auto-Detection of Terminal App"), so a session running in cmux is switched with cmux's logic even when the setting says iTerm2; the setting only decides where a *new* session opens.
 - iTerm2 and Terminal.app try both keys when the session has a title, in the order the pid's provenance calls for (see "Switch matching order" under iTerm2 integration for the table and the history); with no title, tty is the only key. Ghostty does the same on tip builds, which expose a per-terminal tty (ghostty#11922, #63), and keeps cwd as a last resort before copying the resume command to the clipboard; stable Ghostty (1.3.1 and earlier) has no tty, so there it falls through to title, then cwd. cmux reads its own `tree --all` for surface titles and ttys.
 
 ## Current Implementation
@@ -301,7 +301,7 @@ flowchart TB
 │ Main Process (claude-session-utility.ts)                 │
 │  - readClaudeSessions(): parse history.jsonl (cached)   │
 │  - detectActiveSessions(): read sessions/ PID files     │
-│  - detectTerminalApp(): walk parent process tree       │
+│  - detectTerminals(): one ps, walk parents in memory   │
 │  - loadSessionEnrichment(): titles + branches (cached) │
 │  - loadLastAssistantResponses(): tail JSONL (active)   │
 │  - openSession(): route to iTerm2/Ghostty/cmux         │
@@ -313,7 +313,7 @@ flowchart TB
 1. **Immediate**: Session list from `history.jsonl` (cached, ~0ms warm / ~40ms cold)
 2. **Background (~5ms)**: Active session detection via `~/.claude/sessions/` PID files
 3. **Background (~0.5s after 2)**: Last assistant responses for active sessions via `tail -n 200` (~19ms/file)
-4. **Background (~0.5s after 2)**: Terminal app detection via parent process tree walk
+4. **Background (~0.5s after 2)**: Terminal app detection: one process listing, parents walked in memory
 5. **Background (~2s)**: Custom titles + branch names via async parallel grep/tail on 100 JSONL files
 
 All background operations use async `exec` (not `execSync`) to avoid blocking Electron's main thread. Results cached with 5s TTL. Cache is NOT invalidated on window focus (TTL expiry is sufficient).
@@ -399,7 +399,7 @@ Detection Flow:
 
 History: title-first was the order from 2026-03-21 to PR #152 because *every* pid was potentially a guess then — the registration file was read (since PR #67) but never validated, so the code could not tell a registered pid from a guessed one. PR #147's `ps` join made that distinction available; PR #152 first flipped the order to tty-first for everything (the `/branch`-sibling case in #142 C0), then narrowed it to exact pids only. `isGuessedPid` in `claude-session-utility.ts` is the classification: whatever the last detection attached outside the two registration paths.
 
-**Where TTY is relied on** (Ghostty joined this list in 2026-10, #63): the iTerm2 and Terminal.app switch scripts above, `detectTerminalApp` (parent-process walk), the live view's `·ttysNNN` tag for same-titled rows (the tty comes from `live-sessions.ts`, the tag is rendered in `switcher-ui.tsx`; PR #152), and `openSessionInGhostty` plus Ghostty's branch of `crossRefDisambiguate`, which gained the same TTY layer once Ghostty tip builds exposed it (read as the raw code `«class Gtty»` inside `try`, so stable Ghostty still compiles and falls through).
+**Where TTY is relied on** (Ghostty joined this list in 2026-10, #63): the iTerm2 and Terminal.app switch scripts above, terminal detection (parent-process walk), the live view's `·ttysNNN` tag for same-titled rows (the tty comes from `live-sessions.ts`, the tag is rendered in `switcher-ui.tsx`; PR #152), and `openSessionInGhostty` plus Ghostty's branch of `crossRefDisambiguate`, which gained the same TTY layer once Ghostty tip builds exposed it (read as the raw code `«class Gtty»` inside `try`, so stable Ghostty still compiles and falls through).
 
 **Workarounds discovered:**
 - `ps -o tty=` output has trailing whitespace → pipe through `tr -d '[:space:]'`
@@ -558,11 +558,41 @@ Cross-reference: match PID TTY against terminal tab TTYs (iTerm2: `tty of sessio
 
 ### Auto-Detection of Terminal App
 
-For active sessions, CodeV walks the parent process tree (`ps -o comm=` → `ps -o ppid=`, up to 20 levels) to detect which terminal the claude process is running in. This means:
+For active sessions, CodeV walks the parent process tree to detect which terminal the claude process is running in. This means:
 - Clicking an iTerm2 session uses iTerm2 switch logic (even if settings say cmux)
 - Clicking a cmux session uses cmux switch logic (even if settings say iTerm2)
 - Settings terminal only affects **launching** non-active sessions
 - Active sessions show a small uppercase badge (ITERM2, CMUX, GHOSTTY) in the UI
+
+**How the walk runs (since 1.0.100).** Until 1.0.99 the walk spawned two `ps` per level (`ps -o comm= -p`, then `ps -o ppid= -p`), six to eight spawns from `claude` up to the terminal, each with a 2 s timeout — for every badge when the window opened, and again on every switch. On a loaded machine a spawn is the slow part (see the numbers under "Measuring a switch"). Now:
+
+```
+ badges (window opens)      detectTerminals(pids)
+ cross-reference       ──►    ① ONE  ps -axo pid=,ppid=,lstart=,comm=   (TZ=UTC LC_ALL=C, 10 s timeout)
+                                 (+ one ps -o pid=,command= only for an Electron ancestor, see below)
+                              ② parse into a table; walk each pid's parents in memory
+                              ③ remember every terminal found:  pid + start time → terminal
+                                        │
+ switch (click / Enter)     resolveSwitchTerminal(pid)                    ▼
+                       ──►    ④ read sessions/<pid>.json → procStart   ── same pid AND same start? ──► use it   (detectSrc: cache)
+                              ⑤ otherwise ①–③ for this one pid, with a 2 s timeout                              (detectSrc: ps)
+```
+
+- **One listing, walked in memory** (`src/process-tree.ts`, pure; `src/terminal-detect.ts` runs `ps`). The matching rules and their order are unchanged: `codev`, an Electron process whose command line names codev, iTerm, cmux, Ghostty, Terminal.app. `comm` is a full path that can contain spaces, so it is the last column. The listing has no command lines; only an Electron ancestor whose path does not already name codev needs one, and only then is a second `ps -o pid=,command= -p <pid>` run. The walk stops at a process that is not in the listing, at a parent of 0 or 1, and at a pid it has already visited.
+- **A switch reuses a known answer** (`src/terminal-detect-cache.ts`). Each detection that names a terminal is stored in the main process under the pid together with the process's start time from the same listing (`lstart`). A pid alone would not be safe: pids are reused. A switch reads the session's registration file (`sessions/<pid>.json`, one small file read per account, no spawn) and uses the stored answer only when **all** of these hold: an entry exists for the pid; a registration for the pid exists and states `procStart`; every registration found for that pid, across accounts, states the same `procStart`; and it equals the stored start time. Anything else — no entry, an older Claude Code that writes no `procStart`, a leftover file of an earlier process in another account, a file that cannot be read — runs the listing, as a switch always did.
+- **Two timeouts for the listing, by who is waiting.** A switch gives its listing 2 s, what each `ps` of the old walk had: the user is waiting, and after 2 s the switch goes to the terminal in Settings. The badges and the same-directory cross-reference are background work that nobody waits on, and give it 10 s. The longer one is needed because the timeout is a timer inside CodeV's main process: when that process's own event loop is blocked for longer than the timeout, the timer fires as soon as the loop runs again, although `ps` finished long before. The callback then reports the command as killed, with nothing on stdout — a timeout that did not happen in `ps`. The main process is busy while the app starts, which is when the first badges are requested.
+- **A failed listing is counted, with its reason.** Each one is classified as `timeout` (the callback said the command was killed; a false timeout has this shape too, and shows as a run longer than the timeout it was given), `error <code or signal>` (`ps` could not be started, exited non-zero or died on a signal; for example `error EAGAIN`, `error 1`, `error SIGKILL`), `error unknown` (an error that states neither a code nor a signal) or `empty` (no error, and no process line in the output). The main process keeps three figures since the app started — listings attempted, listings failed, and the last failure with its reason, how long it ran and who asked (`badge`, `switch` or `crossref`) — writes one `console.warn` line per failure, and puts the figures into every switch timing record (the `listings` field under "Measuring a switch"), so that how often a listing fails can be read from the log afterwards. There is no retry.
+- **`unknown` is never stored**, so one slow moment cannot pin a session to the wrong terminal. A listing that fails or times out gives `unknown` and the switch falls back to the terminal in Settings, as before; for the badges, a failed listing still answers from the stored entries that pass the check above.
+- **Not reused: the tty.** The stored answer is only which terminal *app* to talk to. Which tab is chosen is decided by the switch script, live, exactly as before.
+
+**When a terminal script is stopped by its timeout.** Two kinds of script run with a 5 s timeout: the Ghostty and Terminal.app *switch* scripts, and the *launch* scripts of iTerm2, Ghostty and Terminal.app (a resume in a new tab or window, a new session, the members of a saved list). When the timeout fires the script is killed before it finished, and until 1.0.100 CodeV gave no feedback. The main process now sends a line to the switcher window's banner (`src/switch-notice.ts`), one of two:
+
+| Killed script | Banner | Why this wording |
+|---|---|---|
+| switch | "Ghostty did not answer within 5 s; the switch may not have completed. The machine may be busy." | A killed script did not finish, but it may have done part of its work: AppleScript runs step by step, so the terminal may already have been activated. The line does not say "cancelled". |
+| launch | "Ghostty took more than 5 s to answer. The session may still be opening — check before trying again." | Several launch scripts submit the command before their last step: Ghostty's `new window with configuration` (the command is the surface's initial input) is followed by `activate`; Terminal.app's `do script` and iTerm2's `write text` are followed by `activate` when a new window is opened in a running terminal. A kill during that last step leaves a session that is starting, and a blind retry would open it twice. |
+
+Paths that do **not** report: the iTerm2 switch, which runs without a timeout (a hang there ends as `timedOut` in the timing log, with no banner), and the cmux switch and launch, which do not hand over their kill. In Menu Bar mode the window hid when the row was chosen, so the line is held and shown the next time the window opens, and dropped if that is more than two minutes later. There is no automatic retry: one that lands 5–10 s later would take the focus from whatever the user moved on to.
 
 ### cmux Integration Details
 
@@ -710,7 +740,8 @@ Before rewriting any part of the switch path for speed, measure where a switch s
         │ IPC
         └──────────► ② IPC arrives
                      ③ settings read          (ms.settings)
-                     ④ detectTerminalApp      (ms.detect; running sessions only)
+                     ④ which terminal         (ms.detect; running sessions only;
+                                               detectSrc says how it was decided)
                      ⑤ script text built      (ms.build)
                      ⑥ file written, command started (ms.spawn)
                               └──────────────────────────────────► osascript runs
@@ -745,6 +776,8 @@ Any failure in the timing code is swallowed and the switch runs as before.
 | `via` | `enter` or `click`. |
 | `kind` | `switch` (the session was running) or `resume` (it was not; a new tab runs `claude --resume`). |
 | `terminal`, `configured` | Where the switch went after auto-detection, and the terminal named in Settings. |
+| `detectSrc` | How step ④ decided the terminal this time (since 1.0.100; see "Auto-Detection of Terminal App"): `cache` — an earlier detection of the same process was reused, so `ms.detect` is one small file read; `ps` — one process listing was run, plus a command-line lookup in the Electron case described there (also when it named no terminal and the switch fell back to `configured`); `none` — nothing was detected (a resume, or a switch without a pid). A line without the field was written before 1.0.100, when every switch to a running session spawned two `ps` per level. `ms.detect` means the same in all cases: the time spent deciding the terminal. |
+| `listings` | Since 1.0.100. The process listings that terminal detection ran since the app started, as the counters stood when this record was built: `{ "n": …, "failed": …, "last": … }`. `n` is the listings attempted (badges, cross-reference and switches together), `failed` how many of them gave no usable listing, and `last` the latest failure, `{ "reason": …, "ms": …, "path": … }`, or `null` when there has been none. `reason` is `timeout`, `error <code or signal>`, `error unknown` (an error with neither a code nor a signal) or `empty`; `ms` is how long that listing ran, from the call to its callback, in whole ms (a `timeout` that ran much longer than its 2 s or 10 s is the main process's event loop having been blocked, not a slow `ps`); `path` is who asked: `badge`, `switch` or `crossref`. The figures describe the app run, not this switch: a record whose `detectSrc` is `cache` still carries them. Read from memory, with no spawn and no disk access. A line without the field was written before 1.0.100. |
 | `tool` | What ran the switch: `osascript`, `cmux-cli`, `open` (VS Code, Claude Desktop) or `pty` (the embedded terminal). |
 | `untimed` | True when no command was started and awaited, so there is no exit to time to: `ms.run`, `ms.main` and `ms.total` are `null`; `ms.returned` and the earlier steps are kept. That is the whole rule. In practice it is mostly the paths with tool `open` or `pty`, which hand the switch over and return at once (VS Code, for one, then waits 500 ms before its own command). It is also a terminal launch that failed before its command started, for example when the script file could not be written; such a record is `untimed` with tool `osascript` and `ok` false. The log exists to measure terminal switching; these records are there to be counted, not timed. |
 | `branch` | Which key found the tab: `tty`, `title`, `cwd`, `project-name` (cmux), `none` (the script ran and matched nothing); for a resume `new-tab`, `new-window` or `new-workspace`; `deep-link`, `embedded`. `null` means unknown, for example a script that failed. |
@@ -774,7 +807,7 @@ yarn switch-timing            # or: node scripts/switch-timing-summary.js [optio
 yarn switch-timing --redact   # for anything that will be pasted somewhere public
 ```
 
-It prints p50/p90 (50th and 90th percentile) per step and for the total — for all switches, and grouped by kind, terminal, branch and account. Then a per-session table: the number of switches, p50/p90 of the total and of the external command, the terminal, the account, the branch mix (for example `tty×5 cwd×2`), the title and the project path. Then the share of the total spent inside the external command, and the total against load: buckets of 1-minute load per core, and Pearson correlations of the total with load and with CPU %.
+It prints p50/p90 (50th and 90th percentile) per step and for the total — for all switches, and grouped by kind, terminal, branch and account, and, for switches to a running session, by `detectSrc` (lines from before 1.0.100 show as `(not recorded)`, which is the before/after comparison for the detection step), followed by one line with the `listings` counters of the last record written that has them (the last such line of the log: write order, not `ts`, because `ts` is when a switch started and the counters are read when its record is built; with file arguments, name the older file first), for example `Process listings since the app started: 40, failed 3 (last: timeout, 10012 ms, badge)`. Then a per-session table: the number of switches, p50/p90 of the total and of the external command, the terminal, the account, the branch mix (for example `tty×5 cwd×2`), the title and the project path. Then the share of the total spent inside the external command, and the total against load: buckets of 1-minute load per core, and Pearson correlations of the total with load and with CPU %.
 
 | Option | Effect |
 |---|---|
@@ -786,7 +819,7 @@ How to read the tables:
 
 - **`n` is the number of records in the row; a cell ending in `(k)` covers only `k` of them.** Not every record has every step: a resume has no `detect`. And `run`, `main` and `total` are over completed switches only. Four kinds of record are left out of those three percentiles and counted in the first line of the report instead: timed out, killed by their timeout, failed (`ok` false), and not timed end to end (`untimed`). A record can be more than one of these (a killed switch is also `ok` false; a launch that failed before its command started is also `untimed`), so the first line counts each record once, as the first that applies in that order; the four counts and the completed switches add up to the total. A status flag (`ok`, `timedOut`, `killed`, `untimed`) that is present must be a boolean, or the line is malformed.
 - **Accounts.** `(none)` is a record for which no account was resolved; `(unknown)` is a version 1 line, which did not record one.
-- **Lines of the wrong shape are malformed.** A line counts as a record only if it is an object, its `ms` is an object, and every text field (`kind`, `terminal`, `branch`, `account`, `sessionId`, `title`, `project` and the like) is a string, `null` or absent. One wrong-typed field makes the whole line malformed.
+- **Lines of the wrong shape are malformed.** A line counts as a record only if it is an object, its `ms` is an object, and every text field (`kind`, `terminal`, `branch`, `account`, `sessionId`, `title`, `project` and the like) is a string, `null` or absent. `listings`, when present and not `null`, must have the shape in the field table. One wrong-typed field makes the whole line malformed.
 - **A log that exists but cannot be read makes the report incomplete**, and the script says so on stderr and in the report's first line, and exits 1. A log that does not exist is not an error: the rotated file is optional. Under `--redact` an input is named by its position (`input 2`), never by its path.
 - **Session labels** are the first 8 characters of the id, or more when two sessions would otherwise share a label. Under `--redact` they are the placeholders, never shortened. Only the title is cut (40 characters).
 - **Control characters are removed from everything printed**, with or without `--redact`: a title is free text, and an escape sequence or a line break in one could otherwise drive the terminal or forge a row.

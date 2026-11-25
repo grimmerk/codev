@@ -31,7 +31,7 @@
 export type SwitchMark =
   /** Main read its two settings (terminal app, tab/window). */
   | 'settings'
-  /** `detectTerminalApp` answered (running sessions only). */
+  /** The terminal is decided: `resolveSwitchTerminal` answered (running sessions only). */
   | 'detect'
   /** The AppleScript text (or the command line) is built. */
   | 'script'
@@ -80,6 +80,12 @@ export interface SwitchFacts {
    * Desktop or the embedded terminal. Null: no account was resolved.
    */
   account?: string | null;
+  /**
+   * How the terminal of a running session was decided this time: `cache` —
+   * an earlier detection of the same process was reused; `ps` — a process
+   * listing was run (whether or not it named a terminal).
+   */
+  detectSrc?: 'cache' | 'ps';
 }
 
 /** What the renderer stamps on the click that starts a switch. */
@@ -313,7 +319,7 @@ export interface SwitchStepMs {
   clickToIpcHr: number | null;
   /** IPC arrival to the two settings read. */
   settings: number | null;
-  /** `detectTerminalApp`. Null for a resume, which does not detect. */
+  /** Deciding the terminal (see `detectSrc`). Null for a resume, which does not detect. */
   detect: number | null;
   /** Building the script text, plus whatever JS precedes it. */
   build: number | null;
@@ -408,6 +414,16 @@ export interface SwitchSystemSample {
   /** The target process's controlling terminal, and where the value came from. */
   tty?: string | null;
   ttySrc?: 'live-report' | 'ps' | null;
+  /**
+   * Process listings for terminal detection since the app started, read
+   * when the record is built: how many were attempted, how many failed,
+   * and the latest failure (`getListingStats` in terminal-detect.ts).
+   */
+  listings?: {
+    n: number;
+    failed: number;
+    last: { reason: string; ms: number; path: string } | null;
+  } | null;
 }
 
 export interface SwitchContext {
@@ -507,6 +523,8 @@ export const buildSwitchRecord = (
   kind: ctx.active ? 'switch' : 'resume',
   terminal: snap.facts.terminal ?? snap.facts.configured ?? null,
   configured: snap.facts.configured ?? null,
+  // `none`: nothing was detected (a resume, or a switch without a pid).
+  detectSrc: snap.facts.detectSrc ?? 'none',
   tool: snap.facts.tool ?? null,
   branch: snap.facts.branch ?? null,
   order: snap.facts.order ?? null,
@@ -530,6 +548,7 @@ export const buildSwitchRecord = (
   claudeProcs: sys.claudeProcs ?? null,
   liveAgeMs: sys.liveAgeMs ?? null,
   rows: stamp?.rows ?? null,
+  ...(sys.listings ? { listings: sys.listings } : {}),
   ...(sys.top ? { top: sys.top } : {}),
 });
 

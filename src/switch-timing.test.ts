@@ -440,6 +440,7 @@ describe('the log file', () => {
       sysctl?: () => Promise<string>;
       psTop?: () => Promise<string>;
       psTty?: (pid: number) => Promise<string>;
+      listings?: NonNullable<Parameters<typeof startSwitchTiming>[2]>['listings'];
       deadlineMs?: number;
     } = {},
     session: Parameters<typeof startSwitchTiming>[0] = SESSION,
@@ -516,6 +517,39 @@ describe('the log file', () => {
     // A fast switch does not pay for `ps`, and has no `top`.
     expect(psCalls).toBe(0);
     expect('top' in onDisk).toBe(false);
+  });
+
+  it('carries the process-listing counters as they stand when the record is built', async () => {
+    const counters = {
+      n: 12,
+      failed: 2,
+      last: { reason: 'timeout', ms: 10012, path: 'badge' },
+    };
+    const record = await runSwitch(undefined, { listings: () => counters });
+    expect(record?.listings).toEqual(counters);
+    expect(JSON.parse(fs.readFileSync(file, 'utf-8').trim()).listings).toEqual(counters);
+    // One added field: the version is not bumped.
+    expect(record?.v).toBe(2);
+  });
+
+  it('reads the real counters when none are injected', async () => {
+    const record = await runSwitch(undefined);
+    expect(record?.listings).toEqual({
+      n: expect.any(Number),
+      failed: expect.any(Number),
+      last: null,
+    });
+  });
+
+  it('still writes the record when the counters cannot be read', async () => {
+    const record = await runSwitch(undefined, {
+      listings: () => {
+        throw new Error('unreadable');
+      },
+    });
+    expect(record).not.toBeNull();
+    expect('listings' in (record ?? {})).toBe(false);
+    expect(record?.terminal).toBe('ghostty');
   });
 
   it('adds the busiest processes only when the switch was slow', async () => {
@@ -789,6 +823,64 @@ describe('buildSwitchRecord', () => {
     expect(buildSwitchRecord(ctx, undefined, dropped, ms, {}).account).toBeNull();
   });
 
+  it('says how the terminal was decided, and `none` when nothing was detected', () => {
+    const snap = (facts: SwitchSnapshot['facts']): SwitchSnapshot => ({
+      marks: { returned: 1 },
+      spawnedAt: null,
+      exitedAt: null,
+      endedAt: 1,
+      facts,
+      ok: true,
+      timedOut: false,
+    });
+    const ctx = { ts: '2026-01-02T03:04:05.000Z', sessionId: 'id-1', active: true };
+    const build = (facts: SwitchSnapshot['facts']) => {
+      const s = snap(facts);
+      return buildSwitchRecord(ctx, undefined, s, stepDurations(s, undefined, { wallMs: 0, perfEpochMs: 0 }), {});
+    };
+    expect(build({ detectSrc: 'cache' }).detectSrc).toBe('cache');
+    expect(build({ detectSrc: 'ps' }).detectSrc).toBe('ps');
+    // A switch without a pid detects nothing.
+    const noPid = build({});
+    expect([noPid.kind, noPid.detectSrc]).toEqual(['switch', 'none']);
+    // Neither does a resume: `openSession` detects for running sessions only.
+    const resumed = snap({ tool: 'osascript', branch: 'new-tab' });
+    const resume = buildSwitchRecord(
+      { ...ctx, active: false },
+      undefined,
+      resumed,
+      stepDurations(resumed, undefined, { wallMs: 0, perfEpochMs: 0 }),
+      {},
+    );
+    expect([resume.kind, resume.detectSrc, resume.ms]).toEqual([
+      'resume',
+      'none',
+      expect.objectContaining({ detect: null }),
+    ]);
+    // The version is not bumped for one added field.
+    expect(build({ detectSrc: 'cache' }).v).toBe(2);
+  });
+
+  it('carries the listing counters only when the sample has them', () => {
+    const snap: SwitchSnapshot = {
+      marks: { returned: 1 },
+      spawnedAt: null,
+      exitedAt: null,
+      endedAt: 1,
+      facts: {},
+      ok: true,
+      timedOut: false,
+    };
+    const ms = stepDurations(snap, undefined, { wallMs: 0, perfEpochMs: 0 });
+    const ctx = { ts: '2026-01-02T03:04:05.000Z', sessionId: 'id-1', active: true };
+    const none = { n: 3, failed: 0, last: null };
+    expect(buildSwitchRecord(ctx, undefined, snap, ms, { listings: none }).listings).toEqual(none);
+    const failed = { n: 4, failed: 1, last: { reason: 'error EAGAIN', ms: 3, path: 'switch' } };
+    expect(buildSwitchRecord(ctx, undefined, snap, ms, { listings: failed }).listings).toEqual(failed);
+    expect('listings' in buildSwitchRecord(ctx, undefined, snap, ms, {})).toBe(false);
+    expect('listings' in buildSwitchRecord(ctx, undefined, snap, ms, { listings: null })).toBe(false);
+  });
+
   it('drops values of the wrong shape and cuts an overlong title', () => {
     const snap: SwitchSnapshot = {
       marks: {},
@@ -904,6 +996,175 @@ describe('scripts/switch-timing-summary.js', () => {
     const report = summary.formatReport(s, malformed);
     expect(report).toContain('3 switches');
     expect(report).toContain('3 malformed line(s) skipped');
+  });
+
+  it('groups running-session switches by how the terminal was decided, old lines included', () => {
+    const rec = (kind: string, detectSrc: unknown, detect: number | null, total: number) => ({
+      v: 2,
+      kind,
+      terminal: 'ghostty',
+      ...(detectSrc === undefined ? {} : { detectSrc }),
+      ms: { detect, run: total - 20, total },
+    });
+    const lines = [
+      rec('switch', undefined, 2003, 5000), // written before the field existed
+      rec('switch', undefined, 90, 700),
+      rec('switch', 'cache', 0.4, 600),
+      rec('switch', 'cache', 0.6, 800),
+      rec('switch', 'ps', 70, 900),
+      rec('switch', 'none', null, 500),
+      rec('resume', 'none', null, 1500), // a resume is not in this table
+      rec('resume', undefined, null, 1400),
+    ].map((r) => JSON.stringify(r));
+    const { records, malformed } = summary.parseLines(lines.join('\n'));
+    expect(malformed).toBe(0);
+    const s = summary.summarize(records);
+    const groups = Object.fromEntries(
+      s.byDetectSrc.map((g: { key: string; n: number; steps: { detect: unknown } }) => [
+        g.key,
+        [g.n, g.steps.detect],
+      ]),
+    );
+    expect(groups).toEqual({
+      '(not recorded)': [2, { n: 2, p50: 1046.5, p90: 1811.7 }],
+      cache: [2, { n: 2, p50: 0.5, p90: 0.58 }],
+      ps: [1, { n: 1, p50: 70, p90: 70 }],
+      none: [1, { n: 0, p50: null, p90: null }],
+    });
+    const report = summary.formatReport(s);
+    expect(report).toContain('by how the terminal was decided');
+    expect(report).toMatch(/\(not recorded\)\s+2\b/);
+    // A value that is not text makes the line malformed, like every text field.
+    expect(summary.parseLines(JSON.stringify(rec('switch', 7, 1, 100))).malformed).toBe(1);
+  });
+
+  describe('process-listing counters', () => {
+    const rec = (ts: string, listings?: unknown) => ({
+      v: 2,
+      ts,
+      kind: 'switch',
+      terminal: 'ghostty',
+      detectSrc: 'cache',
+      ...(listings === undefined ? {} : { listings }),
+      ms: { detect: 0.5, run: 500, total: 520 },
+    });
+    const parse = (...rs: unknown[]) =>
+      summary.parseLines(rs.map((r) => JSON.stringify(r)).join('\n'));
+
+    it('prints one line from the last record written that has them, whatever its ts', () => {
+      // Two overlapping switches. The one that started LATER finished first,
+      // so its record was built and written first, with the older counters;
+      // the one that started earlier was written after it. `ts` is the start.
+      const { records, malformed } = parse(
+        rec('2026-01-01T10:00:00.000Z'), // written before the field existed
+        rec('2026-01-03T10:00:05.000Z', { n: 39, failed: 2, last: { reason: 'empty', ms: 4, path: 'switch' } }),
+        rec('2026-01-03T10:00:00.000Z', {
+          n: 40,
+          failed: 3,
+          last: { reason: 'timeout', ms: 10012.4, path: 'badge' },
+        }),
+        rec('2026-01-04T10:00:00.000Z'), // written last of all, but without the field
+      );
+      expect(malformed).toBe(0);
+      expect(records).toHaveLength(4);
+      const s = summary.summarize(records);
+      expect(s.listings).toEqual({
+        n: 40,
+        failed: 3,
+        last: { reason: 'timeout', ms: 10012.4, path: 'badge' },
+      });
+      expect(summary.formatReport(s).split('\n')).toContain(
+        'Process listings since the app started: 40, failed 3 (last: timeout, 10012 ms, badge)',
+      );
+    });
+
+    it('prints no failure when there has been none', () => {
+      const { records } = parse(rec('2026-01-02T10:00:00.000Z', { n: 7, failed: 0, last: null }));
+      expect(summary.formatReport(summary.summarize(records)).split('\n')).toContain(
+        'Process listings since the app started: 7, failed 0',
+      );
+    });
+
+    it('takes the later line when two records share a time', () => {
+      const { records } = parse(
+        rec('2026-01-02T10:00:00.000Z', { n: 1, failed: 0, last: null }),
+        rec('2026-01-02T10:00:00.000Z', { n: 2, failed: 0, last: null }),
+      );
+      expect(summary.summarize(records).listings).toMatchObject({ n: 2 });
+    });
+
+    it('reads the rotated file before the live one, and named files in the order named', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codev-listings-'));
+      try {
+        const rotated = path.join(dir, 'switch-timing.jsonl.1');
+        const live = path.join(dir, 'switch-timing.jsonl');
+        // The rotated file's records carry LATER times than the live file's
+        // here, so only the order of the files can give the right answer.
+        fs.writeFileSync(
+          rotated,
+          `${JSON.stringify(rec('2026-01-09T10:00:00.000Z', { n: 5, failed: 0, last: null }))}\n`,
+        );
+        fs.writeFileSync(
+          live,
+          `${JSON.stringify(rec('2026-01-02T10:00:00.000Z', { n: 9, failed: 1, last: { reason: 'error unknown', ms: 2, path: 'crossref' } }))}\n`,
+        );
+        const listingsOf = (files: string[]) =>
+          summary.summarize(summary.parseLines(summary.readFiles(files).text).records).listings;
+        // The default order: `.1`, then the live file.
+        expect(listingsOf([rotated, live])).toMatchObject({ n: 9, last: { reason: 'error unknown' } });
+        // Named the other way round, the file named last decides.
+        expect(listingsOf([live, rotated])).toMatchObject({ n: 5, last: null });
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('prints nothing for a log written before the field existed, and still reads it', () => {
+      const { records, malformed } = parse(
+        rec('2026-01-01T10:00:00.000Z'),
+        { v: 1, sid: 'deadbeef', kind: 'switch', terminal: 'ghostty', ms: { run: 50, total: 60 } },
+        rec('2026-01-01T11:00:00.000Z', null),
+      );
+      expect(malformed).toBe(0);
+      expect(records).toHaveLength(3);
+      const s = summary.summarize(records);
+      expect(s.listings).toBeNull();
+      expect(summary.formatReport(s)).not.toContain('Process listings');
+    });
+
+    it('treats a value of the wrong shape as a malformed line', () => {
+      for (const bad of [
+        'a string',
+        7,
+        [],
+        { n: '40', failed: 3, last: null },
+        { n: 40, last: null },
+        // Every writer includes `last`: without it the object is not a record's.
+        { n: 40, failed: 3 },
+        { n: 40, failed: 3, last: undefined },
+        { n: 40, failed: 3, last: [] },
+        { n: 40, failed: 3, last: 'timeout' },
+        { n: 40, failed: 3, last: { reason: 7, ms: 1, path: 'badge' } },
+        { n: 40, failed: 3, last: { reason: 'timeout', ms: '1', path: 'badge' } },
+        { n: 40, failed: 3, last: { reason: 'timeout', ms: 1, path: null } },
+      ]) {
+        const { records, malformed } = parse(rec('2026-01-02T10:00:00.000Z', bad));
+        expect([records.length, malformed, JSON.stringify(bad)]).toEqual([0, 1, JSON.stringify(bad)]);
+      }
+    });
+
+    it('strips escape sequences from what it prints', () => {
+      const { records } = parse(
+        rec('2026-01-02T10:00:00.000Z', {
+          n: 1,
+          failed: 1,
+          last: { reason: 'error \u001b[31mX', ms: 5, path: 'bad\u001b[0mge' },
+        }),
+      );
+      const report = summary.formatReport(summary.summarize(records));
+      expect(report).not.toContain('\u001b');
+      expect(report).toContain('Process listings since the app started: 1, failed 1 (last: error ');
+    });
   });
 
   // Two v2 sessions and one v1 line, as a log that spans the version change.
