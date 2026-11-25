@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   branchFromSwitchOutput,
+  scanFromSwitchOutput,
   buildSwitchRecord,
   cpuPercentBetween,
   createSwitchTiming,
@@ -29,6 +30,7 @@ import {
   buildGhosttySwitchScript,
   buildITerm2SwitchScript,
   buildTerminalAppSwitchScript,
+  LOOP_MARK,
 } from './terminal-switch';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -199,10 +201,38 @@ describe('branchFromSwitchOutput', () => {
     );
   });
 
+  it('reads the branch with or without the loop mark', () => {
+    expect(branchFromSwitchOutput(`found-by-title${LOOP_MARK}\n`)).toBe('title');
+    expect(branchFromSwitchOutput(`not found${LOOP_MARK}`)).toBe('none');
+  });
+
   it('is null — unknown, not "none" — for a failed or silent script', () => {
     expect(branchFromSwitchOutput('')).toBeNull();
     expect(branchFromSwitchOutput(undefined)).toBeNull();
     expect(branchFromSwitchOutput('execution error: not allowed (-1743)')).toBeNull();
+  });
+});
+
+describe('scanFromSwitchOutput', () => {
+  it('is bulk without the loop mark and loop with it, for every real result', () => {
+    for (const r of ['found-by-tty', 'found-by-title', 'found-by-cwd', 'not found']) {
+      expect(scanFromSwitchOutput(`${r}\n`)).toBe('bulk');
+      expect(scanFromSwitchOutput(`${r}${LOOP_MARK}\n`)).toBe('loop');
+    }
+  });
+
+  it('is null when the output is not a switch result, so a failure never reads as bulk', () => {
+    expect(scanFromSwitchOutput('')).toBeNull();
+    expect(scanFromSwitchOutput(undefined)).toBeNull();
+    expect(scanFromSwitchOutput(`execution error${LOOP_MARK}`)).toBeNull();
+  });
+
+  it('lands on the collected facts with the branch', () => {
+    const h = harness();
+    h.timing.spawned();
+    h.timing.exited(`found-by-tty${LOOP_MARK}\n`);
+    h.timing.settle(true);
+    expect(h.finished[0].facts).toMatchObject({ branch: 'tty', scan: 'loop' });
   });
 });
 
@@ -861,6 +891,31 @@ describe('buildSwitchRecord', () => {
     expect(build({ detectSrc: 'cache' }).v).toBe(2);
   });
 
+  it('says how the switch script looked the tab up, and null when that is unknown', () => {
+    const snap = (facts: SwitchSnapshot['facts']): SwitchSnapshot => ({
+      marks: { returned: 1 },
+      spawnedAt: null,
+      exitedAt: null,
+      endedAt: 1,
+      facts,
+      ok: true,
+      timedOut: false,
+    });
+    const build = (facts: SwitchSnapshot['facts']) => {
+      const s = snap(facts);
+      return buildSwitchRecord(
+        { ts: '2026-01-02T03:04:05.000Z', sessionId: 'id-1', active: true },
+        undefined,
+        s,
+        stepDurations(s, undefined, { wallMs: 0, perfEpochMs: 0 }),
+        {},
+      );
+    };
+    expect(build({ tool: 'osascript', branch: 'tty', scan: 'bulk' }).scan).toBe('bulk');
+    expect(build({ tool: 'osascript', branch: 'none', scan: 'loop' }).scan).toBe('loop');
+    expect(build({ tool: 'cmux-cli', branch: 'title' }).scan).toBeNull();
+  });
+
   it('carries the listing counters only when the sample has them', () => {
     const snap: SwitchSnapshot = {
       marks: { returned: 1 },
@@ -1036,6 +1091,35 @@ describe('scripts/switch-timing-summary.js', () => {
     expect(report).toMatch(/\(not recorded\)\s+2\b/);
     // A value that is not text makes the line malformed, like every text field.
     expect(summary.parseLines(JSON.stringify(rec('switch', 7, 1, 100))).malformed).toBe(1);
+  });
+
+  it('groups switch scripts by how they looked the tab up, old lines included', () => {
+    const rec = (tool: string, scan: unknown, run: number, kind = 'switch') => ({
+      v: 2,
+      kind,
+      tool,
+      terminal: 'ghostty',
+      ...(scan === undefined ? {} : { scan }),
+      ms: { run, total: run + 20 },
+    });
+    const lines = [
+      rec('osascript', undefined, 1400), // written before the field existed
+      rec('osascript', 'bulk', 200),
+      rec('osascript', 'bulk', 300),
+      rec('osascript', 'loop', 1500),
+      rec('osascript', null, 5000), // killed: no result to read
+      rec('cmux-cli', null, 100), // not a switch script
+      rec('osascript', null, 400, 'resume'), // a launch, not a switch
+    ].map((r) => JSON.stringify(r));
+    const { records, malformed } = summary.parseLines(lines.join('\n'));
+    expect(malformed).toBe(0);
+    const s = summary.summarize(records);
+    const groups = Object.fromEntries(
+      s.byScan.map((g: { key: string; n: number }) => [g.key, g.n]),
+    );
+    expect(groups).toEqual({ '(not recorded)': 1, bulk: 2, loop: 1, '(unknown)': 1 });
+    expect(summary.formatReport(s)).toContain('by how the tab was looked up');
+    expect(summary.parseLines(JSON.stringify(rec('osascript', 7, 1))).malformed).toBe(1);
   });
 
   describe('process-listing counters', () => {

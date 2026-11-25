@@ -27,6 +27,8 @@
  *   placeholders instead (the summary script's `--redact`).
  */
 
+import { splitSwitchOutput } from './terminal-switch';
+
 /** Points on the path, in the order a terminal switch passes them. */
 export type SwitchMark =
   /** Main read its two settings (terminal app, tab/window). */
@@ -53,6 +55,9 @@ export type SwitchBranch =
   | 'new-workspace'
   | 'embedded'
   | 'deep-link';
+
+/** How a switch script looked the tab up; see `SwitchFacts.scan`. */
+export type SwitchScan = 'bulk' | 'loop';
 
 /** What ran the switch: the thing whose exit ends the measurement. */
 export type SwitchTool = 'osascript' | 'cmux-cli' | 'open' | 'pty';
@@ -86,6 +91,13 @@ export interface SwitchFacts {
    * listing was run (whether or not it named a terminal).
    */
   detectSrc?: 'cache' | 'ps';
+  /**
+   * How the switch script looked the tab up (issue #177): `bulk` — every
+   * step that ran read all items in one statement; `loop` — at least one
+   * step fell back to asking item by item. Only an AppleScript switch to a
+   * running session whose result was read sets it (see `scanFromSwitchOutput`).
+   */
+  scan?: SwitchScan | null;
 }
 
 /** What the renderer stamps on the click that starts a switch. */
@@ -169,20 +181,32 @@ export const SWITCH_DEADLINE_MS = 15000;
 
 /**
  * The switch scripts end in `return "found-by-tty"` and the like (see
- * terminal-switch.ts); osascript prints that value. Reading it costs
- * nothing and changes no script. Anything else — an empty stdout from a
- * script that failed, a launch script, which returns nothing — is `null`:
- * unknown, which is not the same as "matched nothing".
+ * terminal-switch.ts), followed by `LOOP_MARK` when a step fell back to the
+ * per-item loop; osascript prints that value. Reading it costs nothing.
+ * Anything else — an empty stdout from a script that failed, a launch
+ * script, which returns nothing — is `null`: unknown, which is not the
+ * same as "matched nothing".
  */
 export const branchFromSwitchOutput = (
   stdout: string | undefined,
 ): SwitchBranch | null => {
-  const out = (stdout || '').trim();
+  const out = splitSwitchOutput(stdout).result;
   if (out === 'found-by-tty') return 'tty';
   if (out === 'found-by-title') return 'title';
   if (out === 'found-by-cwd') return 'cwd';
   if (out === 'not found') return 'none';
   return null;
+};
+
+/**
+ * Which lookup the switch script used, from the same printed value: `loop`
+ * when it carries `LOOP_MARK`, `bulk` when it does not. `null` when the
+ * output is not a switch script's result at all (`branchFromSwitchOutput`
+ * is null), so a failed script or a launch never reads as `bulk`.
+ */
+export const scanFromSwitchOutput = (stdout: string | undefined): SwitchScan | null => {
+  if (branchFromSwitchOutput(stdout) === null) return null;
+  return splitSwitchOutput(stdout).loop ? 'loop' : 'bulk';
 };
 
 export const createSwitchTiming = (deps: SwitchTimingDeps): SwitchTiming => {
@@ -245,7 +269,11 @@ export const createSwitchTiming = (deps: SwitchTimingDeps): SwitchTiming => {
         exitedAt = since();
         if (wasKilled === true) killed = true;
         if (stdout !== undefined && facts.branch === undefined) {
-          facts = { ...facts, branch: branchFromSwitchOutput(stdout) };
+          facts = {
+            ...facts,
+            branch: branchFromSwitchOutput(stdout),
+            scan: scanFromSwitchOutput(stdout),
+          };
         }
         if (settled && running === 0) finish(false);
       }),
@@ -525,6 +553,8 @@ export const buildSwitchRecord = (
   configured: snap.facts.configured ?? null,
   // `none`: nothing was detected (a resume, or a switch without a pid).
   detectSrc: snap.facts.detectSrc ?? 'none',
+  // Null: not an AppleScript switch whose result was read (see SwitchFacts.scan).
+  scan: snap.facts.scan ?? null,
   tool: snap.facts.tool ?? null,
   branch: snap.facts.branch ?? null,
   order: snap.facts.order ?? null,

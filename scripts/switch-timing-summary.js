@@ -123,6 +123,7 @@ const TEXT_FIELDS = [
   'tty',
   'ttySrc',
   'detectSrc',
+  'scan',
 ];
 
 /** Status flags: compared with `=== true` / `=== false`, so they must be booleans. */
@@ -212,6 +213,14 @@ const NO_ACCOUNT = '(none)';
 
 /** Lines written before 1.0.100 have no `detectSrc`: they always walked the process tree. */
 const NO_DETECT_SRC = '(not recorded)';
+
+/**
+ * `scan` (since 1.0.101): `bulk` or `loop`. A line without the field was
+ * written before, when every switch script asked item by item; `null` is a
+ * script whose result could not be read (killed, failed).
+ */
+const scanOf = (r) =>
+  typeof r.scan === 'string' && r.scan ? r.scan : 'scan' in r ? UNKNOWN : NO_DETECT_SRC;
 
 /**
  * The process-listing counters of the LAST record, in write order, that
@@ -386,6 +395,11 @@ const summarize = (records, opts = {}) => {
     byDetectSrc: groupBy(
       records.filter((r) => r.kind === 'switch'),
       (r) => (typeof r.detectSrc === 'string' && r.detectSrc ? r.detectSrc : NO_DETECT_SRC),
+    ),
+    // Switch scripts only: the field describes how an AppleScript looked the tab up.
+    byScan: groupBy(
+      records.filter((r) => r.kind === 'switch' && r.tool === 'osascript'),
+      scanOf,
     ),
     listings: lastWrittenListings(records),
     sessions: sessionRows(records, opts.sort),
@@ -606,6 +620,12 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
       s.byDetectSrc,
     ),
     ...(s.listings ? [listingsLine(s.listings)] : []),
+    '',
+    stepTable(
+      'Switch scripts (osascript, running session), by how the tab was looked up (bulk: one read of every tab per step; loop: a step fell back to asking tab by tab; not recorded: before 1.0.101, always tab by tab; (unknown): the result was not read, e.g. killed)',
+      'scan',
+      s.byScan,
+    ),
     '',
     sessionTable(s, opts),
     '',
