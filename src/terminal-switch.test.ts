@@ -147,7 +147,10 @@ describe('switch script: bulk read first, per-item loop only as fallback', () =>
       expect(script.split(`set cvLoop to "${LOOP_MARK}"`).length - 1).toBe(reads.length);
       // The bulk path ends by marking itself done inside its `try`; an error
       // anywhere before that (the read, a failed re-check) leaves it false.
-      expect(script.split('set cvDone to true\n').length - 1).toBe(reads.length);
+      // Outside the `try`, an error would still mark the step done and skip the loop.
+      expect([...script.matchAll(/set cvDone to true\n\s*end try\n\s*if not cvDone then/g)].length).toBe(
+        reads.length,
+      );
     });
 
     it(`${name}: a bulk match is read again and brought forward only if it still matches`, () => {

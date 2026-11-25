@@ -10,7 +10,8 @@
  * Prints p50 / p90 per step and for the total, for all switches and grouped
  * by kind, terminal, branch, account and (for switches to a running
  * session) how the terminal was decided, with one line of process-listing
- * counters from the last record written that has them; a per-session table (the 20 with
+ * counters from the last record written that has them, and (for switch
+ * scripts) how the script looked the tab up; a per-session table (the 20 with
  * the most switches; `--all` for every one, `--sort=p90` for the slowest
  * first); then the total against machine load. Plain Node, no dependencies.
  * A line that is not a record is counted and skipped; a missing or empty
