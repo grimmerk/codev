@@ -12,7 +12,8 @@
  *
  * Nothing here throws or rejects. A listing that fails or times out gives
  * 'unknown', exactly as the old walk did, and the caller falls back to the
- * configured terminal.
+ * configured terminal. Why it failed is counted (`getListingStats`), so
+ * that how often it happens can be read from the switch timing log.
  *
  * No Electron imports, so this runs under vitest.
  */
@@ -32,13 +33,39 @@ import {
   UNKNOWN_TERMINAL,
 } from './terminal-detect-cache';
 
-/** The old walk gave each `ps` 2 s; the one listing gets the same. */
-export const DETECT_PS_TIMEOUT_MS = 2000;
+/** Who asked for a listing: the badges, a switch, or the same-cwd cross-reference. */
+export type ListingPath = 'badge' | 'switch' | 'crossref';
+
+/**
+ * A switch waits on its listing, so it gets what each `ps` of the old walk
+ * got: after 2 s the switch goes to the terminal in Settings.
+ */
+export const SWITCH_LISTING_TIMEOUT_MS = 2000;
+
+/**
+ * The badges and the same-cwd cross-reference are background work that
+ * nobody waits on, so they can afford to wait much longer — and need to.
+ * `execFile`'s timeout is a timer in THIS process: when the app's own event
+ * loop is blocked for longer than the timeout, the timer fires as soon as
+ * the loop runs again, although `ps` finished long before, and the callback
+ * gets `killed: true` with an empty stdout. At start-up the main process is
+ * busy, and with 2 s that false timeout can leave the list without badges.
+ */
+export const BACKGROUND_LISTING_TIMEOUT_MS = 10000;
+
+export const listingTimeoutFor = (path: ListingPath): number =>
+  path === 'switch' ? SWITCH_LISTING_TIMEOUT_MS : BACKGROUND_LISTING_TIMEOUT_MS;
 
 /** An Electron inside an Electron is already unusual; this only bounds the loop. */
 const MAX_CMDLINE_ROUNDS = 3;
 
-const run = (args: string[]): Promise<string> =>
+/** What one `ps` gave: its stdout, and the `execFile` callback's error (null when it ran). */
+export interface PsRun {
+  stdout: string;
+  error: { killed?: unknown; code?: unknown; signal?: unknown } | null;
+}
+
+const run = (args: string[], timeoutMs: number): Promise<PsRun> =>
   new Promise((resolve) => {
     try {
       execFile(
@@ -46,19 +73,107 @@ const run = (args: string[]): Promise<string> =>
         args,
         {
           encoding: 'utf-8',
-          timeout: DETECT_PS_TIMEOUT_MS,
+          timeout: timeoutMs,
           maxBuffer: 4 * 1024 * 1024,
           // `lstart` in the form a session registration's `procStart` has:
           // UTC, in the C locale.
           env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' },
         },
-        // A listing cut short by the timeout is not a listing.
-        (err, stdout) => resolve(err || typeof stdout !== 'string' ? '' : stdout),
+        (err, stdout) =>
+          resolve({ stdout: typeof stdout === 'string' ? stdout : '', error: err ?? null }),
       );
-    } catch {
-      resolve('');
+    } catch (err) {
+      resolve({ stdout: '', error: asPsError(err) });
     }
   });
+
+const asPsError = (err: unknown): NonNullable<PsRun['error']> =>
+  err && typeof err === 'object' ? (err as NonNullable<PsRun['error']>) : {};
+
+/** An injected runner may answer with plain text; a rejection or a throw is a failed run. */
+const settle = async (start: () => Promise<string | PsRun>): Promise<PsRun> => {
+  try {
+    const got = await start();
+    if (typeof got === 'string') return { stdout: got, error: null };
+    return got && typeof got === 'object' ? got : { stdout: '', error: {} };
+  } catch (err) {
+    return { stdout: '', error: asPsError(err) };
+  }
+};
+
+/** A listing cut short, or one whose command failed, is not a listing. */
+const textOf = (ran: PsRun): string =>
+  ran.error || typeof ran.stdout !== 'string' ? '' : ran.stdout;
+
+/**
+ * Why a listing is unusable, or null when it is fine:
+ * - `timeout` — the callback said `killed`: the timeout fired. That is also
+ *   the shape of a FALSE timeout (see `BACKGROUND_LISTING_TIMEOUT_MS`), which
+ *   shows as a run far longer than the timeout it was given;
+ * - `error <code or signal>` — `ps` could not be started (`EAGAIN` when no
+ *   process can be spawned), exited non-zero, or died on a signal;
+ * - `empty` — no error, and not one process line in the output.
+ */
+export const classifyListing = (error: PsRun['error'], rows: number): string | null => {
+  if (error) {
+    const { killed, code, signal } = error;
+    // Too much output also kills the child; that is not a timeout.
+    if (killed === true && code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return 'timeout';
+    const tag = [code, signal].find(
+      (v) => (typeof v === 'string' && v !== '') || typeof v === 'number',
+    );
+    const text = tag === undefined ? '' : String(tag).replace(/[^\w.-]/g, '').slice(0, 40);
+    return `error ${text || 'unknown'}`;
+  }
+  return rows === 0 ? 'empty' : null;
+};
+
+export interface ListingFailure {
+  reason: string;
+  /** How long the listing ran, from the call to its callback, in whole ms. */
+  ms: number;
+  path: ListingPath;
+}
+
+/** Process listings since the app started. */
+export interface ListingStats {
+  /** Listings attempted. */
+  n: number;
+  failed: number;
+  /** The latest failure; null when there has been none. */
+  last: ListingFailure | null;
+}
+
+const stats: ListingStats = { n: 0, failed: 0, last: null };
+
+/** A copy: what the switch timing log writes into each record. */
+export const getListingStats = (): ListingStats => ({
+  n: stats.n,
+  failed: stats.failed,
+  last: stats.last ? { ...stats.last } : null,
+});
+
+/** For tests. */
+export const resetListingStats = (): void => {
+  stats.n = 0;
+  stats.failed = 0;
+  stats.last = null;
+};
+
+const noteListing = (path: ListingPath, reason: string | null, ms: number): void => {
+  try {
+    stats.n++;
+    if (reason === null) return;
+    stats.failed++;
+    stats.last = { reason, ms: Math.round(ms), path };
+    // One short line per failure; no pid and no path of anything.
+    console.warn(
+      `[terminal-detect] process listing failed: ${reason}, ${Math.round(ms)} ms (${path})`,
+    );
+  } catch {
+    // Counting must never cost a detection.
+  }
+};
 
 /**
  * The start time that Claude Code registered for the process holding `pid`
@@ -110,10 +225,14 @@ export const readRegisteredStart = (
 };
 
 export interface DetectDeps {
-  /** `ps -axo pid=,ppid=,lstart=,comm=` under TZ=UTC LC_ALL=C; '' on failure. */
-  ps?: () => Promise<string>;
-  /** `ps -o pid=,command= -p <pids>`; '' on failure. */
-  psCommand?: (pids: number[]) => Promise<string>;
+  /**
+   * `ps -axo pid=,ppid=,lstart=,comm=` under TZ=UTC LC_ALL=C, with the
+   * timeout of the path that asked. Plain text stands for a run without an
+   * error; a `PsRun` carries the callback's error.
+   */
+  ps?: (timeoutMs: number) => Promise<string | PsRun>;
+  /** `ps -o pid=,command= -p <pids>`, with the same timeout. */
+  psCommand?: (pids: number[], timeoutMs: number) => Promise<string | PsRun>;
   registeredStart?: (pid: number) => string | null;
   cache?: TerminalCache;
 }
@@ -138,20 +257,29 @@ const cachedFor = (pid: number, deps: DetectDeps): string | null => {
  * except that a failed listing still answers from the cache where the
  * cache can prove its entry, so one slow moment does not blank a badge
  * the app had already worked out.
+ *
+ * `path` says who is asking. It decides how long the listing may take
+ * (`listingTimeoutFor`) and is recorded with a failure.
  */
 export const detectTerminals = async (
   pids: number[],
+  path: ListingPath,
   deps: DetectDeps = {},
 ): Promise<Map<number, string>> => {
   const result = new Map<number, string>();
   for (const pid of pids) result.set(pid, UNKNOWN_TERMINAL);
   if (pids.length === 0) return result;
   try {
-    const ps = deps.ps ?? (() => run(['-axo', 'pid=,ppid=,lstart=,comm=']));
+    const timeoutMs = listingTimeoutFor(path);
+    const ps =
+      deps.ps ?? ((ms: number) => run(['-axo', 'pid=,ppid=,lstart=,comm='], ms));
     const psCommand =
       deps.psCommand ??
-      ((list: number[]) => run(['-o', 'pid=,command=', '-p', list.join(',')]));
-    const table = parseProcessTable(await ps().catch(() => ''));
+      ((list: number[], ms: number) => run(['-o', 'pid=,command=', '-p', list.join(',')], ms));
+    const startedAt = performance.now();
+    const listed = await settle(() => ps(timeoutMs));
+    const table = parseProcessTable(textOf(listed));
+    noteListing(path, classifyListing(listed.error, table.size), performance.now() - startedAt);
     if (table.size === 0) {
       for (const pid of pids) result.set(pid, cachedFor(pid, deps) ?? UNKNOWN_TERMINAL);
       return result;
@@ -169,7 +297,7 @@ export const detectTerminals = async (
       if (need.size === 0) break;
       const fetched =
         round < MAX_CMDLINE_ROUNDS
-          ? parseCommandLines(await psCommand([...need]).catch(() => ''))
+          ? parseCommandLines(textOf(await settle(() => psCommand([...need], timeoutMs))))
           : new Map<number, string>();
       // A process that did not answer has no command line to match.
       for (const pid of need) cmdlines.set(pid, fetched.get(pid) ?? '');
@@ -184,9 +312,12 @@ export const detectTerminals = async (
   return result;
 };
 
-/** One pid; 'unknown' when its chain names no terminal or the listing failed. */
+/**
+ * One pid, for a switch (so with the switch's timeout): 'unknown' when its
+ * chain names no terminal or the listing failed.
+ */
 export const detectTerminal = async (pid: number, deps: DetectDeps = {}): Promise<string> =>
-  (await detectTerminals([pid], deps)).get(pid) ?? UNKNOWN_TERMINAL;
+  (await detectTerminals([pid], 'switch', deps)).get(pid) ?? UNKNOWN_TERMINAL;
 
 /** How a switch decided its terminal: from the cache, or from a process listing. */
 export type DetectSource = 'cache' | 'ps';

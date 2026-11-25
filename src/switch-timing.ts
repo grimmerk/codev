@@ -414,6 +414,16 @@ export interface SwitchSystemSample {
   /** The target process's controlling terminal, and where the value came from. */
   tty?: string | null;
   ttySrc?: 'live-report' | 'ps' | null;
+  /**
+   * Process listings for terminal detection since the app started, read
+   * when the record is built: how many were attempted, how many failed,
+   * and the latest failure (`getListingStats` in terminal-detect.ts).
+   */
+  listings?: {
+    n: number;
+    failed: number;
+    last: { reason: string; ms: number; path: string } | null;
+  } | null;
 }
 
 export interface SwitchContext {
@@ -538,6 +548,7 @@ export const buildSwitchRecord = (
   claudeProcs: sys.claudeProcs ?? null,
   liveAgeMs: sys.liveAgeMs ?? null,
   rows: stamp?.rows ?? null,
+  ...(sys.listings ? { listings: sys.listings } : {}),
   ...(sys.top ? { top: sys.top } : {}),
 });
 

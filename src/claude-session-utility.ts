@@ -569,7 +569,7 @@ const crossRefDisambiguate = async (
   // Detect terminal for each PID in parallel, then group
   const byTerminal: Record<string, { pid: number; cwd: string; candidates: ClaudeSession[] }[]> = {};
   // One process listing answers for every pid.
-  const terminals = await detectTerminals(needsCrossRef.map(item => item.pid));
+  const terminals = await detectTerminals(needsCrossRef.map(item => item.pid), 'crossref');
   for (let i = 0; i < needsCrossRef.length; i++) {
     const terminal = terminals.get(needsCrossRef[i].pid) ?? 'unknown';
     if (!byTerminal[terminal]) byTerminal[terminal] = [];

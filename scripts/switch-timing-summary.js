@@ -9,7 +9,8 @@
  *
  * Prints p50 / p90 per step and for the total, for all switches and grouped
  * by kind, terminal, branch, account and (for switches to a running
- * session) how the terminal was decided; a per-session table (the 20 with
+ * session) how the terminal was decided, with one line of process-listing
+ * counters from the newest record that has them; a per-session table (the 20 with
  * the most switches; `--all` for every one, `--sort=p90` for the slowest
  * first); then the total against machine load. Plain Node, no dependencies.
  * A line that is not a record is counted and skipped; a missing or empty
@@ -130,6 +131,25 @@ const FLAG_FIELDS = ['ok', 'timedOut', 'killed', 'untimed'];
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
+ * `listings` (since 1.0.100): absent or null on a line that did not record
+ * it, else `{ n, failed, last }` where `last` is null or
+ * `{ reason, ms, path }`. It is printed, so it is held to its shape like
+ * the text fields.
+ */
+const isListings = (v) =>
+  v === undefined ||
+  v === null ||
+  (isPlainObject(v) &&
+    isNum(v.n) &&
+    isNum(v.failed) &&
+    (v.last === undefined ||
+      v.last === null ||
+      (isPlainObject(v.last) &&
+        typeof v.last.reason === 'string' &&
+        isNum(v.last.ms) &&
+        typeof v.last.path === 'string')));
+
+/**
  * A line this script can summarize: an object whose `ms` is an object,
  * whose text fields are each a string, null or absent, and whose status
  * flags are each a boolean, null or absent. One rule for all of them: a
@@ -142,7 +162,8 @@ const isRecord = (r) =>
   isPlainObject(r) &&
   isPlainObject(r.ms) &&
   TEXT_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'string') &&
-  FLAG_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'boolean');
+  FLAG_FIELDS.every((k) => r[k] === undefined || r[k] === null || typeof r[k] === 'boolean') &&
+  isListings(r.listings);
 
 /** Records from JSONL text. A line that is not a record (see `isRecord`) is skipped and counted. */
 const parseLines = (text) => {
@@ -190,6 +211,21 @@ const NO_ACCOUNT = '(none)';
 
 /** Lines written before 1.0.100 have no `detectSrc`: they always walked the process tree. */
 const NO_DETECT_SRC = '(not recorded)';
+
+/**
+ * The process-listing counters of the newest record that has them (by
+ * `ts`; a later line wins a tie). They count since the app started, so the
+ * newest record holds the latest state of the run that wrote it. Null when
+ * no record has the field.
+ */
+const newestListings = (records) => {
+  let best = null;
+  for (const r of records) {
+    if (!isPlainObject(r.listings)) continue;
+    if (!best || String(r.ts ?? '') >= String(best.ts ?? '')) best = r;
+  }
+  return best ? best.listings : null;
+};
 
 /** A record that names its session (version 2 on). */
 const namesSession = (r) => typeof r.sessionId === 'string' && r.sessionId !== '';
@@ -337,6 +373,7 @@ const summarize = (records, opts = {}) => {
       records.filter((r) => r.kind === 'switch'),
       (r) => (typeof r.detectSrc === 'string' && r.detectSrc ? r.detectSrc : NO_DETECT_SRC),
     ),
+    listings: newestListings(records),
     sessions: sessionRows(records, opts.sort),
     unnamed: records.filter((r) => !namesSession(r)).length,
     runShareP50: percentile(runShare, 50),
@@ -504,6 +541,18 @@ const sessionTable = (s, opts) => {
   return lines.join('\n');
 };
 
+/**
+ * One line from the newest record that carries the counters: how many
+ * process listings terminal detection ran since the app started, how many
+ * failed, and why the last one did (timeout, error <code>, empty), how long
+ * it ran and for whom (badge, switch, crossref).
+ */
+const listingsLine = (l) =>
+  `Process listings since the app started: ${l.n}, failed ${l.failed}` +
+  (l.last
+    ? ` (last: ${safeText(l.last.reason)}, ${Math.round(l.last.ms)} ms, ${safeText(l.last.path)})`
+    : '');
+
 const formatReport = (summary, malformed = 0, opts = {}) => {
   if (summary.count === 0) {
     return `No switch records${malformed ? ` (${malformed} malformed line(s) skipped)` : ''}.`;
@@ -541,6 +590,7 @@ const formatReport = (summary, malformed = 0, opts = {}) => {
       'detectSrc',
       s.byDetectSrc,
     ),
+    ...(s.listings ? [listingsLine(s.listings)] : []),
     '',
     sessionTable(s, opts),
     '',

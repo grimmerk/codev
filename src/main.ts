@@ -2874,7 +2874,7 @@ ipcMain.handle('detect-terminal-apps', async (_event, pidMap: Record<string, num
   }
   // One process listing for every badge; each answer found is remembered
   // for the switch to that session (terminal-detect.ts).
-  const terminals = await detectTerminals(toWalk.map(([, pid]) => pid));
+  const terminals = await detectTerminals(toWalk.map(([, pid]) => pid), 'badge');
   for (const [sessionId, pid] of toWalk) {
     results[sessionId] = terminals.get(pid) ?? 'unknown';
   }
