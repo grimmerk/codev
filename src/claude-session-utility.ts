@@ -57,6 +57,7 @@ import {
   buildGhosttySwitchScript,
   buildITerm2SwitchScript,
   buildTerminalAppSwitchScript,
+  splitSwitchOutput,
   switchOrderFor,
 } from './terminal-switch';
 import { pickSessionByTabTitle } from './cross-ref-title';
@@ -2753,7 +2754,8 @@ export const openSessionInGhostty = async (
       noteSwitchKilled(error, 'Ghostty');
       const result = (stdout || '').trim();
       console.log('[ghostty] switch result:', result, error?.message || '');
-      if (result === 'not found') {
+      // `not found (loop)` too: the suffix only says how the script looked.
+      if (splitSwitchOutput(result).result === 'not found') {
         copyResumeCommand(sessionId, projectPath, accountLabel);
       }
       try { fs.unlinkSync(tmpScript); } catch {}
